@@ -102,7 +102,6 @@ export default {
     namePlaceholder: 'My API Key',
     groupLabel: 'Group',
     providerLabel: 'Provider',
-    providerGroupCount: '{count} groups',
     providers: {
       anthropic: 'Anthropic',
       openai: 'OpenAI',

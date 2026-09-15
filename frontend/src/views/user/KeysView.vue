@@ -497,9 +497,6 @@
                   </span>
                 </span>
                 <span class="text-sm font-semibold text-gray-800 dark:text-gray-100">{{ provider.label }}</span>
-                <span class="text-xs text-gray-500 dark:text-gray-400">
-                  {{ t('keys.providerGroupCount', { count: provider.count }) }}
-                </span>
               </span>
               <span
                 v-if="createProvider === provider.value"

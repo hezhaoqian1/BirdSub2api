@@ -102,7 +102,6 @@ export default {
     namePlaceholder: '我的 API 密钥',
     groupLabel: '分组',
     providerLabel: '厂商',
-    providerGroupCount: '{count} 个分组',
     providers: {
       anthropic: 'Anthropic',
       openai: 'OpenAI',
