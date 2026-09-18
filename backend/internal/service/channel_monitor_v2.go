@@ -376,6 +376,7 @@ func ChannelMonitorV2BootstrapProgress(now, coveredFrom time.Time, hasData bool)
 }
 
 type ChannelMonitorV2Service struct {
+	Hybrid   *HybridMonitorService
 	repo     ChannelMonitorV2Repository
 	settings channelMonitorRuntimeReader
 	now      func() time.Time

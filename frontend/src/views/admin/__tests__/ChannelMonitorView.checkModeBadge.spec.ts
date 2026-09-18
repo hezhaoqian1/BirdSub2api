@@ -95,9 +95,10 @@ function makeMonitor(overrides: Partial<ChannelMonitor> = {}): ChannelMonitor {
 }
 
 function mountView() {
-  return mount(ChannelMonitorView, {
+  const wrapper = mount(ChannelMonitorView, {
     global: {
       stubs: {
+        HybridMonitorPanel: true,
         AppLayout: AppLayoutStub,
         TablePageLayout: TablePageLayoutStub,
         DataTable: DataTableStub,
@@ -114,6 +115,8 @@ function mountView() {
       },
     },
   })
+  void wrapper.findAll('[role="tab"]').find(tab => tab.text() === '探测配置与历史')!.trigger('click')
+  return wrapper
 }
 
 describe('ChannelMonitorView check-mode badge', () => {

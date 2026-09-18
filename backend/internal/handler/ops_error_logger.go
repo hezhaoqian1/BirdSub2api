@@ -461,6 +461,9 @@ func setOpsEndpointContext(c *gin.Context, upstreamModel string, requestType int
 	if upstreamModel = strings.TrimSpace(upstreamModel); upstreamModel != "" {
 		c.Set(opsUpstreamModelKey, upstreamModel)
 	}
+	if c.Request != nil && service.IsHybridMonitorProbeContext(c.Request.Context()) {
+		requestType = int16(service.RequestTypeMonitorProbe)
+	}
 	c.Set(opsRequestTypeKey, requestType)
 }
 

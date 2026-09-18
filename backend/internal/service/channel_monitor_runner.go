@@ -304,6 +304,9 @@ func (r *ChannelMonitorRunner) runOne(id int64, name string) {
 	defer cancel()
 
 	defer r.releaseInFlight(id)
+	if svc, ok := r.svc.(*ChannelMonitorService); ok && svc.Hybrid != nil && svc.Hybrid.Owns(ctx, id) {
+		return
+	}
 
 	defer func() {
 		if rec := recover(); rec != nil {

@@ -778,6 +778,11 @@ func registerChannelRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 func registerChannelMonitorRoutes(admin *gin.RouterGroup, h *handler.Handlers, settingService *service.SettingService) {
 	guard := channelMonitorAdminFeatureGuard(settingService)
 	monitors := admin.Group("/channel-monitors")
+	hybrid := admin.Group("/channel-monitor-hybrid")
+	hybrid.Use(guard)
+	hybrid.GET("", h.ChannelMonitorV2.HybridSnapshot)
+	hybrid.PUT("/config", h.ChannelMonitorV2.HybridSave)
+	hybrid.POST("/test-notification", h.ChannelMonitorV2.HybridTest)
 	monitors.Use(guard)
 	{
 		monitors.GET("", h.Admin.ChannelMonitor.List)

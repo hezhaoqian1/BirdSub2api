@@ -12,7 +12,7 @@
         </h1>
         <p class="page-description mt-1.5 text-xs text-gray-500 dark:text-gray-400">
           {{
-            isV1Mode
+            adminMonitorTab === 'hybrid' ? '真实流量优先，空闲时主动探测。按分钟确认异常，统一管理服务状态与钉钉通知。' : isV1Mode
               ? t('channelMonitorV2.admin.descriptionV1')
               : t('channelMonitorV2.admin.descriptionV2')
           }}
@@ -23,6 +23,7 @@
             role="tablist"
             :aria-label="t('channelMonitorV2.admin.tabAria')"
           >
+            <button type="button" role="tab" class="tab flex-1 sm:flex-none" :class="adminMonitorTab === 'hybrid' ? 'tab-active' : ''" :aria-selected="adminMonitorTab === 'hybrid'" @click="adminMonitorTab = 'hybrid'">融合监控</button>
             <button
               type="button"
               role="tab"
@@ -41,13 +42,14 @@
               :aria-selected="adminMonitorTab === 'legacy'"
               @click="adminMonitorTab = 'legacy'"
             >
-              {{ isV1Mode ? t('channelMonitorV2.admin.tabV1Active') : t('channelMonitorV2.admin.tabV1History') }}
+              探测配置与历史
             </button>
           </div>
         </div>
       </header>
 
-      <MonitorSettingsPanel v-if="adminMonitorTab === 'v2'" />
+      <HybridMonitorPanel v-if="adminMonitorTab === 'hybrid'" />
+      <MonitorSettingsPanel v-else-if="adminMonitorTab === 'v2'" />
 
       <TablePageLayout v-else>
       <template #filters>
@@ -199,12 +201,13 @@ import MonitorActionsCell from '@/components/admin/monitor/MonitorActionsCell.vu
 import { getPersistedPageSize } from '@/composables/usePersistedPageSize'
 import { useChannelMonitorFormat } from '@/composables/useChannelMonitorFormat'
 import MonitorSettingsPanel from '@/features/channel-monitor-v2/MonitorSettingsPanel.vue'
+import HybridMonitorPanel from '@/features/channel-monitor-hybrid/HybridMonitorPanel.vue'
 import { isChannelMonitorV1Mode } from '@/utils/featureFlags'
 
 const { t } = useI18n()
 const appStore = useAppStore()
 const isV1Mode = computed(() => isChannelMonitorV1Mode())
-const adminMonitorTab = ref<'v2' | 'legacy'>(isChannelMonitorV1Mode() ? 'legacy' : 'v2')
+const adminMonitorTab = ref<'hybrid' | 'v2' | 'legacy'>('hybrid')
 const {
   providerLabel,
   providerBadgeClass,

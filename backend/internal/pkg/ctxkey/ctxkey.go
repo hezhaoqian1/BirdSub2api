@@ -26,6 +26,9 @@ const (
 	// ClientRequestID 客户端请求的唯一标识，用于追踪请求全生命周期（用于 Ops 监控与排障）。
 	ClientRequestID Key = "ctx_client_request_id"
 
+	// HybridMonitorProbe 标识融合监控发起的主动探测请求。
+	HybridMonitorProbe Key = "ctx_hybrid_monitor_probe"
+
 	// Model 请求模型标识（用于统一请求链路日志字段）。
 	Model Key = "ctx_model"
 
