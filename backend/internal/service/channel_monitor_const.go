@@ -28,6 +28,10 @@ const (
 	monitorMaintenanceMaxDaysPerRun = 35
 	// monitorWorkerConcurrency 调度器并发执行的监控数（pond 池容量）。
 	monitorWorkerConcurrency = 5
+	// Alert delivery uses a separate bounded pool so a slow DingTalk endpoint
+	// cannot consume the monitor-check workers during an outage.
+	alertWorkerConcurrency = 2
+	alertWorkerQueueSize   = 64
 	// monitorStartupLoadTimeout Start 时一次性加载所有 enabled monitor 的总超时。
 	monitorStartupLoadTimeout = 10 * time.Second
 	// monitorMinIntervalSeconds / monitorMaxIntervalSeconds 用户配置的检测间隔上下限。
@@ -69,6 +73,7 @@ const (
 	MonitorProviderKimi        = "kimi"
 	MonitorProviderZhipu       = "zhipu"
 	MonitorProviderDeepseek    = "deepseek"
+	MonitorProviderMiniMax     = "minimax"
 
 	// MonitorCheckMode 检测模式（channel_monitors.check_mode）。
 	//   probe       - LLM 探活（默认，原有行为）
@@ -151,7 +156,7 @@ var (
 		"CHANNEL_MONITOR_NOT_FOUND", "channel monitor not found",
 	)
 	ErrChannelMonitorInvalidProvider = infraerrors.BadRequest(
-		"CHANNEL_MONITOR_INVALID_PROVIDER", "provider must be one of openai/anthropic/gemini/grok/antigravity/kimi/zhipu/deepseek",
+		"CHANNEL_MONITOR_INVALID_PROVIDER", "provider must be one of openai/anthropic/gemini/grok/antigravity/kimi/zhipu/deepseek/minimax",
 	)
 	ErrChannelMonitorInvalidCheckMode = infraerrors.BadRequest(
 		"CHANNEL_MONITOR_INVALID_CHECK_MODE", "check_mode must be one of probe/quota/quota_probe; antigravity only supports quota",
@@ -163,7 +168,7 @@ var (
 		"CHANNEL_MONITOR_PROVIDER_INCOMPATIBLE", "monitor provider must match the linked account platform",
 	)
 	ErrChannelMonitorAccountNotSupportable = infraerrors.BadRequest(
-		"CHANNEL_MONITOR_ACCOUNT_NOT_SUPPORTABLE", "linked account cannot serve as a quota data source (cn coding plan must be kimi/zhipu, cn payg must be kimi/deepseek, openai requires an oauth account, anthropic requires oauth or setup-token)",
+		"CHANNEL_MONITOR_ACCOUNT_NOT_SUPPORTABLE", "linked account cannot serve as a quota data source (cn coding plan must be kimi/zhipu/minimax, cn payg must be kimi/deepseek, openai requires an oauth account, anthropic requires oauth or setup-token)",
 	)
 	ErrChannelMonitorInvalidAPIMode = infraerrors.BadRequest(
 		"CHANNEL_MONITOR_INVALID_API_MODE", "api_mode must be chat_completions or responses; responses is only supported for openai",
@@ -184,7 +189,7 @@ var (
 		"CHANNEL_MONITOR_ENDPOINT_SCHEME", "endpoint must use https scheme",
 	)
 	ErrChannelMonitorEndpointPath = infraerrors.BadRequest(
-		"CHANNEL_MONITOR_ENDPOINT_PATH", "endpoint must be base origin only (no path/query/fragment)",
+		"CHANNEL_MONITOR_ENDPOINT_PATH", "endpoint must not contain query parameters or a fragment",
 	)
 	ErrChannelMonitorEndpointPrivate = infraerrors.BadRequest(
 		"CHANNEL_MONITOR_ENDPOINT_PRIVATE", "endpoint must be a public host",

@@ -189,16 +189,24 @@ func (s *SettingService) InitializeDefaultSettings(ctx context.Context) error {
 		SettingKeyChannelMonitorEnabled:                "true",
 		SettingKeyChannelMonitorMode:                   ChannelMonitorModeV1,
 		SettingKeyChannelMonitorDefaultIntervalSeconds: "60",
+		SettingKeyChannelMonitorDingTalkEnabled:        "false",
+		SettingKeyChannelMonitorDingTalkWebhook:        "",
+		SettingKeyChannelMonitorDingTalkSecret:         "",
 		SettingKeyChannelMonitorHideThroughput:         "true",
 		SettingKeyChannelMonitorShowQuota:              "false",
+		SettingKeyChannelMonitorHideUserRanking:        "false",
 
-		// Grok: safe defaults — no cross-vendor model rewrite unless operators enable it.
+		// Grok compatibility defaults: cross-client mapping stays enabled unless
+		// operators explicitly disable it.
 		SettingKeyGrokDefaultTextModel:           "grok-4.6",
 		SettingKeyGrokCrossClientModelMapEnabled: "true",
 		SettingKeyGrokDefaultBaseURLMode:         GrokDefaultBaseURLModeCLI,
 
 		// Available channels feature (default disabled; opt-in)
 		SettingKeyAvailableChannelsEnabled: "false",
+
+		// Subscription feature (default enabled; opt-out)
+		SettingKeySubscriptionEnabled: "true",
 
 		// Model plaza feature (default disabled; opt-in, public unless require_auth)
 		SettingKeyModelPlazaEnabled:       "false",
@@ -797,12 +805,19 @@ func (s *SettingService) parseSettings(settings map[string]string) *SystemSettin
 	result.ChannelMonitorDefaultIntervalSeconds = parseChannelMonitorInterval(
 		settings[SettingKeyChannelMonitorDefaultIntervalSeconds],
 	)
+	result.ChannelMonitorDingTalkEnabled = settings[SettingKeyChannelMonitorDingTalkEnabled] == "true"
+	result.ChannelMonitorDingTalkWebhook = strings.TrimSpace(settings[SettingKeyChannelMonitorDingTalkWebhook])
+	result.ChannelMonitorDingTalkWebhookConfigured = result.ChannelMonitorDingTalkWebhook != ""
+	result.ChannelMonitorDingTalkSecret = strings.TrimSpace(settings[SettingKeyChannelMonitorDingTalkSecret])
+	result.ChannelMonitorDingTalkSecretConfigured = result.ChannelMonitorDingTalkSecret != ""
+
 	// 默认隐藏吞吐（迁移 206 的隐私默认）：未配置时必须与 setting_public.go 的
 	// 公开读取路径给出同一个值，否则管理端看到“未隐藏”而用户端实际已隐藏。
 	result.ChannelMonitorHideThroughput = !isFalseSettingValue(settings[SettingKeyChannelMonitorHideThroughput])
 	// 配额展示默认关闭且 fail-closed：仅字面 "true" 视为开启
 	// （与 setting_public.go 公开读取路径保持一致）。
 	result.ChannelMonitorShowQuota = settings[SettingKeyChannelMonitorShowQuota] == "true"
+	result.ChannelMonitorHideUserRanking = isTrueSettingValue(settings[SettingKeyChannelMonitorHideUserRanking])
 
 	// Grok default mapping policy
 	result.GrokDefaultTextModel = strings.TrimSpace(settings[SettingKeyGrokDefaultTextModel])
@@ -816,6 +831,9 @@ func (s *SettingService) parseSettings(settings map[string]string) *SystemSettin
 
 	// Available channels feature (default: disabled; strict true)
 	result.AvailableChannelsEnabled = settings[SettingKeyAvailableChannelsEnabled] == "true"
+
+	// Subscription feature (default: enabled; only an explicit false disables)
+	result.SubscriptionEnabled = !isFalseSettingValue(settings[SettingKeySubscriptionEnabled])
 
 	// Model plaza feature (default: disabled; strict true)
 	result.ModelPlazaEnabled = settings[SettingKeyModelPlazaEnabled] == "true"
@@ -1003,6 +1021,15 @@ func clampAffiliateRebateRate(value float64) float64 {
 func isFalseSettingValue(value string) bool {
 	switch strings.ToLower(strings.TrimSpace(value)) {
 	case "false", "0", "off", "disabled":
+		return true
+	default:
+		return false
+	}
+}
+
+func isTrueSettingValue(value string) bool {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "true", "1", "on", "enabled":
 		return true
 	default:
 		return false

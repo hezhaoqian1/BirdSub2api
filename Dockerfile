@@ -28,7 +28,7 @@ WORKDIR /app/frontend
 # Install pnpm (pinned to v9 to match CI and keep builds reproducible)
 RUN corepack enable && corepack prepare pnpm@9 --activate
 
-# Install dependencies first (better caching)
+# Install dependencies first so Docker layer caching can reuse package installs.
 COPY frontend/package.json frontend/pnpm-lock.yaml ./
 RUN if [ -n "${NPM_CONFIG_REGISTRY}" ]; then pnpm config set registry "${NPM_CONFIG_REGISTRY}"; fi && \
     pnpm install --frozen-lockfile --prefer-offline
@@ -69,7 +69,7 @@ RUN apk add --no-cache git ca-certificates tzdata
 
 WORKDIR /app/backend
 
-# Copy go mod files first (better caching)
+# Copy go mod files first so Docker layer caching can reuse module downloads.
 COPY backend/go.mod backend/go.sum ./
 RUN go mod download
 
@@ -148,7 +148,7 @@ EXPOSE 8080
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
-    CMD wget -q -T 5 -O /dev/null http://localhost:${SERVER_PORT:-8080}/health || exit 1
+    CMD wget -q -T 5 -O /dev/null http://localhost:${SERVER_PORT:-${PORT:-8080}}/health || exit 1
 
 # Run the application (entrypoint fixes /app/data ownership then execs as sub2api)
 ENTRYPOINT ["/app/docker-entrypoint.sh"]
