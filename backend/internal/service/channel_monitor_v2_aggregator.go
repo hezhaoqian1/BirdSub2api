@@ -42,6 +42,7 @@ type channelMonitorRuntimeSubscriber interface {
 }
 
 type ChannelMonitorV2Aggregator struct {
+	hybrid     *HybridMonitorService
 	repo       ChannelMonitorV2Repository
 	db         *sql.DB
 	settings   channelMonitorRuntimeReader
@@ -118,6 +119,9 @@ func (s *ChannelMonitorV2Aggregator) Stop() {
 		return
 	}
 	s.stopOnce.Do(func() {
+		if s.hybrid != nil {
+			s.hybrid.Stop()
+		}
 		s.mu.Lock()
 		cancel := s.cancel
 		unsub := s.unsub

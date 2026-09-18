@@ -3,7 +3,7 @@
     <div
       class="flex justify-between text-[10px] font-semibold uppercase tracking-widest text-gray-400 mb-2"
     >
-      <span>{{ t('monitorCommon.history60pts', { n: length }) }}</span>
+      <span>{{ minuteMode ? '最近 60 分钟 · 每格 1 分钟' : t('monitorCommon.history60pts', { n: length }) }}</span>
       <span class="tabular-nums">{{ t('monitorCommon.nextUpdateIn', { n: countdownSeconds }) }}</span>
     </div>
 
@@ -44,6 +44,7 @@ const props = withDefaults(defineProps<{
   countdownSeconds: number
   length?: number
   maintenance?: boolean
+  minuteMode?: boolean
 }>(), {
   buckets: () => [],
   length: 60,
@@ -106,7 +107,7 @@ const displayBars = computed<Bar[]>(() => {
     bars.push({
       colorClass,
       heightPct,
-      title: `${relative} · ${label} · ${latency}ms`,
+      title: point.title || `${relative} · ${label} · ${latency}ms`,
     })
   }
 

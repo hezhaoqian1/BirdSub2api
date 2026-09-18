@@ -34,6 +34,7 @@ export interface LatencyMetric {
 }
 
 export interface MonitorMetric {
+  success_rate?: number
   success_requests: number
   error_requests: number
   request_count: number
