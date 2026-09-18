@@ -32,7 +32,7 @@ func TestHybridPostgresPersistence(t *testing.T) {
 	_, err = db.Exec(`CREATE TABLE usage_logs(id bigserial,request_id text,first_token_ms bigint,group_id bigint,requested_model text,model text,api_key_id bigint,created_at timestamptz,actual_cost numeric,input_tokens bigint,output_tokens bigint,cache_read_tokens bigint,cache_creation_tokens bigint,request_type integer);
  CREATE TABLE ops_error_logs(id bigserial,request_id text,client_request_id text,error_owner text,status_code integer,upstream_status_code integer,error_type text,error_message text,group_id bigint,requested_model text,model text,api_key_id bigint,created_at timestamptz,is_count_tokens boolean,request_type integer);`)
 	require.NoError(t, err)
-	migration, err := os.ReadFile(filepath.Join("..", "..", "migrations", "235_channel_monitor_hybrid.sql"))
+	migration, err := os.ReadFile(filepath.Join("..", "..", "migrations", "239_channel_monitor_hybrid.sql"))
 	require.NoError(t, err)
 	_, err = db.Exec(string(migration))
 	require.NoError(t, err)
