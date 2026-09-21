@@ -181,7 +181,6 @@ import {
   formatLatencyPrivacy,
   formatMonitorMs,
   formatMonitorPercent,
-  formatMonitorSuccessRateFromError,
   formatMonitorThroughput,
   formatMonitorTokensPerSecond,
   tokensPerSecondFromTpm,
@@ -359,12 +358,12 @@ function rowKey(row: MonitorMatrixRow): string {
 }
 
 function successRate(metrics: MonitorMetric): string {
-  // Empty traffic: no request count and no throughput signal.
-  // When throughput is hidden for privacy, still show success from error_rate.
   const noCount = metrics.request_count <= 0
   const noTP = (metrics.rpm || 0) <= 0 && (metrics.tpm || 0) <= 0
   if (noCount && noTP && props.showThroughput) return '-'
-  return formatMonitorSuccessRateFromError(metrics.error_rate)
+  if (metrics.success_rate != null) return formatMonitorPercent(metrics.success_rate)
+  if (metrics.request_count > 0) return formatMonitorPercent(metrics.success_requests / metrics.request_count)
+  return '-'
 }
 
 function formatScore(health: MonitorHealth): string {

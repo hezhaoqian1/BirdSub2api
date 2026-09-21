@@ -1,9 +1,12 @@
 package service
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
 )
 
 const (
@@ -20,11 +23,12 @@ const (
 	RequestTypeWSV2         RequestType = 3
 	RequestTypeCyberBlocked RequestType = 4 // cyber_policy 命中（透传但被上游安全策略拒绝）
 	RequestTypeLive         RequestType = 5
+	RequestTypeMonitorProbe RequestType = 6
 )
 
 func (t RequestType) IsValid() bool {
 	switch t {
-	case RequestTypeUnknown, RequestTypeSync, RequestTypeStream, RequestTypeWSV2, RequestTypeCyberBlocked, RequestTypeLive:
+	case RequestTypeUnknown, RequestTypeSync, RequestTypeStream, RequestTypeWSV2, RequestTypeCyberBlocked, RequestTypeLive, RequestTypeMonitorProbe:
 		return true
 	default:
 		return false
@@ -50,6 +54,8 @@ func (t RequestType) String() string {
 		return "cyber"
 	case RequestTypeLive:
 		return "live"
+	case RequestTypeMonitorProbe:
+		return "monitor_probe"
 	default:
 		return "unknown"
 	}
@@ -73,8 +79,20 @@ func ParseUsageRequestType(value string) (RequestType, error) {
 		return RequestTypeCyberBlocked, nil
 	case "live":
 		return RequestTypeLive, nil
+	case "monitor_probe":
+		return RequestTypeMonitorProbe, nil
 	default:
-		return RequestTypeUnknown, fmt.Errorf("invalid request_type, allowed values: unknown, sync, stream, ws_v2, cyber, live")
+		return RequestTypeUnknown, fmt.Errorf("invalid request_type, allowed values: unknown, sync, stream, ws_v2, cyber, live, monitor_probe")
+	}
+}
+
+func ApplyHybridMonitorRequestType(ctx context.Context, log *UsageLog) {
+	if ctx == nil || log == nil {
+		return
+	}
+	if probe, _ := ctx.Value(ctxkey.HybridMonitorProbe).(bool); probe {
+		log.RequestType = RequestTypeMonitorProbe
+		log.SyncRequestTypeAndLegacyFields()
 	}
 }
 

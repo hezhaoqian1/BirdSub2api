@@ -538,7 +538,7 @@ func (s *GatewayService) handleStreamingResponseAnthropicAPIKeyPassthrough(
 				if anthropicStreamEventIsTerminal("", trimmed) {
 					sawTerminalEvent = true
 				}
-				if firstTokenMs == nil && trimmed != "" && trimmed != "[DONE]" {
+				if firstTokenMs == nil && monitorStreamHasOutput(trimmed) {
 					ms := int(time.Since(startTime).Milliseconds())
 					firstTokenMs = &ms
 				}

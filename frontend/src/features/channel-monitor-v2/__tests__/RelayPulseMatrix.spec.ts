@@ -82,6 +82,11 @@ function metrics(requestCount: number): MonitorMetric {
 }
 
 describe('RelayPulseMatrix', () => {
+  it('uses actual success rate even when ignored errors make error rate zero', () => {
+    const actual = { ...metrics(10), success_rate: 0.6, error_rate: 0 }
+    const wrapper = mount(RelayPulseMatrix, { props: { rows: [{ platform: 'openai', model: 'test', metrics: actual, health, buckets: [{ bucket_start: '2026-08-01T00:00:00Z', metrics: actual, health }] }], coverage: { requested_start: '2026-08-01T00:00:00Z', requested_end: '2026-08-01T00:01:00Z', coverage_start: '2026-08-01T00:00:00Z', data_through: '2026-08-01T00:01:00Z', computed_at: '2026-08-01T00:01:00Z', aggregation_lag_seconds: 0, coverage_complete: true, bucket_seconds: 60 }, healthMode: 'overall' } })
+    expect(wrapper.text()).toContain('60.0%')
+  })
   it('shows privacy-safe hover tooltips and multi-band colors without click modal', async () => {
     const wrapper = mount(RelayPulseMatrix, {
       props: {

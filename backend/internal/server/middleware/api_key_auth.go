@@ -184,6 +184,8 @@ func apiKeyAuthWithSubscription(apiKeyService *service.APIKeyService, subscripti
 			if !billingInfoRequest {
 				_ = apiKeyService.TouchLastUsed(c.Request.Context(), apiKey.ID)
 			}
+			finish := trackHybridMonitorActivity(c, apiKey)
+			defer finish()
 			c.Next()
 			return
 		}
@@ -283,8 +285,22 @@ func apiKeyAuthWithSubscription(apiKeyService *service.APIKeyService, subscripti
 			_ = apiKeyService.TouchLastUsed(c.Request.Context(), apiKey.ID)
 		}
 
+		finish := trackHybridMonitorActivity(c, apiKey)
+		defer finish()
 		c.Next()
 	}
+}
+
+func trackHybridMonitorActivity(c *gin.Context, apiKey *service.APIKey) func() {
+	if c == nil || c.Request == nil || apiKey == nil || apiKey.GroupID == nil || *apiKey.GroupID <= 0 {
+		return func() {}
+	}
+	groupID := *apiKey.GroupID
+	if service.IsHybridMonitorProbe(c.Request) && service.IsRegisteredHybridMonitorProbeKey(apiKey.ID, groupID) {
+		c.Request = c.Request.WithContext(service.WithHybridMonitorProbe(c.Request.Context()))
+		return func() {}
+	}
+	return service.BeginHybridBusinessRequest(groupID)
 }
 
 func apiKeyHeadersTooLarge(c *gin.Context) bool {

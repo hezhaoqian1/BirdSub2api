@@ -154,6 +154,7 @@ func (r *usageLogRepository) Create(ctx context.Context, log *service.UsageLog) 
 	if log == nil {
 		return false, nil
 	}
+	service.ApplyHybridMonitorRequestType(ctx, log)
 
 	if tx := dbent.TxFromContext(ctx); tx != nil {
 		return r.createSingle(ctx, tx.Client(), log)
@@ -170,6 +171,7 @@ func (r *usageLogRepository) CreateBestEffort(ctx context.Context, log *service.
 	if log == nil {
 		return nil
 	}
+	service.ApplyHybridMonitorRequestType(ctx, log)
 
 	if tx := dbent.TxFromContext(ctx); tx != nil {
 		_, err := r.createSingle(ctx, tx.Client(), log)
