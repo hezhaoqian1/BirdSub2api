@@ -11,18 +11,22 @@
       <!-- Custom Logo or Default Logo -->
       <router-link
         :to="homePath"
-        class="sidebar-logo flex h-9 w-9 items-center justify-center overflow-hidden rounded-xl shadow-glow transition-opacity hover:opacity-80"
+        class="sidebar-logo flex h-9 w-9 items-center justify-center overflow-hidden transition-opacity hover:opacity-70"
+        :aria-label="displaySiteName"
         @click="handleMenuItemClick(homePath)"
       >
-        <img v-if="settingsLoaded" :src="siteLogo || '/logo.svg'" alt="Logo" class="h-full w-full object-contain" />
+        <img v-if="settingsLoaded && siteLogo" :src="siteLogo" alt="" class="h-full w-full object-contain" />
+        <span v-else class="sidebar-route-mark" aria-hidden="true">
+          <i></i><i></i><i></i>
+        </span>
       </router-link>
       <div class="sidebar-brand" :class="{ 'sidebar-brand-collapsed': sidebarCollapsed }" :aria-hidden="sidebarCollapsed ? 'true' : 'false'">
         <router-link
           :to="homePath"
-          class="sidebar-brand-title text-lg font-bold text-gray-900 transition-colors hover:text-primary-600 dark:text-white dark:hover:text-primary-400"
+          class="sidebar-brand-title text-gray-900 transition-colors hover:text-primary-600 dark:text-white dark:hover:text-primary-400"
           @click="handleMenuItemClick(homePath)"
         >
-          {{ siteName }}
+          {{ displaySiteName }}
         </router-link>
         <!-- Version Badge -->
         <VersionBadge :version="siteVersion" />
@@ -148,7 +152,7 @@
     </nav>
 
     <!-- Bottom Section -->
-    <div class="mt-auto border-t border-gray-100 p-3 dark:border-dark-800">
+    <div class="sidebar-footer mt-auto border-t p-3 dark:border-dark-800">
       <!-- Theme Toggle -->
       <button
         @click="toggleTheme"
@@ -196,8 +200,10 @@ import VersionBadge from '@/components/common/VersionBadge.vue'
 import Icon from '@/components/icons/Icon.vue'
 import { sanitizeSvg } from '@/utils/sanitize'
 import { sanitizeUrl } from '@/utils/url'
+import { resolveDisplaySiteName } from '@/utils/branding'
 import { FeatureFlags, makeSidebarFlag } from '@/utils/featureFlags'
 import { resolveSiteBillingMode } from '@/utils/siteBillingMode'
+import { applySavedTheme } from '@/utils/theme'
 import { useBatchImageAccess } from '@/composables/useBatchImageAccess'
 
 interface NavItem {
@@ -262,6 +268,7 @@ const groupExpandOverrides = ref<Map<string, boolean>>(new Map())
 
 // Site settings from appStore (cached, no flicker)
 const siteName = computed(() => appStore.siteName)
+const displaySiteName = computed(() => resolveDisplaySiteName(siteName.value))
 const siteLogo = computed(() => sanitizeUrl(appStore.siteLogo || '', { allowRelative: true, allowDataUrl: true }))
 const siteVersion = computed(() => appStore.siteVersion)
 const settingsLoaded = computed(() => appStore.publicSettingsLoaded)
@@ -932,15 +939,8 @@ function handleGroupClick(item: NavItem) {
   groupExpandOverrides.value.set(item.path, true)
 }
 
-// Initialize theme
-const savedTheme = localStorage.getItem('theme')
-if (
-  savedTheme === 'dark' ||
-  (!savedTheme && window.matchMedia('(prefers-color-scheme: dark)').matches)
-) {
-  isDark.value = true
-  document.documentElement.classList.add('dark')
-}
+// Restore only an explicit user preference. New visitors start in light mode.
+isDark.value = applySavedTheme()
 
 // Fetch admin settings (for feature-gated nav items like Ops).
 watch(
@@ -981,6 +981,40 @@ onBeforeUnmount(() => {
   min-width: 2.25rem;
 }
 
+.sidebar-route-mark {
+  position: relative;
+  display: block;
+  width: 1.65rem;
+  height: 1.1rem;
+}
+
+.sidebar-route-mark i {
+  position: absolute;
+  left: 0;
+  display: block;
+  width: 1.65rem;
+  height: 2px;
+  transform: rotate(-8deg);
+  transform-origin: left center;
+}
+
+.sidebar-route-mark i:nth-child(1) {
+  top: 0;
+  background: var(--bird-blue);
+}
+
+.sidebar-route-mark i:nth-child(2) {
+  top: 0.38rem;
+  width: 1.2rem;
+  background: var(--bird-red);
+}
+
+.sidebar-route-mark i:nth-child(3) {
+  top: 0.76rem;
+  width: 0.85rem;
+  background: var(--bird-yellow);
+}
+
 .sidebar-header-collapsed {
   gap: 0;
   padding-left: 1.125rem;
@@ -1011,6 +1045,10 @@ onBeforeUnmount(() => {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  font-family: var(--bird-font-display);
+  font-size: 1.25rem;
+  font-weight: 700;
+  line-height: 1.1;
 }
 
 .sidebar-link-collapsed {

@@ -16,7 +16,7 @@
   <div
     v-else-if="compactHomeEnabled"
     data-testid="compact-home"
-    class="flex min-h-screen flex-col bg-gray-50 text-gray-900 dark:bg-dark-950 dark:text-white"
+    class="home-page flex min-h-screen flex-col bg-gray-50 text-gray-900 dark:bg-dark-950 dark:text-white"
   >
     <header class="border-b border-gray-200 px-4 py-4 sm:px-6 dark:border-dark-800">
       <nav class="mx-auto flex max-w-5xl flex-wrap items-center justify-between gap-3 sm:gap-4">
@@ -93,39 +93,24 @@
   <!-- Default Home Page -->
   <div
     v-else
-    class="relative flex min-h-screen flex-col overflow-hidden bg-gradient-to-br from-gray-50 via-primary-50/30 to-gray-100 dark:from-dark-950 dark:via-dark-900 dark:to-dark-950"
+    class="home-page relative flex min-h-screen flex-col overflow-hidden bg-gray-50 dark:bg-dark-950"
   >
     <!-- Background Decorations -->
-    <div class="pointer-events-none absolute inset-0 overflow-hidden">
-      <div
-        class="absolute -right-40 -top-40 h-96 w-96 rounded-full bg-primary-400/20 blur-3xl"
-      ></div>
-      <div
-        class="absolute -bottom-40 -left-40 h-96 w-96 rounded-full bg-primary-500/15 blur-3xl"
-      ></div>
-      <div
-        class="absolute left-1/3 top-1/4 h-72 w-72 rounded-full bg-primary-300/10 blur-3xl"
-      ></div>
-      <div
-        class="absolute bottom-1/4 right-1/4 h-64 w-64 rounded-full bg-primary-400/10 blur-3xl"
-      ></div>
-      <div
-        class="absolute inset-0 bg-[linear-gradient(rgba(20,184,166,0.03)_1px,transparent_1px),linear-gradient(90deg,rgba(20,184,166,0.03)_1px,transparent_1px)] bg-[size:64px_64px]"
-      ></div>
-    </div>
+    <div class="home-grid pointer-events-none absolute inset-0 overflow-hidden"></div>
 
     <!-- Header -->
     <header class="relative z-20 px-6 py-4">
       <nav class="mx-auto flex max-w-6xl items-center justify-between">
         <!-- Logo -->
-        <div class="flex items-center">
-          <div class="h-10 w-10 overflow-hidden rounded-xl shadow-md">
+        <div class="home-brand flex items-center gap-3">
+          <div class="h-10 w-10 overflow-hidden rounded-xl border border-gray-200/80 bg-white shadow-sm dark:border-dark-700 dark:bg-dark-800">
             <img :src="siteLogo || '/logo.svg'" alt="Logo" class="h-full w-full object-contain" />
           </div>
+          <span class="text-lg font-semibold tracking-[-0.03em] text-gray-900 dark:text-white">{{ siteName }}</span>
         </div>
 
         <!-- Nav Actions -->
-        <div class="flex items-center gap-3">
+        <div class="home-nav-actions flex max-w-full flex-wrap items-center gap-3">
           <!-- Language Switcher -->
           <LocaleSwitcher />
 
@@ -200,14 +185,14 @@
     </header>
 
     <!-- Main Content -->
-    <main class="relative z-10 flex-1 px-6 py-16">
+    <main class="home-main relative z-10 flex-1 px-6 py-16">
       <div class="mx-auto max-w-6xl">
         <!-- Hero Section - Left/Right Layout -->
         <div class="mb-12 flex flex-col items-center justify-between gap-12 lg:flex-row lg:gap-16">
           <!-- Left: Text Content -->
           <div class="flex-1 text-center lg:text-left">
             <h1
-              class="mb-4 text-4xl font-bold text-gray-900 dark:text-white md:text-5xl lg:text-6xl"
+              class="home-hero-title mb-4 text-4xl font-bold text-gray-900 dark:text-white md:text-5xl lg:text-6xl"
             >
               {{ siteName }}
             </h1>
@@ -297,7 +282,7 @@
         <div class="mb-12 grid gap-6 md:grid-cols-3">
           <!-- Feature 1: Unified Gateway -->
           <div
-            class="group rounded-2xl border border-gray-200/50 bg-white/60 p-6 backdrop-blur-sm transition-all duration-300 hover:shadow-xl hover:shadow-primary-500/10 dark:border-dark-700/50 dark:bg-dark-800/60"
+            class="home-feature-card group rounded-xl border border-gray-200/70 bg-white/80 p-6 backdrop-blur-sm transition-all duration-300 dark:border-dark-700/70 dark:bg-dark-800/70"
           >
             <div
               class="mb-4 flex h-12 w-12 items-center justify-center rounded-xl bg-gradient-to-br from-blue-500 to-blue-600 shadow-lg shadow-blue-500/30 transition-transform group-hover:scale-110"
@@ -314,7 +299,7 @@
 
           <!-- Feature 2: Account Pool -->
           <div
-            class="group rounded-2xl border border-gray-200/50 bg-white/60 p-6 backdrop-blur-sm transition-all duration-300 hover:shadow-xl hover:shadow-primary-500/10 dark:border-dark-700/50 dark:bg-dark-800/60"
+            class="home-feature-card group rounded-xl border border-gray-200/70 bg-white/80 p-6 backdrop-blur-sm transition-all duration-300 dark:border-dark-700/70 dark:bg-dark-800/70"
           >
             <div
               class="mb-4 flex h-12 w-12 items-center justify-center rounded-xl bg-gradient-to-br from-primary-500 to-primary-600 shadow-lg shadow-primary-500/30 transition-transform group-hover:scale-110"
@@ -343,7 +328,7 @@
 
           <!-- Feature 3: Billing & Quota -->
           <div
-            class="group rounded-2xl border border-gray-200/50 bg-white/60 p-6 backdrop-blur-sm transition-all duration-300 hover:shadow-xl hover:shadow-primary-500/10 dark:border-dark-700/50 dark:bg-dark-800/60"
+            class="home-feature-card group rounded-xl border border-gray-200/70 bg-white/80 p-6 backdrop-blur-sm transition-all duration-300 dark:border-dark-700/70 dark:bg-dark-800/70"
           >
             <div
               class="mb-4 flex h-12 w-12 items-center justify-center rounded-xl bg-gradient-to-br from-purple-500 to-purple-600 shadow-lg shadow-purple-500/30 transition-transform group-hover:scale-110"
@@ -501,6 +486,8 @@ import LocaleSwitcher from '@/components/common/LocaleSwitcher.vue'
 import Icon from '@/components/icons/Icon.vue'
 import { sanitizeUrl } from '@/utils/url'
 import { FeatureFlags, isFeatureFlagEnabled } from '@/utils/featureFlags'
+import { resolveDisplaySiteName } from '@/utils/branding'
+import { applySavedTheme } from '@/utils/theme'
 
 const { t } = useI18n()
 
@@ -508,7 +495,7 @@ const authStore = useAuthStore()
 const appStore = useAppStore()
 
 // Site settings - directly from appStore (already initialized from injected config)
-const siteName = computed(() => appStore.cachedPublicSettings?.site_name || appStore.siteName || 'Sub2API')
+const siteName = computed(() => resolveDisplaySiteName(appStore.cachedPublicSettings?.site_name || appStore.siteName))
 const siteLogo = computed(() => sanitizeUrl(appStore.cachedPublicSettings?.site_logo || appStore.siteLogo || '', { allowRelative: true, allowDataUrl: true }))
 const siteSubtitle = computed(() => appStore.cachedPublicSettings?.site_subtitle || 'AI API Gateway Platform')
 const docUrl = computed(() => sanitizeUrl(appStore.cachedPublicSettings?.doc_url || appStore.docUrl || ''))
@@ -557,14 +544,7 @@ function toggleTheme() {
 
 // Initialize theme
 function initTheme() {
-  const savedTheme = localStorage.getItem('theme')
-  if (
-    savedTheme === 'dark' ||
-    (!savedTheme && window.matchMedia('(prefers-color-scheme: dark)').matches)
-  ) {
-    isDark.value = true
-    document.documentElement.classList.add('dark')
-  }
+  isDark.value = applySavedTheme()
 }
 
 onMounted(() => {
@@ -581,6 +561,74 @@ onMounted(() => {
 </script>
 
 <style scoped>
+/* BirdAPI paper, route lines and quiet motion carry through the public home page. */
+.home-page {
+  background-color: var(--bird-paper, #f5f1e8);
+  background-image: linear-gradient(115deg, rgba(49, 88, 220, 0.04), transparent 40%);
+}
+
+.home-grid {
+  background-image:
+    linear-gradient(rgba(23, 23, 20, 0.035) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(23, 23, 20, 0.035) 1px, transparent 1px);
+  background-size: 72px 72px;
+  opacity: 0.75;
+}
+
+.home-brand::after {
+  content: '';
+  width: 28px;
+  height: 3px;
+  margin-left: 2px;
+  background: linear-gradient(90deg, var(--bird-blue, #2448d8) 0 52%, var(--bird-red, #d8442f) 52% 77%, var(--bird-yellow, #e6c84b) 77%);
+  transform: translateY(1.1rem);
+}
+
+@media (max-width: 639px) {
+  .home-page > header {
+    padding-left: 1rem;
+    padding-right: 1rem;
+  }
+
+  .home-page > header > nav {
+    flex-wrap: wrap;
+    row-gap: 0.75rem;
+  }
+
+  .home-nav-actions {
+    flex: 1 1 100%;
+    justify-content: flex-end;
+    gap: 0.5rem;
+  }
+}
+
+.home-hero-title {
+  letter-spacing: -0.045em;
+  line-height: 0.98;
+  text-wrap: balance;
+}
+
+.home-feature-card {
+  box-shadow: 0 1px 2px rgba(23, 23, 20, 0.04), 0 12px 30px rgba(23, 23, 20, 0.045);
+}
+
+.home-feature-card:hover {
+  border-color: rgba(36, 72, 216, 0.42);
+  box-shadow: 0 16px 38px rgba(23, 23, 20, 0.1);
+  transform: translateY(-4px);
+}
+
+:global(.dark) .home-page {
+  background-color: #101316;
+  background-image: linear-gradient(115deg, rgba(49, 88, 220, 0.14), transparent 42%);
+}
+
+:global(.dark) .home-grid {
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.03) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
+}
+
 /* Terminal Container */
 .terminal-container {
   position: relative;
@@ -590,12 +638,12 @@ onMounted(() => {
 /* Terminal Window */
 .terminal-window {
   width: 420px;
-  background: linear-gradient(145deg, #1e293b 0%, #0f172a 100%);
+  background: #171714;
   border-radius: 14px;
   box-shadow:
-    0 25px 50px -12px rgba(0, 0, 0, 0.4),
-    0 0 0 1px rgba(255, 255, 255, 0.1),
-    inset 0 1px 0 rgba(255, 255, 255, 0.1);
+    0 24px 48px -14px rgba(23, 23, 20, 0.42),
+    0 0 0 1px rgba(23, 23, 20, 0.16),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08);
   overflow: hidden;
   transform: perspective(1000px) rotateX(2deg) rotateY(-2deg);
   transition: transform 0.3s ease;
@@ -610,8 +658,8 @@ onMounted(() => {
   display: flex;
   align-items: center;
   padding: 12px 16px;
-  background: rgba(30, 41, 59, 0.8);
-  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  background: rgba(23, 23, 20, 0.86);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
 }
 
 .terminal-buttons {
@@ -626,13 +674,13 @@ onMounted(() => {
 }
 
 .btn-close {
-  background: #ef4444;
+  background: #d8442f;
 }
 .btn-minimize {
-  background: #eab308;
+  background: #e6c84b;
 }
 .btn-maximize {
-  background: #22c55e;
+  background: #7ca36b;
 }
 
 .terminal-title {
@@ -640,7 +688,7 @@ onMounted(() => {
   text-align: center;
   font-size: 12px;
   font-family: ui-monospace, monospace;
-  color: #64748b;
+  color: #a8a39a;
   margin-right: 52px;
 }
 
@@ -686,31 +734,31 @@ onMounted(() => {
 }
 
 .code-prompt {
-  color: #22c55e;
+  color: #e6c84b;
   font-weight: bold;
 }
 .code-cmd {
-  color: #38bdf8;
+  color: #9bb1ff;
 }
 .code-flag {
-  color: #a78bfa;
+  color: #e5b39f;
 }
 .code-url {
-  color: #14b8a6;
+  color: #6d88f0;
 }
 .code-comment {
-  color: #64748b;
+  color: #a8a39a;
   font-style: italic;
 }
 .code-success {
-  color: #22c55e;
-  background: rgba(34, 197, 94, 0.15);
+  color: #d9e3ff;
+  background: rgba(49, 88, 220, 0.38);
   padding: 2px 8px;
   border-radius: 4px;
   font-weight: 600;
 }
 .code-response {
-  color: #fbbf24;
+  color: #e6c84b;
 }
 
 /* Blinking Cursor */
@@ -718,7 +766,7 @@ onMounted(() => {
   display: inline-block;
   width: 8px;
   height: 16px;
-  background: #22c55e;
+  background: #e6c84b;
   animation: blink 1s step-end infinite;
 }
 
@@ -737,8 +785,8 @@ onMounted(() => {
 :deep(.dark) .terminal-window {
   box-shadow:
     0 25px 50px -12px rgba(0, 0, 0, 0.6),
-    0 0 0 1px rgba(20, 184, 166, 0.2),
-    0 0 40px rgba(20, 184, 166, 0.1),
+    0 0 0 1px rgba(49, 88, 220, 0.28),
+    0 0 40px rgba(49, 88, 220, 0.12),
     inset 0 1px 0 rgba(255, 255, 255, 0.1);
 }
 </style>

@@ -26,6 +26,7 @@ export const useSubscriptionStore = defineStore('subscriptions', () => {
 
   // Auto-refresh interval
   let pollerInterval: ReturnType<typeof setInterval> | null = null
+  let activeRequestController: AbortController | null = null
 
   // Computed
   const hasActiveSubscriptions = computed(() => activeSubscriptions.value.length > 0)
@@ -56,8 +57,10 @@ export const useSubscriptionStore = defineStore('subscriptions', () => {
 
     // Start new request
     loading.value = true
+    const requestController = new AbortController()
+    activeRequestController = requestController
     const requestPromise = subscriptionsAPI
-      .getActiveSubscriptions()
+      .getActiveSubscriptions(requestController.signal)
       .then((data) => {
         if (currentGeneration === requestGeneration) {
           activeSubscriptions.value = data
@@ -67,6 +70,12 @@ export const useSubscriptionStore = defineStore('subscriptions', () => {
         return data
       })
       .catch((error) => {
+        // Logout or another session reset invalidates this request. The request
+        // may still reject after the auth state is gone; do not surface it as a
+        // real subscription failure to the page or console.
+        if (currentGeneration !== requestGeneration) {
+          return []
+        }
         console.error('Failed to fetch active subscriptions:', error)
         throw error
       })
@@ -74,6 +83,9 @@ export const useSubscriptionStore = defineStore('subscriptions', () => {
         if (activePromise === requestPromise) {
           loading.value = false
           activePromise = null
+        }
+        if (activeRequestController === requestController) {
+          activeRequestController = null
         }
       })
 
@@ -110,7 +122,10 @@ export const useSubscriptionStore = defineStore('subscriptions', () => {
    */
   function clear() {
     requestGeneration++
+    activeRequestController?.abort()
+    activeRequestController = null
     activePromise = null
+    loading.value = false
     activeSubscriptions.value = []
     loaded.value = false
     lastFetchedAt.value = null

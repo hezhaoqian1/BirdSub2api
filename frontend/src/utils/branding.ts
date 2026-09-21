@@ -1,5 +1,13 @@
 import { sanitizeUrl } from '@/utils/url'
 
+export function resolveDisplaySiteName(siteName?: string | null): string {
+  const normalizedName = siteName?.trim()
+  if (!normalizedName || normalizedName.toLowerCase() === 'sub2api') {
+    return 'BirdAPI'
+  }
+  return normalizedName
+}
+
 export function updateFavicon(logoUrl: string): void {
   const sanitizedLogoUrl = sanitizeUrl(logoUrl, {
     allowRelative: true,

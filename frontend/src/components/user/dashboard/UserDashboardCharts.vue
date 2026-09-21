@@ -1,7 +1,7 @@
 <template>
   <div class="space-y-6">
     <!-- Date Range Filter -->
-    <div class="card p-4">
+    <div class="dashboard-control-strip card p-4">
       <div class="flex flex-wrap items-center gap-4">
         <div class="flex items-center gap-2">
           <span class="text-sm font-medium text-gray-700 dark:text-gray-300">{{ t('dashboard.timeRange') }}:</span>
@@ -22,11 +22,12 @@
     <!-- Charts Grid -->
     <div class="grid grid-cols-1 gap-6 lg:grid-cols-2">
       <!-- Model Distribution Chart -->
-      <div class="card relative overflow-hidden p-4">
+      <div class="dashboard-chart-card card relative overflow-hidden p-5">
         <div v-if="loading" class="absolute inset-0 z-10 flex items-center justify-center bg-white/50 backdrop-blur-sm dark:bg-dark-800/50">
           <LoadingSpinner size="md" />
         </div>
-        <h3 class="mb-4 text-sm font-semibold text-gray-900 dark:text-white">{{ t('dashboard.modelDistribution') }}</h3>
+        <p class="dashboard-panel-kicker">BirdAPI / Model route</p>
+        <h3 class="dashboard-panel-title mb-4 text-sm font-semibold text-gray-900 dark:text-white">{{ t('dashboard.modelDistribution') }}</h3>
         <div class="flex flex-col items-center gap-4 sm:flex-row sm:gap-6">
           <div class="h-48 w-48 shrink-0">
             <Doughnut v-if="modelData" :data="modelData" :options="doughnutOptions" />

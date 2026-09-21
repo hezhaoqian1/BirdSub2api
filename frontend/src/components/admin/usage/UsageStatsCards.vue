@@ -1,7 +1,7 @@
 <template>
-  <div class="grid grid-cols-2 gap-4 lg:grid-cols-4">
-    <div class="card p-4 flex items-center gap-3">
-      <div class="rounded-lg bg-blue-100 p-2 dark:bg-blue-900/30 text-blue-600">
+  <div class="usage-stats-grid grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+    <div class="usage-stat-card card flex items-center gap-3 p-4">
+      <div class="usage-stat-icon p-2 text-blue-600">
         <Icon name="document" size="md" />
       </div>
       <div>
@@ -10,8 +10,8 @@
         <p class="text-xs text-gray-400">{{ t('usage.inSelectedRange') }}</p>
       </div>
     </div>
-    <div class="card p-4 flex items-center gap-3">
-      <div class="rounded-lg bg-amber-100 p-2 dark:bg-amber-900/30 text-amber-600"><svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="m21 7.5-9-5.25L3 7.5m18 0-9 5.25m9-5.25v9l-9 5.25M3 7.5l9 5.25M3 7.5v9l9 5.25m0-9v9" /></svg></div>
+    <div class="usage-stat-card card flex items-center gap-3 p-4">
+      <div class="usage-stat-icon p-2 text-amber-600"><svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="m21 7.5-9-5.25L3 7.5m18 0-9 5.25m9-5.25v9l-9 5.25M3 7.5l9 5.25M3 7.5v9l9 5.25m0-9v9" /></svg></div>
       <div>
         <p class="text-xs font-medium text-gray-500">{{ t('usage.totalTokens') }}</p>
         <p class="text-xl font-bold">{{ formatTokens(stats?.total_tokens || 0) }}</p>
@@ -58,13 +58,13 @@
         </p>
       </div>
     </div>
-    <div class="card p-4 flex items-center gap-3">
-      <div class="rounded-lg bg-green-100 p-2 dark:bg-green-900/30 text-green-600">
+    <div class="usage-stat-card card flex items-center gap-3 p-4">
+      <div class="usage-stat-icon p-2 text-red-600">
         <Icon name="dollar" size="md" />
       </div>
       <div class="min-w-0 flex-1">
         <p class="text-xs font-medium text-gray-500">{{ t('usage.totalCost') }}</p>
-        <p class="text-xl font-bold text-green-600">
+        <p class="text-xl font-bold text-red-600">
           ${{ (stats?.total_actual_cost || 0).toFixed(4) }}
         </p>
         <p class="text-xs text-gray-400">
@@ -79,8 +79,8 @@
         </p>
       </div>
     </div>
-    <div class="card p-4 flex items-center gap-3">
-      <div class="rounded-lg bg-purple-100 p-2 dark:bg-purple-900/30 text-purple-600">
+    <div class="usage-stat-card card flex items-center gap-3 p-4">
+      <div class="usage-stat-icon p-2 text-blue-600">
         <Icon name="clock" size="md" />
       </div>
       <div><p class="text-xs font-medium text-gray-500">{{ t('usage.avgDuration') }}</p><p class="text-xl font-bold">{{ formatDuration(stats?.average_duration_ms || 0) }}</p></div>
@@ -126,3 +126,33 @@ const formatTokens = (value: number) => {
 const cacheLabel = () => t('usage.cacheTotal')
 const cacheDetailLabel = () => t('usage.cacheBreakdown')
 </script>
+
+<style scoped>
+.usage-stat-card {
+  min-width: 0;
+  min-height: 7rem;
+  border-top: 3px solid var(--bird-blue);
+}
+
+.usage-stat-card:nth-child(2) { border-top-color: var(--bird-yellow); }
+.usage-stat-card:nth-child(3) { border-top-color: var(--bird-red); }
+.usage-stat-card:nth-child(4) { border-top-color: var(--bird-ink); }
+
+.usage-stat-icon {
+  flex: 0 0 auto;
+  border: 1px solid var(--bird-line);
+  border-radius: 2px;
+  background: var(--bird-paper-deep);
+}
+
+.usage-stat-card > div:last-child > p:nth-child(2) {
+  margin-top: 0.35rem;
+  font-family: var(--bird-font-display);
+  font-size: 1.75rem;
+  line-height: 1;
+}
+
+.dark .usage-stat-icon {
+  background: rgba(255, 255, 255, 0.055);
+}
+</style>

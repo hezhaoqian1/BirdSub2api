@@ -1,7 +1,10 @@
 <template>
-  <div class="card">
-    <div class="flex items-center justify-between border-b border-gray-100 px-6 py-4 dark:border-dark-700">
-      <h2 class="text-lg font-semibold text-gray-900 dark:text-white">{{ t('dashboard.recentUsage') }}</h2>
+  <div class="recent-usage card">
+    <div class="flex items-end justify-between border-b px-6 py-4 dark:border-dark-700">
+      <div>
+        <p class="recent-usage-kicker">BirdAPI / Request log</p>
+        <h2 class="recent-usage-title text-gray-900 dark:text-white">{{ t('dashboard.recentUsage') }}</h2>
+      </div>
       <span class="badge badge-gray">{{ t('dashboard.last7Days') }}</span>
     </div>
     <div class="p-6">
@@ -11,10 +14,10 @@
       <div v-else-if="data.length === 0" class="py-8">
         <EmptyState :title="t('dashboard.noUsageRecords')" :description="t('dashboard.startUsingApi')" />
       </div>
-      <div v-else class="space-y-3">
-        <div v-for="log in data" :key="log.id" class="flex items-center justify-between rounded-xl bg-gray-50 p-4 transition-colors hover:bg-gray-100 dark:bg-dark-800/50 dark:hover:bg-dark-800">
+      <div v-else class="divide-y divide-black/10 dark:divide-white/10">
+        <div v-for="log in data" :key="log.id" class="recent-usage-row flex items-center justify-between px-2 py-4 transition-colors">
           <div class="flex items-center gap-4">
-            <div class="flex h-10 w-10 items-center justify-center rounded-xl bg-primary-100 dark:bg-primary-900/30">
+            <div class="recent-usage-icon flex h-10 w-10 items-center justify-center">
               <Icon name="beaker" size="md" class="text-primary-600 dark:text-primary-400" />
             </div>
             <div>
@@ -55,3 +58,44 @@ defineProps<{
 const { t } = useI18n()
 const formatCost = (c: number) => c.toFixed(4)
 </script>
+
+<style scoped>
+.recent-usage {
+  overflow: hidden;
+  border-top: 3px solid var(--bird-blue);
+}
+
+.recent-usage > div:first-child {
+  border-color: var(--bird-line);
+}
+
+.recent-usage-kicker {
+  color: var(--bird-muted);
+  font-family: var(--bird-font-mono);
+  font-size: 0.62rem;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.recent-usage-title {
+  margin-top: 0.3rem;
+  font-family: var(--bird-font-display);
+  font-size: 1.35rem;
+  font-weight: 650;
+}
+
+.recent-usage-row:hover {
+  background: rgba(23, 23, 20, 0.04);
+}
+
+.recent-usage-icon {
+  border: 1px solid var(--bird-line);
+  border-radius: 2px;
+  background: var(--bird-paper-deep);
+}
+
+.dark .recent-usage-row:hover,
+.dark .recent-usage-icon {
+  background: rgba(255, 255, 255, 0.055);
+}
+</style>
