@@ -1,5 +1,5 @@
 <template>
-  <header class="glass sticky top-0 z-30 border-b border-gray-200/50 dark:border-dark-700/50">
+  <header class="app-header sticky top-0 z-30 border-b dark:border-dark-700/60">
     <div class="flex h-16 items-center justify-between gap-2 px-2 sm:px-4 md:px-6">
       <!-- Left: Mobile Menu Toggle + Page Title -->
       <div class="flex shrink-0 items-center gap-2 sm:gap-4">
@@ -11,13 +11,15 @@
           <Icon name="menu" size="md" />
         </button>
 
-        <div class="hidden lg:block">
-          <h1 class="text-lg font-semibold text-gray-900 dark:text-white">
-            {{ pageTitle }}
-          </h1>
-          <p v-if="pageDescription" class="text-xs text-gray-500 dark:text-dark-400">
-            {{ pageDescription }}
-          </p>
+        <div class="hidden items-center gap-3 lg:flex">
+          <span class="header-route-mark" aria-hidden="true"><i></i><i></i><i></i></span>
+          <div>
+            <p class="header-kicker">BirdAPI / Route control</p>
+            <h1 class="header-page-title text-gray-900 dark:text-white">{{ pageTitle }}</h1>
+            <p v-if="pageDescription" class="header-description text-gray-500 dark:text-dark-400">
+              {{ pageDescription }}
+            </p>
+          </div>
         </div>
       </div>
 
@@ -32,7 +34,7 @@
           :href="docUrl"
           target="_blank"
           rel="noopener noreferrer"
-          class="hidden items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-sm font-medium text-gray-600 transition-colors hover:bg-gray-100 hover:text-gray-900 dark:text-dark-400 dark:hover:bg-dark-800 dark:hover:text-white sm:flex"
+          class="header-action hidden items-center gap-1.5 px-2.5 py-1.5 text-sm font-medium text-gray-600 transition-colors hover:text-gray-900 dark:text-dark-400 dark:hover:text-white sm:flex"
         >
           <Icon name="book" size="sm" />
           <span class="hidden sm:inline">{{ t('nav.docs') }}</span>
@@ -42,7 +44,7 @@
         <router-link
           v-if="user && modelPlazaEnabled"
           :to="{ path: '/model-plaza', query: { embedded: '1' } }"
-          class="hidden items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-sm font-medium text-gray-600 transition-colors hover:bg-gray-100 hover:text-gray-900 dark:text-dark-400 dark:hover:bg-dark-800 dark:hover:text-white sm:flex"
+          class="header-action hidden items-center gap-1.5 px-2.5 py-1.5 text-sm font-medium text-gray-600 transition-colors hover:text-gray-900 dark:text-dark-400 dark:hover:text-white sm:flex"
         >
           <Icon name="grid" size="sm" />
           <span class="hidden sm:inline">{{ t('nav.modelPlaza') }}</span>
@@ -57,7 +59,7 @@
         <!-- Balance Display -->
         <div
           v-if="user"
-          class="group relative hidden items-center gap-2 rounded-xl bg-primary-50 px-3 py-1.5 dark:bg-primary-900/20 sm:flex"
+          class="header-balance group relative hidden items-center gap-2 px-3 py-1.5 sm:flex"
         >
           <svg
             class="h-4 w-4 text-primary-600 dark:text-primary-400"
@@ -105,10 +107,10 @@
         <div v-if="user" class="relative" ref="dropdownRef">
           <button
             @click="toggleDropdown"
-            class="flex items-center gap-2 rounded-xl p-1.5 transition-colors hover:bg-gray-100 dark:hover:bg-dark-800"
+            class="header-user-button flex items-center gap-2 p-1.5 transition-colors dark:hover:bg-dark-800"
             :aria-label="t('common.userMenu')"
           >
-            <div class="flex h-8 w-8 items-center justify-center overflow-hidden rounded-xl bg-gradient-to-br from-primary-500 to-primary-600 text-sm font-medium text-white shadow-sm">
+            <div class="header-avatar flex h-8 w-8 items-center justify-center overflow-hidden text-sm font-medium text-white">
               <img
                 v-if="avatarUrl"
                 :src="avatarUrl"
@@ -392,6 +394,76 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped>
+.header-route-mark {
+  position: relative;
+  display: block;
+  width: 1.5rem;
+  height: 1rem;
+  flex: 0 0 auto;
+}
+
+.header-route-mark i {
+  position: absolute;
+  left: 0;
+  height: 2px;
+  transform: rotate(-8deg);
+  transform-origin: left center;
+}
+
+.header-route-mark i:nth-child(1) { top: 0; width: 1.5rem; background: var(--bird-blue); }
+.header-route-mark i:nth-child(2) { top: 0.34rem; width: 1.05rem; background: var(--bird-red); }
+.header-route-mark i:nth-child(3) { top: 0.68rem; width: 0.72rem; background: var(--bird-yellow); }
+
+.header-kicker {
+  color: var(--bird-muted);
+  font-family: var(--bird-font-mono);
+  font-size: 0.58rem;
+  font-weight: 700;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.header-page-title {
+  margin-top: 0.2rem;
+  font-family: var(--bird-font-display);
+  font-size: 1.15rem;
+  font-weight: 650;
+  line-height: 1;
+}
+
+.header-description {
+  display: none;
+}
+
+.header-action {
+  border-left: 1px solid var(--bird-line);
+}
+
+.header-action:hover,
+.header-user-button:hover {
+  background: rgba(23, 23, 20, 0.045);
+}
+
+.header-balance {
+  border: 1px solid rgba(36, 72, 216, 0.25);
+  background: rgba(36, 72, 216, 0.07);
+}
+
+.header-user-button {
+  border-left: 1px solid var(--bird-line);
+}
+
+.header-avatar {
+  border-radius: 2px;
+  background: var(--bird-blue);
+  box-shadow: inset 0 -3px 0 var(--bird-red);
+}
+
+.dark .header-action:hover,
+.dark .header-user-button:hover {
+  background: rgba(255, 255, 255, 0.05);
+}
+
 .dropdown-enter-active,
 .dropdown-leave-active {
   transition: all 0.2s ease;

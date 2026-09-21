@@ -1,10 +1,10 @@
 <template>
   <AppLayout>
-    <div class="space-y-6">
+    <div class="usage-page space-y-6">
       <UsageStatsCards :stats="usageStats" :show-account-cost="false" :strike-standard-cost="true" />
 
       <div class="space-y-4">
-        <div class="card p-4">
+        <div class="usage-toolbar card p-4">
           <div class="flex flex-wrap items-center gap-4">
             <div class="flex items-center gap-2">
               <span class="text-sm font-medium text-gray-700 dark:text-gray-300">{{ t('admin.dashboard.timeRange') }}:</span>
@@ -66,7 +66,7 @@
         </div>
       </div>
 
-      <div class="card p-6">
+      <div class="usage-filter-panel card p-4 md:p-5">
         <div class="flex flex-wrap items-end justify-between gap-4">
           <div v-if="activeTab === 'errors'" class="flex flex-1 flex-wrap items-end gap-4">
             <div class="w-full sm:w-auto sm:min-w-[220px]">
@@ -914,3 +914,36 @@ watch(endpointDistributionSource, () => {
   // Endpoint source switching is handled by the chart component using already loaded stats.
 })
 </script>
+
+<style scoped>
+.usage-toolbar {
+  position: relative;
+  border-top: 3px solid var(--bird-yellow);
+}
+
+.usage-toolbar::before {
+  content: 'DATA WINDOW / 01';
+  position: absolute;
+  right: 1rem;
+  top: -1.55rem;
+  color: var(--bird-muted);
+  font-family: var(--bird-font-mono);
+  font-size: 0.58rem;
+  font-weight: 700;
+}
+
+.usage-filter-panel {
+  border-top: 3px solid var(--bird-blue);
+}
+
+.usage-page :deep(.card h2),
+.usage-page :deep(.card h3) {
+  letter-spacing: 0;
+}
+
+@media (max-width: 640px) {
+  .usage-toolbar::before {
+    display: none;
+  }
+}
+</style>

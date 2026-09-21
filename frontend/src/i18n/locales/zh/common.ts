@@ -220,6 +220,11 @@ export default {
   auth: {
     welcomeBack: '欢迎回来',
     signInToAccount: '登录您的账户以继续',
+    brandHeadlineLine1: '轻轻落地，',
+    brandHeadlineLine2: '继续构建。',
+    brandDescription: '一个账户管理 API Key、模型路由与每一次调用。所有模型，始终只认一个入口。',
+    accessNavigation: '账户入口',
+    backHome: '返回首页',
     signIn: '登录',
     signingIn: '登录中...',
     passkeySignIn: '使用 Passkey 登录',
@@ -227,7 +232,7 @@ export default {
     passkeyCancelled: '已取消 Passkey 登录。',
     passkeyFailed: 'Passkey 登录失败，请重试。',
     createAccount: '创建账户',
-    signUpToStart: '注册以开始使用 {siteName}',
+    signUpToStart: '创建账户，开始通过 BirdAPI 构建',
     signUp: '注册',
     processing: '处理中...',
     continue: '继续',
@@ -247,6 +252,7 @@ export default {
     passwordMinLength: '密码至少需要 6 个字符',
     loginFailed: '登录失败，请检查您的凭据后重试。',
     errors: {
+      INVALID_CREDENTIALS: '邮箱或密码错误。',
       USER_NOT_ACTIVE: '账号已被禁用',
     },
     registrationFailed: '注册失败，请重试。',

@@ -143,6 +143,21 @@ describe('useSubscriptionStore', () => {
 
       await expect(store.fetchActiveSubscriptions()).rejects.toThrow('Network error')
     })
+
+    it('清除会话后忽略已失效请求的错误', async () => {
+      let rejectRequest: (error: Error) => void
+      mockGetActiveSubscriptions.mockImplementation(
+        () => new Promise((_, reject) => { rejectRequest = reject })
+      )
+      const store = useSubscriptionStore()
+      const request = store.fetchActiveSubscriptions()
+
+      store.clear()
+      rejectRequest!(new Error('Request aborted after logout'))
+
+      await expect(request).resolves.toEqual([])
+      expect(store.loading).toBe(false)
+    })
   })
 
   // --- hasActiveSubscriptions ---

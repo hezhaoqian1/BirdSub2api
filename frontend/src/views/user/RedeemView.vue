@@ -1,16 +1,19 @@
 <template>
   <AppLayout>
-    <div class="mx-auto max-w-2xl space-y-6">
+    <div class="redeem-page mx-auto max-w-5xl space-y-6">
+      <div class="redeem-primary-grid">
       <!-- Current Balance Card -->
-      <div class="card overflow-hidden">
-        <div class="bg-gradient-to-br from-primary-500 to-primary-600 px-6 py-8 text-center">
+      <div class="redeem-balance-card card overflow-hidden">
+        <div class="redeem-balance-panel px-6 py-8">
+          <p class="redeem-kicker text-blue-100">BirdAPI credit / 01</p>
+          <div class="redeem-route-lines" aria-hidden="true"><span></span><span></span><span></span></div>
           <div
-            class="mb-4 inline-flex h-16 w-16 items-center justify-center rounded-2xl bg-white/20 backdrop-blur-sm"
+            class="redeem-balance-icon mb-6 inline-flex h-14 w-14 items-center justify-center bg-white/15"
           >
             <Icon name="creditCard" size="xl" class="text-white" />
           </div>
           <p class="text-sm font-medium text-primary-100">{{ t('redeem.currentBalance') }}</p>
-          <p class="mt-2 text-4xl font-bold text-white">
+          <p class="redeem-balance-value mt-3 text-white">
             ${{ user?.balance?.toFixed(2) || '0.00' }}
           </p>
           <p class="mt-2 text-sm text-primary-100">
@@ -20,11 +23,13 @@
       </div>
 
       <!-- Redeem Form -->
-      <div class="card">
-        <div class="p-6">
+      <div class="redeem-form-card card">
+        <div class="p-6 md:p-8">
+          <p class="redeem-kicker">BirdAPI / Redeem</p>
+          <h2 class="redeem-form-title text-gray-900 dark:text-white">{{ t('redeem.redeemCodeLabel') }}</h2>
           <form @submit.prevent="handleRedeem" class="space-y-5">
             <div>
-              <label for="code" class="input-label">
+              <label for="code" class="sr-only">
                 {{ t('redeem.redeemCodeLabel') }}
               </label>
               <div class="relative mt-1">
@@ -38,7 +43,7 @@
                   required
                   :placeholder="t('redeem.redeemCodePlaceholder')"
                   :disabled="submitting"
-                  class="input py-3 pl-12 text-lg"
+                  class="redeem-code-input input py-3 pl-12 text-lg"
                 />
               </div>
               <p class="input-hint">
@@ -49,7 +54,7 @@
             <button
               type="submit"
               :disabled="!redeemCode || submitting"
-              class="btn btn-primary w-full py-3"
+              class="redeem-submit btn btn-primary w-full py-3"
             >
               <svg
                 v-if="submitting"
@@ -76,6 +81,7 @@
             </button>
           </form>
         </div>
+      </div>
       </div>
 
       <!-- Success Message -->
@@ -162,9 +168,10 @@
         </div>
       </transition>
 
+      <div class="redeem-secondary-grid">
       <!-- Information Card -->
       <div
-        class="card border-primary-200 bg-primary-50 dark:border-primary-800/50 dark:bg-primary-900/20"
+        class="redeem-info-card card border-primary-200 bg-primary-50 dark:border-primary-800/50 dark:bg-primary-900/20"
       >
         <div class="p-6">
           <div class="flex items-start gap-4">
@@ -199,9 +206,10 @@
       </div>
 
       <!-- Recent Activity -->
-      <div class="card">
+      <div class="redeem-history-card card">
         <div class="border-b border-gray-100 px-6 py-4 dark:border-dark-700">
-          <h2 class="text-lg font-semibold text-gray-900 dark:text-white">
+          <p class="redeem-kicker">BirdAPI / Credit log</p>
+          <h2 class="redeem-history-title text-gray-900 dark:text-white">
             {{ t('redeem.recentActivity') }}
           </h2>
         </div>
@@ -230,18 +238,18 @@
             <div
               v-for="item in history"
               :key="item.id"
-              class="flex items-center justify-between rounded-xl bg-gray-50 p-4 dark:bg-dark-800"
+              class="redeem-history-row flex items-center justify-between p-4"
             >
               <div class="flex items-center gap-4">
                 <div
                   :class="[
-                    'flex h-10 w-10 items-center justify-center rounded-xl',
+                    'redeem-history-icon flex h-10 w-10 items-center justify-center',
                     isBalanceType(item.type)
                       ? item.value >= 0
                         ? 'bg-emerald-100 dark:bg-emerald-900/30'
                         : 'bg-red-100 dark:bg-red-900/30'
                       : isSubscriptionType(item.type)
-                        ? 'bg-purple-100 dark:bg-purple-900/30'
+                        ? 'bg-amber-100 dark:bg-amber-900/30'
                         : item.value >= 0
                           ? 'bg-blue-100 dark:bg-blue-900/30'
                           : 'bg-orange-100 dark:bg-orange-900/30'
@@ -263,7 +271,7 @@
                     v-else-if="isSubscriptionType(item.type)"
                     name="badge"
                     size="md"
-                    class="text-purple-600 dark:text-purple-400"
+                    class="text-amber-700 dark:text-amber-300"
                   />
                   <!-- 并发类型图标 -->
                   <Icon
@@ -295,7 +303,7 @@
                         ? 'text-emerald-600 dark:text-emerald-400'
                         : 'text-red-600 dark:text-red-400'
                       : isSubscriptionType(item.type)
-                        ? 'text-purple-600 dark:text-purple-400'
+                        ? 'text-amber-700 dark:text-amber-300'
                         : item.value >= 0
                           ? 'text-blue-600 dark:text-blue-400'
                           : 'text-orange-600 dark:text-orange-400'
@@ -336,6 +344,7 @@
             </p>
           </div>
         </div>
+      </div>
       </div>
     </div>
   </AppLayout>
@@ -493,6 +502,144 @@ onMounted(async () => {
 </script>
 
 <style scoped>
+.redeem-primary-grid,
+.redeem-secondary-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
+  gap: 1rem;
+}
+
+.redeem-balance-card,
+.redeem-form-card {
+  min-height: 22rem;
+}
+
+.redeem-balance-panel {
+  position: relative;
+  height: 100%;
+  overflow: hidden;
+  background: var(--bird-blue);
+  text-align: left;
+}
+
+.redeem-kicker {
+  color: var(--bird-muted);
+  font-family: var(--bird-font-mono);
+  font-size: 0.62rem;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.redeem-balance-panel .redeem-kicker {
+  color: rgba(255, 255, 255, 0.76);
+}
+
+.redeem-route-lines {
+  position: absolute;
+  inset: 5rem -3rem auto 48%;
+  height: 6rem;
+  transform: rotate(-7deg);
+}
+
+.redeem-route-lines span {
+  position: absolute;
+  left: 0;
+  display: block;
+  width: 100%;
+  height: 1px;
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.redeem-route-lines span:nth-child(2) { top: 1.5rem; background: var(--bird-yellow); }
+.redeem-route-lines span:nth-child(3) { top: 3rem; background: var(--bird-red); }
+
+.redeem-balance-icon {
+  margin-top: 4rem;
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  border-radius: 2px;
+}
+
+.redeem-balance-value {
+  font-family: var(--bird-font-display);
+  font-size: 3.75rem;
+  font-weight: 650;
+  line-height: 1;
+}
+
+.redeem-form-card {
+  border-top: 3px solid var(--bird-red);
+}
+
+.redeem-form-title,
+.redeem-history-title {
+  margin: 0.4rem 0 1.75rem;
+  font-family: var(--bird-font-display);
+  font-size: 2rem;
+  font-weight: 650;
+  line-height: 1.05;
+}
+
+.redeem-code-input {
+  min-height: 3.6rem;
+  font-family: var(--bird-font-mono);
+}
+
+.redeem-submit {
+  min-height: 3.45rem;
+  background: var(--bird-red);
+  border-color: var(--bird-red);
+}
+
+.redeem-submit:hover {
+  background: #bf3726;
+  border-color: #bf3726;
+}
+
+.redeem-info-card {
+  border-left: 3px solid var(--bird-blue);
+}
+
+.redeem-history-card {
+  overflow: hidden;
+  border-top: 3px solid var(--bird-yellow);
+}
+
+.redeem-history-title {
+  margin-bottom: 0;
+  font-size: 1.45rem;
+}
+
+.redeem-history-row + .redeem-history-row {
+  border-top: 1px solid var(--bird-line);
+}
+
+.redeem-history-row:hover {
+  background: rgba(23, 23, 20, 0.035);
+}
+
+.redeem-history-icon {
+  border: 1px solid var(--bird-line);
+  border-radius: 2px;
+  background: var(--bird-paper-deep) !important;
+}
+
+.dark .redeem-history-row:hover,
+.dark .redeem-history-icon {
+  background: rgba(255, 255, 255, 0.055) !important;
+}
+
+@media (max-width: 860px) {
+  .redeem-primary-grid,
+  .redeem-secondary-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .redeem-balance-card,
+  .redeem-form-card {
+    min-height: 0;
+  }
+}
+
 .fade-enter-active,
 .fade-leave-active {
   transition: all 0.3s ease;

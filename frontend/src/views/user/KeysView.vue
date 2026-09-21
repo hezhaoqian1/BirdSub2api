@@ -2,7 +2,7 @@
   <AppLayout>
     <TablePageLayout>
       <template #filters>
-        <div class="flex flex-col gap-3">
+        <div class="keys-filter-panel flex flex-col gap-3">
           <div class="flex flex-wrap items-center gap-3">
             <SearchInput
               v-model="filterSearch"
@@ -48,51 +48,54 @@
       </template>
 
       <template #actions>
-        <div class="flex justify-end gap-3">
-          <button
-            @click="loadApiKeys"
-            :disabled="loading"
-            class="btn btn-secondary"
-            :title="t('common.refresh')"
-          >
-            <Icon name="refresh" size="md" :class="loading ? 'animate-spin' : ''" />
-          </button>
-          <div class="relative" ref="columnDropdownRef">
+        <div class="keys-action-bar flex flex-wrap items-center justify-between gap-3">
+          <p class="keys-route-label">BirdAPI / Access keys</p>
+          <div class="flex flex-wrap items-center justify-end gap-3">
             <button
-              @click="showColumnDropdown = !showColumnDropdown"
-              class="btn btn-secondary px-2 md:px-3"
-              :title="t('keys.columnSettings')"
+              @click="loadApiKeys"
+              :disabled="loading"
+              class="btn btn-secondary"
+              :title="t('common.refresh')"
             >
-              <svg class="h-4 w-4 md:mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5">
-                <path stroke-linecap="round" stroke-linejoin="round" d="M9 4.5v15m6-15v15m-10.875 0h15.75c.621 0 1.125-.504 1.125-1.125V5.625c0-.621-.504-1.125-1.125-1.125H4.125C3.504 4.5 3 5.004 3 5.625v12.75c0 .621.504 1.125 1.125 1.125z" />
-              </svg>
-              <span class="hidden md:inline">{{ t('keys.columnSettings') }}</span>
+              <Icon name="refresh" size="md" :class="loading ? 'animate-spin' : ''" />
             </button>
-            <div
-              v-if="showColumnDropdown"
-              class="absolute right-0 top-full z-50 mt-1 max-h-80 w-48 overflow-y-auto rounded-lg border border-gray-200 bg-white py-1 shadow-lg dark:border-dark-600 dark:bg-dark-800"
-            >
+            <div class="relative" ref="columnDropdownRef">
               <button
-                v-for="col in toggleableColumns"
-                :key="col.key"
-                @click="toggleColumn(col.key)"
-                class="flex w-full items-center justify-between px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-dark-700"
+                @click="showColumnDropdown = !showColumnDropdown"
+                class="btn btn-secondary px-2 md:px-3"
+                :title="t('keys.columnSettings')"
               >
-                <span>{{ col.label }}</span>
-                <Icon
-                  v-if="isColumnVisible(col.key)"
-                  name="check"
-                  size="sm"
-                  class="text-primary-500"
-                  :stroke-width="2"
-                />
+                <svg class="h-4 w-4 md:mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M9 4.5v15m6-15v15m-10.875 0h15.75c.621 0 1.125-.504 1.125-1.125V5.625c0-.621-.504-1.125-1.125-1.125H4.125C3.504 4.5 3 5.004 3 5.625v12.75c0 .621.504 1.125 1.125 1.125z" />
+                </svg>
+                <span class="hidden md:inline">{{ t('keys.columnSettings') }}</span>
               </button>
+              <div
+                v-if="showColumnDropdown"
+                class="absolute right-0 top-full z-50 mt-1 max-h-80 w-48 overflow-y-auto rounded border border-gray-200 bg-white py-1 shadow-lg dark:border-dark-600 dark:bg-dark-800"
+              >
+                <button
+                  v-for="col in toggleableColumns"
+                  :key="col.key"
+                  @click="toggleColumn(col.key)"
+                  class="flex w-full items-center justify-between px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-dark-700"
+                >
+                  <span>{{ col.label }}</span>
+                  <Icon
+                    v-if="isColumnVisible(col.key)"
+                    name="check"
+                    size="sm"
+                    class="text-primary-500"
+                    :stroke-width="2"
+                  />
+                </button>
+              </div>
             </div>
+            <button @click="showCreateModal = true" class="keys-primary-cta btn btn-primary" data-tour="keys-create-btn">
+              <Icon name="plus" size="md" class="mr-2" />
+              {{ t('keys.createKey') }}
+            </button>
           </div>
-          <button @click="showCreateModal = true" class="btn btn-primary" data-tour="keys-create-btn">
-            <Icon name="plus" size="md" class="mr-2" />
-            {{ t('keys.createKey') }}
-          </button>
         </div>
       </template>
 
@@ -2106,3 +2109,45 @@ onUnmounted(() => {
   if (resetTimer) clearInterval(resetTimer)
 })
 </script>
+
+<style scoped>
+.keys-route-label {
+  color: var(--bird-muted);
+  font-family: var(--bird-font-mono);
+  font-size: 0.65rem;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.keys-primary-cta {
+  min-height: 3rem;
+  padding-inline: 1.15rem;
+  background: var(--bird-red);
+  border-color: var(--bird-red);
+}
+
+.keys-primary-cta:hover {
+  background: #bf3726;
+  border-color: #bf3726;
+}
+
+.keys-filter-panel :deep(input),
+.keys-filter-panel :deep(button) {
+  border-radius: 0.25rem;
+}
+
+@media (max-width: 640px) {
+  .keys-action-bar,
+  .keys-action-bar > div {
+    width: 100%;
+  }
+
+  .keys-action-bar > div {
+    justify-content: stretch;
+  }
+
+  .keys-primary-cta {
+    flex: 1 1 auto;
+  }
+}
+</style>
