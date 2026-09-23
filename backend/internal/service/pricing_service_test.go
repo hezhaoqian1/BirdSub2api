@@ -130,6 +130,73 @@ func TestBillingServiceGPT6AstraUsesOfficialPricingAcrossTiersAndLongContext(t *
 	}
 }
 
+func TestBillingServiceGPT6SolAndLunaUseOfficialPricingAcrossTiersAndLongContext(t *testing.T) {
+	tests := []struct {
+		model          string
+		input          float64
+		inputPriority  float64
+		output         float64
+		outputPriority float64
+		cacheWrite     float64
+		cacheRead      float64
+	}{
+		{model: "gpt-6-sol", input: 2e-6, inputPriority: 4e-6, output: 10e-6, outputPriority: 20e-6, cacheWrite: 2.5e-6, cacheRead: 0.2e-6},
+		{model: "gpt-6-luna", input: 0.1e-6, inputPriority: 0.2e-6, output: 0.5e-6, outputPriority: 1e-6, cacheWrite: 0.125e-6, cacheRead: 0.01e-6},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.model, func(t *testing.T) {
+			for _, pricingSource := range []string{"catalog", "fallback"} {
+				t.Run(pricingSource, func(t *testing.T) {
+					var svc *BillingService
+					if pricingSource == "catalog" {
+						catalog := map[string]*LiteLLMModelPricing{
+							tt.model: {
+								InputCostPerToken:                   tt.input,
+								InputCostPerTokenPriority:           tt.inputPriority,
+								OutputCostPerToken:                  tt.output,
+								OutputCostPerTokenPriority:          tt.outputPriority,
+								CacheCreationInputTokenCost:         tt.cacheWrite,
+								CacheCreationInputTokenCostPriority: tt.cacheWrite * 2,
+								CacheReadInputTokenCost:             tt.cacheRead,
+								CacheReadInputTokenCostPriority:     tt.cacheRead * 2,
+								LongContextInputTokenThreshold:      272_000,
+								LongContextInputCostMultiplier:      2,
+								LongContextOutputCostMultiplier:     1.5,
+							},
+						}
+						svc = NewBillingService(&config.Config{}, &PricingService{pricingData: catalog})
+					} else {
+						svc = NewBillingService(&config.Config{}, &PricingService{pricingData: map[string]*LiteLLMModelPricing{}})
+					}
+					pricing, err := svc.GetModelPricing(tt.model)
+					require.NoError(t, err)
+					require.InDelta(t, tt.input, pricing.InputPricePerToken, 1e-12)
+					require.InDelta(t, tt.inputPriority, pricing.InputPricePerTokenPriority, 1e-12)
+					require.InDelta(t, tt.output, pricing.OutputPricePerToken, 1e-12)
+					require.InDelta(t, tt.outputPriority, pricing.OutputPricePerTokenPriority, 1e-12)
+					require.InDelta(t, tt.cacheWrite, pricing.CacheCreationPricePerToken, 1e-12)
+					require.InDelta(t, tt.cacheRead, pricing.CacheReadPricePerToken, 1e-12)
+					require.Equal(t, 272_000, pricing.LongContextInputThreshold)
+					require.InDelta(t, 2.0, pricing.LongContextInputMultiplier, 1e-12)
+					require.InDelta(t, 1.5, pricing.LongContextOutputMultiplier, 1e-12)
+
+					tokens := UsageTokens{InputTokens: 272_001, OutputTokens: 10, CacheCreationTokens: 1, CacheReadTokens: 1}
+					standard, err := svc.CalculateCostWithServiceTier(tt.model, tokens, 1, "")
+					require.NoError(t, err)
+					require.True(t, standard.LongContextBillingApplied)
+					require.InDelta(t, 272_001*tt.input*2, standard.InputCost, 1e-12)
+
+					priority, err := svc.CalculateCostWithServiceTier(tt.model, tokens, 1, "priority")
+					require.NoError(t, err)
+					require.True(t, priority.LongContextBillingApplied)
+					require.InDelta(t, 272_001*tt.inputPriority*2, priority.InputCost, 1e-12)
+				})
+			}
+		})
+	}
+}
+
 func TestGPT6AstraDedicatedFallbacksUseOfficialRates(t *testing.T) {
 	tests := []struct {
 		name string

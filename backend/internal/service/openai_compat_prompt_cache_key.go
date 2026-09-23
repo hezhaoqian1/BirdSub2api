@@ -14,9 +14,10 @@ const compatPromptCacheKeyPrefix = "compat_cc_"
 func shouldAutoInjectPromptCacheKeyForCompat(model string) bool {
 	trimmed := strings.TrimSpace(strings.ToLower(model))
 	canonical := canonicalizeOpenAIModelAliasSpelling(trimmed)
-	// GPT-6 is the public alias for Astra. Keep this deliberately scoped to
-	// Astra so other GPT-6 families do not inherit Messages compatibility state.
-	if canonical == "gpt-6" || canonical == "gpt-6-astra" {
+	// GPT-6 models support prompt caching on the official Chat Completions API.
+	// Only catalogued IDs and explicit reasoning-effort variants qualify; a
+	// preview/date/unknown suffix must not silently inherit this behavior.
+	if isOpenAIGPT6PromptCacheModel(canonical) {
 		return true
 	}
 	// 仅对 Responses 兼容路径支持的 GPT-5 族开启自动注入，避免 normalizeCodexModel

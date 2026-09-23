@@ -379,6 +379,17 @@ func TestNewConfiguredCodexModelDescriptorUsesProviderMetadataAndSafeFallback(t 
 	require.Equal(t, "xhigh", *gpt6.MultiAgentReasoningEffort)
 	require.Equal(t, int64(1_050_000), gpt6.ContextWindow)
 
+	for _, modelID := range []string{"gpt-6-sol", "gpt-6-luna"} {
+		model := newConfiguredCodexModelDescriptor(modelID)
+		require.Equal(t, []string{"none", "low", "medium", "high", "xhigh", "max"}, effortsFromConfiguredCodexLevels(model.SupportedReasoningLevels), modelID)
+		require.NotNil(t, model.DefaultReasoningLevel, modelID)
+		require.Equal(t, "medium", *model.DefaultReasoningLevel, modelID)
+		require.Equal(t, int64(1_050_000), model.ContextWindow, modelID)
+		require.Equal(t, int64(1_050_000), model.MaxContextWindow, modelID)
+		require.True(t, configuredCodexSupportsPriorityServiceTier(modelID), modelID)
+		require.True(t, isOpenAICodexImageInputModel(modelID), modelID)
+	}
+
 	gpt55 := newConfiguredCodexModelDescriptor("gpt-5.5")
 	require.Equal(t, "GPT-5.5", gpt55.DisplayName)
 	require.NotNil(t, gpt55.DefaultReasoningLevel)
