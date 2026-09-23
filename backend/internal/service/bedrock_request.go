@@ -196,6 +196,7 @@ func PrepareBedrockRequestBody(body []byte, modelID string, betaHeader string) (
 // ccCompat 启用 CC 兼容模式时额外处理 thinking 类型转换和 tool_use.id 清理。
 func PrepareBedrockRequestBodyWithTokens(body []byte, modelID string, betaTokens []string, ccCompat bool) ([]byte, error) {
 	var err error
+	body = sanitizeClaudeOpus55RequestBody(body, modelID)
 
 	betaTokens = filterBedrockBetaTokens(betaTokens)
 	body = sanitizeBedrockFieldsForBetaTokens(body, betaTokens)
@@ -255,7 +256,7 @@ func PrepareBedrockRequestBodyWithTokens(body []byte, modelID string, betaTokens
 	body = sanitizeBedrockCacheControl(body, modelID)
 
 	// CC 兼容模式：修复 CC 发送的 Bedrock 不兼容字段
-	if ccCompat {
+	if ccCompat || isClaudeOpus55Model(modelID) {
 		body = sanitizeBedrockThinking(body, modelID)
 		body = sanitizeBedrockToolUseIDs(body)
 	}
@@ -721,7 +722,7 @@ func sanitizeBedrockThinking(body []byte, modelID string) []byte {
 		return body
 	}
 
-	if isBedrockFable5(modelID) {
+	if isClaudeOpus55Model(modelID) || isBedrockFable5(modelID) {
 		if thinkingType == "enabled" {
 			body, _ = sjson.SetBytes(body, "thinking.type", "adaptive")
 		}

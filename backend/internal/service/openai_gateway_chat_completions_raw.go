@@ -92,6 +92,11 @@ func (s *OpenAIGatewayService) forwardAsRawChatCompletions(
 	if normalizedBody, normalized := NormalizeGLMOpenAIReasoningEffort(upstreamBody, upstreamModel); normalized {
 		upstreamBody = normalizedBody
 	}
+	var compatErr error
+	upstreamBody, compatErr = normalizeGPT6SolLunaChatToolCalling(upstreamBody, upstreamModel)
+	if compatErr != nil {
+		return nil, fmt.Errorf("normalize GPT-6 Chat tool calling: %w", compatErr)
+	}
 
 	// 4. Apply OpenAI fast policy on the CC body
 	updatedBody, policyErr := s.applyOpenAIFastPolicyToBody(ctx, account, upstreamModel, upstreamBody)
@@ -247,6 +252,28 @@ func (s *OpenAIGatewayService) forwardAsRawChatCompletions(
 		result.UpstreamEndpoint = grokChatRawEndpoint
 	}
 	return result, forwardErr
+}
+
+// GPT-6 Sol/Luna support function calling on Chat Completions only with
+// reasoning_effort=none. Responses requests retain the caller's reasoning
+// effort and are not routed through this compatibility step.
+func normalizeGPT6SolLunaChatToolCalling(body []byte, model string) ([]byte, error) {
+	if !isOpenAIGPT6SolModel(model) && !isOpenAIGPT6LunaModel(model) {
+		return body, nil
+	}
+	tools := gjson.GetBytes(body, "tools")
+	functions := gjson.GetBytes(body, "functions")
+	if !(tools.IsArray() && len(tools.Array()) > 0) && !(functions.IsArray() && len(functions.Array()) > 0) {
+		return body, nil
+	}
+	if strings.EqualFold(strings.TrimSpace(gjson.GetBytes(body, "reasoning_effort").String()), "none") {
+		return body, nil
+	}
+	normalized, err := sjson.SetBytes(body, "reasoning_effort", "none")
+	if err != nil {
+		return nil, err
+	}
+	return normalized, nil
 }
 
 func (s *OpenAIGatewayService) rawChatCompletionsURL(account *Account) (string, error) {

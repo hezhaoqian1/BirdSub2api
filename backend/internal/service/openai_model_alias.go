@@ -38,6 +38,10 @@ func normalizeKnownOpenAICodexModel(model string) string {
 	}
 
 	switch {
+	case isOpenAIGPT6SolModel(normalized):
+		return "gpt-6-sol"
+	case isOpenAIGPT6LunaModel(normalized):
+		return "gpt-6-luna"
 	case normalized == "gpt-6" || normalized == "gpt-6-astra":
 		return "gpt-6-astra"
 	case strings.Contains(normalized, "gpt-5.6-sol"):
@@ -99,11 +103,65 @@ func isOpenAIGPT56Model(model string) bool {
 	return false
 }
 
-// isOpenAIGPT6AstraModel reports GPT-6 Astra and dated/provider-prefixed variants.
-// The public "gpt-6" alias routes to Astra; unrelated GPT-6 families stay excluded.
+func isOpenAIGPT6EffortSuffix(suffix string) bool {
+	switch strings.ToLower(strings.TrimSpace(suffix)) {
+	case "none", "minimal", "low", "medium", "high", "xhigh", "max":
+		return true
+	default:
+		return false
+	}
+}
+
+func isOpenAIGPT6SolLunaEffortSuffix(suffix string) bool {
+	switch strings.ToLower(strings.TrimSpace(suffix)) {
+	case "none", "low", "medium", "high", "xhigh", "max":
+		return true
+	default:
+		return false
+	}
+}
+
+// isOpenAIGPT6AstraModel reports GPT-6 Astra and provider/date/effort variants.
+// The public "gpt-6" alias routes to Astra.
 func isOpenAIGPT6AstraModel(model string) bool {
 	normalized := canonicalizeOpenAIModelAliasSpelling(model)
 	return normalized == "gpt-6" || normalized == "gpt-6-astra" || strings.HasPrefix(normalized, "gpt-6-astra-")
+}
+
+func isOpenAIGPT6SolModel(model string) bool {
+	normalized := canonicalizeOpenAIModelAliasSpelling(model)
+	return normalized == "gpt-6-sol" || strings.HasPrefix(normalized, "gpt-6-sol-")
+}
+
+func isOpenAIGPT6LunaModel(model string) bool {
+	normalized := canonicalizeOpenAIModelAliasSpelling(model)
+	return normalized == "gpt-6-luna" || strings.HasPrefix(normalized, "gpt-6-luna-")
+}
+
+func isOpenAIGPT6Model(model string) bool {
+	return isOpenAIGPT6AstraModel(model) || isOpenAIGPT6SolModel(model) || isOpenAIGPT6LunaModel(model)
+}
+
+// isOpenAIGPT6PromptCacheModel is intentionally stricter than the family
+// predicates above. Automatic cache-key injection is only enabled for the
+// catalogued IDs and their explicit reasoning-effort suffixes.
+func isOpenAIGPT6PromptCacheModel(model string) bool {
+	normalized := canonicalizeOpenAIModelAliasSpelling(model)
+	if normalized == "gpt-6" {
+		return true
+	}
+	for _, family := range []string{"gpt-6-astra", "gpt-6-sol", "gpt-6-luna"} {
+		if normalized == family {
+			return true
+		}
+		if suffix, ok := strings.CutPrefix(normalized, family+"-"); ok {
+			if family == "gpt-6-astra" {
+				return isOpenAIGPT6EffortSuffix(suffix)
+			}
+			return isOpenAIGPT6SolLunaEffortSuffix(suffix)
+		}
+	}
+	return false
 }
 
 func appendUsageBillingModelCandidate(candidates []string, seen map[string]struct{}, model string) []string {
