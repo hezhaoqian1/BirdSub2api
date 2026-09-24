@@ -138,10 +138,6 @@ func isOpenAIGPT6LunaModel(model string) bool {
 	return normalized == "gpt-6-luna" || strings.HasPrefix(normalized, "gpt-6-luna-")
 }
 
-func isOpenAIGPT6Model(model string) bool {
-	return isOpenAIGPT6AstraModel(model) || isOpenAIGPT6SolModel(model) || isOpenAIGPT6LunaModel(model)
-}
-
 // isOpenAIGPT6PromptCacheModel is intentionally stricter than the family
 // predicates above. Automatic cache-key injection is only enabled for the
 // catalogued IDs and their explicit reasoning-effort suffixes.
@@ -208,4 +204,8 @@ func firstUsageBillingModel(candidates []string) string {
 		}
 	}
 	return ""
+}
+
+func isOpenAIGPT6Model(model string) bool {
+	return isOpenAIGPT6AstraModel(model) || openai.IsGPT6SolOrLunaModelSpelling(model)
 }
