@@ -1,13 +1,18 @@
 package service
 
 import (
+	"context"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/domain"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/claude"
+	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/tidwall/gjson"
 )
 
 // Claude Opus 5 官方定价（USD per token）：$5 输入 / $25 输出 per MTok。
@@ -16,6 +21,13 @@ const (
 	opus5OutputPricePerToken        = 25e-6
 	opus5CacheCreationPricePerToken = 6.25e-6
 	opus5CacheReadPricePerToken     = 0.5e-6
+)
+
+const (
+	opus55InputPricePerToken         = 4e-6
+	opus55OutputPricePerToken        = 20e-6
+	opus55CacheCreationPricePerToken = 5e-6
+	opus55CacheReadPricePerToken     = 0.2e-6
 )
 
 // TestClaudeOpus5_FamilyFallbackDoesNotUseOpus4Rates 覆盖定价数据里还没有
@@ -136,4 +148,177 @@ func TestClaudeOpus5_CatalogAndBedrockMapping(t *testing.T) {
 	mapped, ok := domain.DefaultBedrockModelMapping["claude-opus-5"]
 	require.True(t, ok, "claude-opus-5 missing from DefaultBedrockModelMapping")
 	assert.Equal(t, "us.anthropic.claude-opus-5-v1", mapped)
+}
+
+func TestClaudeOpus55_HardcodedFallbackPricing(t *testing.T) {
+	svc := NewBillingService(&config.Config{}, nil)
+	pricing, err := svc.GetModelPricing("claude-opus-5-5")
+	require.NoError(t, err)
+	require.NotNil(t, pricing)
+	assert.InDelta(t, opus55InputPricePerToken, pricing.InputPricePerToken, 1e-12)
+	assert.InDelta(t, opus55OutputPricePerToken, pricing.OutputPricePerToken, 1e-12)
+	assert.InDelta(t, opus55CacheCreationPricePerToken, pricing.CacheCreation5mPrice, 1e-12)
+	assert.InDelta(t, 8e-6, pricing.CacheCreation1hPrice, 1e-12)
+	assert.InDelta(t, opus55CacheReadPricePerToken, pricing.CacheReadPricePerToken, 1e-12)
+	assert.InDelta(t, 8e-6, pricing.InputPricePerTokenPriority, 1e-12)
+}
+
+func TestClaudeOpus55_FamilyPricingDoesNotMatchOpus5(t *testing.T) {
+	want := &LiteLLMModelPricing{InputCostPerToken: opus55InputPricePerToken, OutputCostPerToken: opus55OutputPricePerToken}
+	svc := &PricingService{pricingData: map[string]*LiteLLMModelPricing{
+		"claude-opus-5":   {InputCostPerToken: opus5InputPricePerToken, OutputCostPerToken: opus5OutputPricePerToken},
+		"claude-opus-5-5": want,
+	}}
+	assert.Same(t, want, svc.matchByModelFamily("anthropic.claude-opus-5-5"))
+}
+
+func TestClaudeOpus55_RequestCompatibility(t *testing.T) {
+	for _, thinkingType := range []string{"enabled", "disabled", "adaptive"} {
+		body := []byte(`{"model":"claude-opus-5-5","thinking":{"type":"` + thinkingType + `","budget_tokens":9000},"tool_choice":{"type":"tool","name":"bash"}}`)
+		got := sanitizeClaudeOpus55RequestBody(body, "")
+		assert.Equal(t, "adaptive", gjson.GetBytes(got, "thinking.type").String())
+		assert.False(t, gjson.GetBytes(got, "thinking.budget_tokens").Exists())
+		assert.True(t, gjson.GetBytes(got, "tool_choice").IsObject())
+		assert.Equal(t, "auto", gjson.GetBytes(got, "tool_choice.type").String())
+		assert.False(t, gjson.GetBytes(got, "tool_choice.name").Exists())
+	}
+
+	untouched := []byte(`{"model":"claude-opus-5","thinking":{"type":"enabled","budget_tokens":9000},"tool_choice":{"type":"tool","name":"bash"}}`)
+	assert.Equal(t, string(untouched), string(sanitizeClaudeOpus55RequestBody(untouched, "")))
+
+	direct := sanitizeClaudeOpus55DirectRequestBody([]byte(`{"model":"claude-opus-5-5","tools":[{"type":"computer_20251124","name":"computer","display_width_px":1024,"display_height_px":768,"cache_control":{"type":"ephemeral"}}]}`), "")
+	assert.Equal(t, "computer_toolset_20260801", gjson.GetBytes(direct, "tools.0.type").String())
+	assert.False(t, gjson.GetBytes(direct, "tools.0.name").Exists())
+	assert.False(t, gjson.GetBytes(direct, "tools.0.display_width_px").Exists())
+	assert.False(t, gjson.GetBytes(direct, "tools.0.display_height_px").Exists())
+	assert.Equal(t, "ephemeral", gjson.GetBytes(direct, "tools.0.cache_control.type").String())
+	assert.Equal(t, "context-1m-2025-08-07", sanitizeClaudeOpus55DirectBetaHeader("computer-use-2025-11-24,context-1m-2025-08-07", "claude-opus-5-5"))
+}
+
+func TestClaudeOpus55_BedrockMappingAndPreparation(t *testing.T) {
+	assert.Contains(t, claude.DefaultModelIDs(), "claude-opus-5-5")
+	mapped, ok := domain.DefaultBedrockModelMapping["claude-opus-5-5"]
+	require.True(t, ok)
+	assert.Equal(t, "anthropic.claude-opus-5-5", mapped)
+	assert.Equal(t, mapped, AdjustBedrockModelRegionPrefix(mapped, "eu-west-1"))
+
+	body := []byte(`{"model":"claude-opus-5-5","thinking":{"type":"disabled","budget_tokens":9000},"tool_choice":{"type":"any"},"tools":[{"type":"computer_20251124","name":"computer"}],"messages":[]}`)
+	got, err := PrepareBedrockRequestBodyWithTokens(body, mapped, nil, false)
+	require.NoError(t, err)
+	assert.Equal(t, "adaptive", gjson.GetBytes(got, "thinking.type").String())
+	assert.False(t, gjson.GetBytes(got, "thinking.budget_tokens").Exists())
+	assert.True(t, gjson.GetBytes(got, "tool_choice").IsObject())
+	assert.Equal(t, "auto", gjson.GetBytes(got, "tool_choice.type").String())
+	assert.Equal(t, "computer_20251124", gjson.GetBytes(got, "tools.0.type").String())
+}
+
+func assertClaudeOpus55CompatibleBody(t *testing.T, body []byte) {
+	t.Helper()
+	assert.Equal(t, "adaptive", gjson.GetBytes(body, "thinking.type").String())
+	assert.False(t, gjson.GetBytes(body, "thinking.budget_tokens").Exists())
+	assert.True(t, gjson.GetBytes(body, "tool_choice").IsObject())
+	assert.Equal(t, "auto", gjson.GetBytes(body, "tool_choice.type").String())
+	assert.False(t, gjson.GetBytes(body, "tool_choice.name").Exists())
+}
+
+func assertClaudeOpus55DirectBody(t *testing.T, body []byte) {
+	t.Helper()
+	assertClaudeOpus55CompatibleBody(t, body)
+	assert.Equal(t, "computer_toolset_20260801", gjson.GetBytes(body, "tools.0.type").String())
+	assert.False(t, gjson.GetBytes(body, "tools.0.name").Exists())
+	assert.False(t, gjson.GetBytes(body, "tools.0.display_width_px").Exists())
+	assert.False(t, gjson.GetBytes(body, "tools.0.display_height_px").Exists())
+}
+
+func assertClaudeOpus55DirectRequest(t *testing.T, req *http.Request) {
+	t.Helper()
+	assertClaudeOpus55DirectBody(t, readRequestBodyForTest(t, req))
+	assert.NotContains(t, getHeaderRaw(req.Header, "anthropic-beta"), claudeOpus55LegacyComputerBeta)
+}
+
+func opus55RequestTestContext(path string) *gin.Context {
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, path, nil)
+	c.Request.Header.Set("anthropic-beta", claudeOpus55LegacyComputerBeta+",context-1m-2025-08-07")
+	return c
+}
+
+func TestClaudeOpus55_RequestBuildersApplyCompatibility(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	body := []byte(`{"model":"claude-opus-5-5","thinking":{"type":"enabled","budget_tokens":9000},"tool_choice":{"type":"tool","name":"bash"},"tools":[{"type":"computer_20251124","name":"computer","display_width_px":1024,"display_height_px":768}],"messages":[]}`)
+	svc := &GatewayService{cfg: &config.Config{
+		Security: config.SecurityConfig{
+			URLAllowlist: config.URLAllowlistConfig{Enabled: false},
+		},
+	}}
+
+	t.Run("native anthropic", func(t *testing.T) {
+		account := &Account{Platform: PlatformAnthropic, Type: AccountTypeAPIKey}
+		req, wireBody, err := svc.buildUpstreamRequest(
+			context.Background(), opus55RequestTestContext("/v1/messages"), account,
+			body, "sk-ant-test", "apikey", "claude-opus-5-5", false, false,
+		)
+		require.NoError(t, err)
+		assertClaudeOpus55DirectBody(t, wireBody)
+		assertClaudeOpus55DirectRequest(t, req)
+	})
+
+	t.Run("mapped native anthropic", func(t *testing.T) {
+		account := &Account{Platform: PlatformAnthropic, Type: AccountTypeAPIKey}
+		aliasBody := []byte(`{"model":"team-opus","thinking":{"type":"disabled","budget_tokens":9000},"tool_choice":{"type":"any"},"messages":[]}`)
+		_, wireBody, err := svc.buildUpstreamRequest(
+			context.Background(), opus55RequestTestContext("/v1/messages"), account,
+			aliasBody, "sk-ant-test", "apikey", "claude-opus-5-5", false, false,
+		)
+		require.NoError(t, err)
+		assertClaudeOpus55CompatibleBody(t, wireBody)
+	})
+
+	t.Run("vertex", func(t *testing.T) {
+		account := &Account{
+			Platform: PlatformAnthropic,
+			Type:     AccountTypeServiceAccount,
+			Credentials: map[string]any{
+				"project_id": "vertex-project",
+				"location":   "us-east5",
+			},
+		}
+		req, _, err := svc.buildUpstreamRequest(
+			context.Background(), opus55RequestTestContext("/v1/messages"), account,
+			body, "vertex-token", "service_account", "claude-opus-5-5", false, false,
+		)
+		require.NoError(t, err)
+		assertClaudeOpus55DirectRequest(t, req)
+	})
+
+	t.Run("API key passthrough", func(t *testing.T) {
+		account := &Account{Platform: PlatformAnthropic, Type: AccountTypeAPIKey}
+		req, wireBody, err := svc.buildUpstreamRequestAnthropicAPIKeyPassthrough(
+			context.Background(), opus55RequestTestContext("/v1/messages"), account, body, "sk-ant-test",
+		)
+		require.NoError(t, err)
+		assertClaudeOpus55DirectBody(t, wireBody)
+		assertClaudeOpus55DirectRequest(t, req)
+	})
+
+	t.Run("count tokens", func(t *testing.T) {
+		account := &Account{Platform: PlatformAnthropic, Type: AccountTypeAPIKey}
+		req, wireBody, err := svc.buildCountTokensRequest(
+			context.Background(), opus55RequestTestContext("/v1/messages/count_tokens"), account,
+			body, "sk-ant-test", "apikey", "claude-opus-5-5", false,
+		)
+		require.NoError(t, err)
+		assertClaudeOpus55DirectBody(t, wireBody)
+		assertClaudeOpus55DirectRequest(t, req)
+	})
+
+	t.Run("count tokens API key passthrough", func(t *testing.T) {
+		account := &Account{Platform: PlatformAnthropic, Type: AccountTypeAPIKey}
+		req, err := svc.buildCountTokensRequestAnthropicAPIKeyPassthrough(
+			context.Background(), opus55RequestTestContext("/v1/messages/count_tokens"), account, body, "sk-ant-test",
+		)
+		require.NoError(t, err)
+		assertClaudeOpus55DirectRequest(t, req)
+	})
 }

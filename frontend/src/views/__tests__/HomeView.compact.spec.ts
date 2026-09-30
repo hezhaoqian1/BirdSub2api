@@ -31,9 +31,19 @@ vi.mock('@/stores/app', () => ({
 
 vi.mock('vue-i18n', async (importOriginal) => {
   const actual = await importOriginal<typeof import('vue-i18n')>()
+  const translations: Record<string, string> = {
+    'home.brandRoute.headlineLead': '所有模型，',
+    'home.brandRoute.headlineTail': '只走一条航线。',
+    'home.brandRoute.value1Eyebrow': '01 / CONNECT ONCE',
+    'home.brandRoute.value2Eyebrow': '02 / STAY ONLINE',
+    'home.brandRoute.value3Eyebrow': '03 / COUNT EVERY TOKEN',
+    'home.brandRoute.registerAndStart': '注册并开始',
+    'home.brandRoute.loginAndStart': '登录并开始',
+    'home.goToDashboard': '进入控制台',
+  }
   return {
     ...actual,
-    useI18n: () => ({ t: (key: string) => key }),
+    useI18n: () => ({ t: (key: string) => translations[key] ?? key }),
   }
 })
 
@@ -103,12 +113,84 @@ describe('HomeView compact mode', () => {
     expect(wrapper.get('[data-testid="compact-home"]').text()).toContain('Test site')
   })
 
-  it.each([undefined, false])('selects the default home when compact mode is %s', (enabled) => {
+  it.each([undefined, false])('selects the BirdAPI brand route home when compact mode is %s', (enabled) => {
     const settings = enabled === undefined ? {} : { compact_home_enabled: enabled }
     const wrapper = mountHome(settings)
 
     expect(wrapper.find('[data-testid="compact-home"]').exists()).toBe(false)
-    expect(wrapper.find('.terminal-container').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="brand-route-home"]').exists()).toBe(true)
+    expect(wrapper.text()).toContain('所有模型，')
+    expect(wrapper.text()).toContain('只走一条航线。')
+    expect(wrapper.text()).toContain('01 / CONNECT ONCE')
+    expect(wrapper.text()).toContain('02 / STAY ONLINE')
+    expect(wrapper.text()).toContain('03 / COUNT EVERY TOKEN')
+    expect(wrapper.find('.terminal-container').exists()).toBe(false)
+  })
+
+  it('sends the default home primary CTA to registration when registration is enabled', () => {
+    const wrapper = mountHome({ registration_enabled: true })
+    const primaryCta = wrapper
+      .findAllComponents(RouterLinkStub)
+      .find((link) => link.text().includes('注册并开始'))
+
+    expect(primaryCta?.props('to')).toBe('/register')
+  })
+
+  it('falls back to login when registration is disabled', () => {
+    const wrapper = mountHome({ registration_enabled: false })
+    const primaryCta = wrapper
+      .findAllComponents(RouterLinkStub)
+      .find((link) => link.text().includes('登录并开始'))
+
+    expect(primaryCta?.props('to')).toBe('/login')
+  })
+
+  it('sends authenticated users from the default home to their dashboard', () => {
+    authStore.isAuthenticated = true
+
+    const wrapper = mountHome({ registration_enabled: true })
+    const primaryCta = wrapper
+      .findAllComponents(RouterLinkStub)
+      .find((link) => link.text().includes('进入控制台'))
+
+    expect(primaryCta?.props('to')).toBe('/dashboard')
+  })
+
+  it('sends authenticated administrators from the default home to the admin dashboard', () => {
+    authStore.isAuthenticated = true
+    authStore.isAdmin = true
+
+    const wrapper = mountHome({ registration_enabled: true })
+    const primaryCta = wrapper
+      .findAllComponents(RouterLinkStub)
+      .find((link) => link.text().includes('进入控制台'))
+
+    expect(primaryCta?.props('to')).toBe('/admin/dashboard')
+  })
+
+  it('lets keyboard users activate the route value cards with Space', async () => {
+    const wrapper = mountHome()
+    const valueCard = wrapper.get('[role="button"][data-step="01"]')
+
+    await valueCard.trigger('keydown', { key: ' ' })
+
+    expect(valueCard.classes()).toContain('active')
+  })
+
+  it('keeps navigation and display controls available in the mobile menu', async () => {
+    const wrapper = mountHome({
+      doc_url: 'https://example.com/docs',
+      model_plaza_enabled: true,
+      model_plaza_require_auth: false,
+    })
+
+    await wrapper.get('.mobile-menu-toggle').trigger('click')
+
+    const menu = wrapper.get('#brand-route-mobile-menu')
+    expect(menu.text()).toContain('home.docs')
+    expect(menu.text()).toContain('home.brandRoute.pricing')
+    expect(menu.text()).toContain('home.login')
+    expect(menu.find('[data-testid="locale-switcher"]').exists()).toBe(true)
   })
 
   it('links unauthenticated visitors to login', () => {

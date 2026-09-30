@@ -1,5 +1,17 @@
 import { beforeEach, describe, expect, it } from 'vitest'
-import { updateFavicon } from '@/utils/branding'
+import { resolveDisplaySiteName, updateFavicon } from '@/utils/branding'
+
+describe('resolveDisplaySiteName', () => {
+  it('maps the legacy default brand to BirdAPI', () => {
+    expect(resolveDisplaySiteName()).toBe('BirdAPI')
+    expect(resolveDisplaySiteName('Sub2API')).toBe('BirdAPI')
+    expect(resolveDisplaySiteName(' sub2api ')).toBe('BirdAPI')
+  })
+
+  it('preserves an explicitly configured site name', () => {
+    expect(resolveDisplaySiteName('Acme Gateway')).toBe('Acme Gateway')
+  })
+})
 
 describe('updateFavicon', () => {
   beforeEach(() => {

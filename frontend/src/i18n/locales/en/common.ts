@@ -220,6 +220,11 @@ export default {
   auth: {
     welcomeBack: 'Welcome Back',
     signInToAccount: 'Sign in to your account to continue',
+    brandHeadlineLine1: 'Land softly.',
+    brandHeadlineLine2: 'Keep building.',
+    brandDescription: 'One account for API keys, model routes, and every request. Every model stays behind one clear entry point.',
+    accessNavigation: 'Account access',
+    backHome: 'Back home',
     signIn: 'Sign In',
     signingIn: 'Signing in...',
     passkeySignIn: 'Sign in with a passkey',
@@ -227,7 +232,7 @@ export default {
     passkeyCancelled: 'Passkey sign-in was cancelled.',
     passkeyFailed: 'Passkey sign-in failed. Please try again.',
     createAccount: 'Create Account',
-    signUpToStart: 'Sign up to start using {siteName}',
+    signUpToStart: 'Create an account and start building with BirdAPI',
     signUp: 'Sign up',
     processing: 'Processing...',
     continue: 'Continue',
@@ -247,6 +252,7 @@ export default {
     passwordMinLength: 'Password must be at least 6 characters',
     loginFailed: 'Login failed. Please check your credentials and try again.',
     errors: {
+      INVALID_CREDENTIALS: 'Invalid email or password.',
       USER_NOT_ACTIVE: 'Account has been disabled.',
     },
     registrationFailed: 'Registration failed. Please try again.',

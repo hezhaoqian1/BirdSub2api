@@ -1,7 +1,7 @@
 <template>
-  <div class="min-h-screen bg-gray-50 dark:bg-dark-950">
-    <!-- Background Decoration -->
-    <div class="pointer-events-none fixed inset-0 bg-mesh-gradient"></div>
+  <div class="app-shell min-h-screen dark:bg-dark-950">
+    <!-- Quiet drafting-grid background shared by the authenticated product UI. -->
+    <div class="app-shell-grid pointer-events-none fixed inset-0"></div>
 
     <!-- Sidebar -->
     <AppSidebar />
@@ -15,8 +15,10 @@
       <AppHeader />
 
       <!-- Main Content -->
-      <main class="p-4 md:p-6 lg:p-8">
-        <slot />
+      <main class="app-main px-4 py-5 md:px-6 md:py-7 lg:px-8 lg:py-8">
+        <div class="app-content-frame">
+          <slot />
+        </div>
       </main>
     </div>
   </div>

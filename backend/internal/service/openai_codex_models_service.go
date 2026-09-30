@@ -571,7 +571,7 @@ func configuredCodexServiceTiersForModel(modelID string) []configuredCodexServic
 
 func configuredCodexSupportsPriorityServiceTier(modelID string) bool {
 	normalized := canonicalizeOpenAIModelAliasSpelling(modelID)
-	for _, family := range []string{"gpt-5.4", "gpt-5.5", "gpt-5.6"} {
+	for _, family := range []string{"gpt-5.4", "gpt-5.5", "gpt-5.6", "gpt-6"} {
 		if normalized == family || strings.HasPrefix(normalized, family+"-") {
 			return true
 		}
@@ -1280,7 +1280,7 @@ func accountCodexModelSupportsImageInput(account *Account, upstreamModel string)
 				// text-only modality list. Keep explicit provider metadata
 				// authoritative for compatible hosts, but repair that stale
 				// official snapshot at the capability boundary.
-				if isOpenAIGPT6AstraModel(upstreamModel) && isOfficialOpenAICodexAccount(account) {
+				if isOpenAIGPT6Model(upstreamModel) && isOfficialOpenAICodexAccount(account) {
 					return true
 				}
 				return stringSliceContains(modalities, "image")
@@ -2072,6 +2072,8 @@ func CodexModelsManifestETag(body []byte) string {
 var apiKeyCodexModelsWithoutResponsesLite = map[string]struct{}{
 	"gpt-6.1-sol":   {},
 	"gpt-6-astra":   {},
+	"gpt-6-sol":     {},
+	"gpt-6-luna":    {},
 	"gpt-5.6-sol":   {},
 	"gpt-5.6-terra": {},
 	"gpt-5.6-luna":  {},
@@ -2105,8 +2107,8 @@ func adjustAPIKeyCodexModelsManifest(body []byte, account *Account) ([]byte, err
 		if account != nil {
 			target = account.GetMappedModel(slug)
 		}
-		if isOpenAIGPT6AstraModel(target) {
-			target = "gpt-6-astra"
+		if isOpenAIGPT6Model(target) {
+			target = normalizeKnownOpenAICodexModel(target)
 		}
 		if _, targeted := apiKeyCodexModelsWithoutResponsesLite[target]; !targeted {
 			continue

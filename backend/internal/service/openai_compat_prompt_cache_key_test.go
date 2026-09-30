@@ -54,6 +54,21 @@ func TestShouldAutoInjectPromptCacheKeyForCompat_GPT6AstraForms(t *testing.T) {
 	}
 }
 
+func TestShouldAutoInjectPromptCacheKeyForCompat_GPT6SolAndLuna(t *testing.T) {
+	for _, model := range []string{
+		"gpt-6-sol", "gpt-6-sol-none", "gpt-6-sol-max", "openai/gpt-6-sol-xhigh",
+		"gpt-6-luna", "gpt-6-luna-low", "provider/gpt-6-luna-high",
+	} {
+		require.True(t, shouldAutoInjectPromptCacheKeyForCompat(model), model)
+	}
+	for _, model := range []string{
+		"gpt-6-sol-preview", "gpt-6-sol-2026-09-22", "gpt-6-sol-unrelated",
+		"gpt-6-luna-preview", "gpt-6-luna-minimal", "gpt-6-luna-2026-09-22", "gpt-6-luna-unrelated",
+	} {
+		require.False(t, shouldAutoInjectPromptCacheKeyForCompat(model), model)
+	}
+}
+
 func TestDeriveCompatPromptCacheKey_StableAcrossLaterTurns(t *testing.T) {
 	base := &apicompat.ChatCompletionsRequest{
 		Model: "gpt-5.4",

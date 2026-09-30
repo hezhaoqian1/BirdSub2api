@@ -1,6 +1,20 @@
 <template>
   <AppLayout>
-    <div class="space-y-6">
+    <div class="dashboard-page space-y-8">
+      <section class="dashboard-masthead" aria-labelledby="dashboard-title">
+        <div class="dashboard-masthead-copy">
+          <div class="dashboard-route-mark" aria-hidden="true"><i></i><i></i><i></i></div>
+          <div>
+            <p class="dashboard-kicker">BirdAPI / Personal workspace</p>
+            <h1 id="dashboard-title" class="dashboard-title">{{ t('dashboard.title') }}</h1>
+            <p class="dashboard-description">{{ t('dashboard.welcomeMessage') }}</p>
+          </div>
+        </div>
+        <div class="dashboard-masthead-status">
+          <span class="dashboard-status-dot" aria-hidden="true"></span>
+          <span>Route online</span>
+        </div>
+      </section>
       <div v-if="loading" class="flex items-center justify-center py-12"><LoadingSpinner /></div>
       <template v-else-if="stats">
         <UserDashboardStats :stats="stats" :balance="user?.balance || 0" :is-simple="authStore.isSimpleMode" :platform-quotas="platformQuotas" />
@@ -15,7 +29,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'; import { useAuthStore } from '@/stores/auth'; import { usageAPI, type UserDashboardStats as UserStatsType } from '@/api/usage'
+import { ref, computed, onMounted } from 'vue'; import { useI18n } from 'vue-i18n'; import { useAuthStore } from '@/stores/auth'; import { usageAPI, type UserDashboardStats as UserStatsType } from '@/api/usage'
 import AppLayout from '@/components/layout/AppLayout.vue'; import LoadingSpinner from '@/components/common/LoadingSpinner.vue'
 import UserDashboardStats from '@/components/user/dashboard/UserDashboardStats.vue'; import UserDashboardCharts from '@/components/user/dashboard/UserDashboardCharts.vue'
 import UserDashboardRecentUsage from '@/components/user/dashboard/UserDashboardRecentUsage.vue'; import UserDashboardQuickActions from '@/components/user/dashboard/UserDashboardQuickActions.vue'
@@ -24,6 +38,7 @@ import { getMyPlatformQuotas } from '@/api/user'
 import { formatDateLocalInput } from '@/utils/format'
 
 const authStore = useAuthStore(); const user = computed(() => authStore.user)
+const { t } = useI18n()
 const stats = ref<UserStatsType | null>(null); const loading = ref(false); const loadingUsage = ref(false); const loadingCharts = ref(false)
 const trendData = ref<TrendDataPoint[]>([]); const modelStats = ref<ModelStat[]>([]); const recentUsage = ref<UsageLog[]>([])
 const platformQuotas = ref<PlatformQuotaItem[] | null>(null)

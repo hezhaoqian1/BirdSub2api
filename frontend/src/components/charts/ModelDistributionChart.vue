@@ -1,11 +1,14 @@
 <template>
-  <div class="card p-4">
+  <div class="dashboard-chart-card card p-5">
     <div class="mb-4 flex items-center justify-between gap-3">
-      <h3 class="text-sm font-semibold text-gray-900 dark:text-white">
-        {{ !enableRankingView || activeView === 'model_distribution'
+      <div>
+        <p class="dashboard-panel-kicker">BirdAPI / Control signal</p>
+        <h3 class="dashboard-panel-title text-sm font-semibold text-gray-900 dark:text-white">
+          {{ !enableRankingView || activeView === 'model_distribution'
           ? t('admin.dashboard.modelDistribution')
           : t('admin.dashboard.spendingRankingTitle') }}
-      </h3>
+        </h3>
+      </div>
       <div class="flex flex-wrap items-center justify-end gap-2">
         <div
           v-if="showSourceToggle"

@@ -34,8 +34,8 @@ export async function getMySubscriptions(): Promise<UserSubscription[]> {
 /**
  * Get current user's active subscriptions
  */
-export async function getActiveSubscriptions(): Promise<UserSubscription[]> {
-  const response = await apiClient.get<UserSubscription[]>('/subscriptions/active')
+export async function getActiveSubscriptions(signal?: AbortSignal): Promise<UserSubscription[]> {
+  const response = await apiClient.get<UserSubscription[]>('/subscriptions/active', { signal })
   return response.data
 }
 

@@ -65,6 +65,8 @@ func TestNormalizeOpenAIReasoningEffortForMaxCapableModels(t *testing.T) {
 		want  string
 	}{
 		{name: "Astra 保留 max", raw: "max", model: "gpt-6-astra", want: "max"},
+		{name: "GPT-6 Sol 保留 max", raw: "max", model: "gpt-6-sol", want: "max"},
+		{name: "GPT-6 Luna 保留 max", raw: "max", model: "openai/gpt-6-luna", want: "max"},
 		{name: "Sol 保留 max", raw: "max", model: "gpt-5.6-sol", want: "max"},
 		{name: "Terra 保留 max", raw: "max", model: "openai/gpt-5.6-terra", want: "max"},
 		{name: "Luna 后缀保留 max", raw: "max", model: "gpt-5.6-luna-2026-07-09", want: "max"},
@@ -382,4 +384,26 @@ func TestOpenAIGatewayServiceForwardAPIKeyRemoteCompactV2PreservesResponsesWire(
 	require.Contains(t, rec.Body.String(), `"encrypted_content":"summary"`)
 	require.NotNil(t, result.ReasoningEffort)
 	require.Equal(t, "max", *result.ReasoningEffort)
+}
+
+func TestNormalizeGPT6SolLunaChatToolCalling(t *testing.T) {
+	tests := []struct {
+		name       string
+		model      string
+		body       string
+		wantEffort string
+	}{
+		{name: "Sol tools override high", model: "gpt-6-sol", body: `{"tools":[{"type":"function","function":{"name":"lookup"}}],"reasoning_effort":"high"}`, wantEffort: "none"},
+		{name: "Luna functions set missing effort", model: "openai/gpt-6-luna", body: `{"functions":[{"name":"lookup"}]}`, wantEffort: "none"},
+		{name: "dated Sol variant", model: "gpt-6-sol-2026-09-22", body: `{"tools":[{"type":"function","function":{"name":"lookup"}}]}`, wantEffort: "none"},
+		{name: "Sol without tools unchanged", model: "gpt-6-sol", body: `{"reasoning_effort":"high"}`, wantEffort: "high"},
+		{name: "Astra unchanged", model: "gpt-6-astra", body: `{"tools":[{"type":"function","function":{"name":"lookup"}}],"reasoning_effort":"high"}`, wantEffort: "high"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := normalizeGPT6SolLunaChatToolCalling([]byte(tt.body), tt.model)
+			require.NoError(t, err)
+			require.Equal(t, tt.wantEffort, gjson.GetBytes(got, "reasoning_effort").String())
+		})
+	}
 }
