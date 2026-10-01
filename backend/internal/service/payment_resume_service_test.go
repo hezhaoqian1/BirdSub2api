@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"net/url"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -160,6 +161,51 @@ func TestBuildPaymentReturnURL(t *testing.T) {
 	}
 	if query.Get("status") != "success" {
 		t.Fatalf("status = %q", query.Get("status"))
+	}
+}
+
+func TestBuildProviderReturnURLDropsResumeTokenPastEasyPayLimit(t *testing.T) {
+	t.Parallel()
+
+	longToken := strings.Repeat("t", 250)
+	got, err := buildProviderReturnURL(payment.TypeEasyPay, "https://birdapi.up.railway.app/payment/result", 75, "sub2_20261001fM4QZAJy", longToken)
+	if err != nil {
+		t.Fatalf("buildProviderReturnURL returned error: %v", err)
+	}
+	if len(got) > easyPayMaxReturnURLLength {
+		t.Fatalf("return url length = %d, want <= %d", len(got), easyPayMaxReturnURLLength)
+	}
+	parsed, err := url.Parse(got)
+	if err != nil {
+		t.Fatalf("url.Parse returned error: %v", err)
+	}
+	query := parsed.Query()
+	if query.Get("resume_token") != "" {
+		t.Fatalf("resume_token should be dropped, got %q", query.Get("resume_token"))
+	}
+	if query.Get("order_id") != "75" || query.Get("out_trade_no") != "sub2_20261001fM4QZAJy" {
+		t.Fatalf("order lookup params missing: %q", parsed.RawQuery)
+	}
+}
+
+func TestBuildProviderReturnURLKeepsResumeTokenWhenAllowed(t *testing.T) {
+	t.Parallel()
+
+	got, err := buildProviderReturnURL(payment.TypeEasyPay, "https://example.com/payment/result", 42, "sub2_42", "short-token")
+	if err != nil {
+		t.Fatalf("buildProviderReturnURL returned error: %v", err)
+	}
+	if parsed, _ := url.Parse(got); parsed.Query().Get("resume_token") != "short-token" {
+		t.Fatalf("short easypay return url should keep resume_token, got %q", got)
+	}
+
+	longToken := strings.Repeat("t", 250)
+	got, err = buildProviderReturnURL(payment.TypeStripe, "https://example.com/payment/result", 42, "sub2_42", longToken)
+	if err != nil {
+		t.Fatalf("buildProviderReturnURL returned error: %v", err)
+	}
+	if parsed, _ := url.Parse(got); parsed.Query().Get("resume_token") != longToken {
+		t.Fatalf("non-easypay providers should keep resume_token, got %q", got)
 	}
 }
 

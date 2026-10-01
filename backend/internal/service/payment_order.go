@@ -435,7 +435,7 @@ func (s *PaymentService) invokeProvider(ctx context.Context, order *dbent.Paymen
 			}
 		}
 	}
-	providerReturnURL, err := buildPaymentReturnURL(canonicalReturnURL, order.ID, outTradeNo, resumeToken)
+	providerReturnURL, err := buildProviderReturnURL(sel.ProviderKey, canonicalReturnURL, order.ID, outTradeNo, resumeToken)
 	if err != nil {
 		return nil, err
 	}

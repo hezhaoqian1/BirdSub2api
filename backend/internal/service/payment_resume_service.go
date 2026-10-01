@@ -304,6 +304,26 @@ func buildPaymentReturnURL(base string, orderID int64, outTradeNo string, resume
 	return parsed.String(), nil
 }
 
+// easyPayMaxReturnURLLength is the longest return_url EasyPay-compatible
+// gateways accept. Longer values make submit.php fail with
+// "创建订单失败，请返回重试！".
+const easyPayMaxReturnURLLength = 256
+
+// buildProviderReturnURL builds the return URL handed to the payment provider.
+// When the resume token would push it past the provider's length limit, the
+// token is left out; it is still returned to the client in the create-order
+// response, and the result page falls back to order_id/out_trade_no lookup.
+func buildProviderReturnURL(providerKey string, base string, orderID int64, outTradeNo string, resumeToken string) (string, error) {
+	returnURL, err := buildPaymentReturnURL(base, orderID, outTradeNo, resumeToken)
+	if err != nil || strings.TrimSpace(resumeToken) == "" {
+		return returnURL, err
+	}
+	if providerKey == payment.TypeEasyPay && len(returnURL) > easyPayMaxReturnURLLength {
+		return buildPaymentReturnURL(base, orderID, outTradeNo, "")
+	}
+	return returnURL, nil
+}
+
 func sameOriginHost(returnURLHost string, requestHost string) bool {
 	returnHost := strings.TrimSpace(returnURLHost)
 	reqHost := strings.TrimSpace(requestHost)
