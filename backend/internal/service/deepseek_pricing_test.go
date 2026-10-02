@@ -15,9 +15,9 @@ import (
 )
 
 // ---------------------------------------------------------------------------
-// deepseekPeakMultiplierAt：官方峰谷口径（2026-08-23 起生效）
-// 高峰时段 01:00–04:00 与 06:00–10:00 UTC（半开区间，仅工作日）；
-// 北京时间周六/周日全天低谷；高峰价 = 2× 低谷价。
+// deepseekPeakMultiplierAt：本站默认价卡峰谷策略
+// 高峰时段每日 01:00–04:00 与 06:00–10:00 UTC（半开区间）；
+// 不排除周末及节假日；高峰价 = 2× 低谷价。
 // 2026-08-24 为周一（工作日），2026-08-22 周六、2026-08-23 周日。
 // ---------------------------------------------------------------------------
 
@@ -43,10 +43,9 @@ func TestDeepseekPeakMultiplierAt(t *testing.T) {
 		{"weekday 05:00 off-peak", mon(5, 0), 1.0},
 		{"weekday 12:00 off-peak", mon(12, 0), 1.0},
 		{"weekday 23:59 off-peak", mon(23, 59), 1.0},
-		// 北京时间周末全天低谷（即使 UTC 处于高峰时段）
-		{"saturday utc 02:00 beijing sat 10:00", sat(2, 0), 1.0},
-		{"sunday utc 07:00 beijing sun 15:00", sun(7, 0), 1.0},
-		// 北京时间与 UTC 跨日边界：UTC 周六 16:30 = 北京周日 00:30 → 周末低谷
+		{"saturday utc 02:00 beijing sat 10:00", sat(2, 0), 2.0},
+		{"sunday utc 07:00 beijing sun 15:00", sun(7, 0), 2.0},
+		// 北京时间与 UTC 跨日边界：UTC 周六 16:30 = 北京周日 00:30，位于低谷窗口。
 		{"utc saturday 16:30 = beijing sunday 00:30", sat(16, 30), 1.0},
 	}
 	for _, tt := range tests {
@@ -76,8 +75,84 @@ func TestIsDeepSeekModel(t *testing.T) {
 	}
 }
 
+func TestDeepseekPeakMultiplierAtDailyBoundaries(t *testing.T) {
+	beijing := time.FixedZone("Asia/Shanghai", 8*3600)
+	days := []time.Time{
+		time.Date(2026, 9, 26, 0, 0, 0, 0, beijing),
+		time.Date(2026, 9, 27, 0, 0, 0, 0, beijing),
+		time.Date(2026, 9, 28, 0, 0, 0, 0, beijing),
+		time.Date(2026, 10, 2, 0, 0, 0, 0, beijing),
+	}
+	windows := []struct {
+		offset time.Duration
+		want   float64
+	}{
+		{9*time.Hour - time.Nanosecond, 1},
+		{9 * time.Hour, 2},
+		{12*time.Hour - time.Nanosecond, 2},
+		{12 * time.Hour, 1},
+		{14*time.Hour - time.Nanosecond, 1},
+		{14 * time.Hour, 2},
+		{18*time.Hour - time.Nanosecond, 2},
+		{18 * time.Hour, 1},
+		{24*time.Hour - time.Nanosecond, 1},
+	}
+	for _, day := range days {
+		for _, window := range windows {
+			instant := day.Add(window.offset)
+			t.Run(instant.Format(time.RFC3339Nano), func(t *testing.T) {
+				require.Equal(t, window.want, deepseekPeakMultiplierAt(instant))
+				require.Equal(t, window.want, deepseekPeakMultiplierAt(instant.UTC()))
+			})
+		}
+	}
+}
+
+func TestCalculateCostUnified_DeepseekWeekendAndHoliday(t *testing.T) {
+	bs := newTestBillingService()
+	resolver := NewModelPricingResolver(nil, bs)
+	beijing := time.FixedZone("Asia/Shanghai", 8*3600)
+	tokens := UsageTokens{InputTokens: 1000, OutputTokens: 500, CacheReadTokens: 2000}
+	models := []struct {
+		name       string
+		inputCost  float64
+		outputCost float64
+		cacheCost  float64
+	}{
+		{"deepseek-v4.1-flash", 0.00015, 0.0003, 0.000006},
+		{"deepseek-v4-pro", 0.00066, 0.00099, 0.000044},
+	}
+	for _, model := range models {
+		for _, day := range []time.Time{
+			time.Date(2026, 9, 26, 0, 0, 0, 0, beijing),
+			time.Date(2026, 9, 27, 0, 0, 0, 0, beijing),
+			time.Date(2026, 10, 2, 0, 0, 0, 0, beijing),
+		} {
+			for _, window := range []struct {
+				hour       int
+				multiplier float64
+			}{{9, 2}, {12, 1}, {14, 2}, {18, 1}} {
+				instant := day.Add(time.Duration(window.hour) * time.Hour)
+				t.Run(model.name+"/"+instant.Format(time.RFC3339), func(t *testing.T) {
+					cost, err := bs.CalculateCostUnified(CostInput{
+						Ctx: context.Background(), Model: model.name, Tokens: tokens,
+						RateMultiplier: 2.68, Resolver: resolver, PricingAt: instant,
+					})
+					require.NoError(t, err)
+					require.InDelta(t, model.inputCost*window.multiplier, cost.InputCost, 1e-12)
+					require.InDelta(t, model.outputCost*window.multiplier, cost.OutputCost, 1e-12)
+					require.InDelta(t, model.cacheCost*window.multiplier, cost.CacheReadCost, 1e-12)
+					expected := (model.inputCost + model.outputCost + model.cacheCost) * window.multiplier
+					require.InDelta(t, expected, cost.TotalCost, 1e-12)
+					require.InDelta(t, expected*2.68, cost.ActualCost, 1e-12)
+				})
+			}
+		}
+	}
+}
+
 // ---------------------------------------------------------------------------
-// 默认价卡（Source=LiteLLM）按官方峰谷倍率计费；分组/渠道自定义定价不叠加
+// 默认价卡（Source=LiteLLM）按本站峰谷倍率计费；分组/渠道自定义定价不叠加
 // ---------------------------------------------------------------------------
 
 func TestCalculateCostUnified_DeepseekDefaultCardPeakMultiplier(t *testing.T) {
@@ -176,6 +251,8 @@ func TestCalculateCostUnified_DeepseekGroupPricingNotScaledByPeak(t *testing.T) 
 	for _, pricingAt := range []time.Time{
 		time.Date(2026, 8, 24, 12, 0, 0, 0, time.UTC), // 低谷
 		time.Date(2026, 8, 24, 2, 0, 0, 0, time.UTC),  // 高峰
+		time.Date(2026, 9, 27, 2, 0, 0, 0, time.UTC),
+		time.Date(2026, 10, 2, 7, 0, 0, 0, time.UTC),
 	} {
 		cost, err := bs.CalculateCostUnified(CostInput{
 			Ctx: context.Background(), Model: "deepseek-v4-flash", Group: group,
@@ -183,7 +260,7 @@ func TestCalculateCostUnified_DeepseekGroupPricingNotScaledByPeak(t *testing.T) 
 		})
 		require.NoError(t, err)
 		require.InDelta(t, groupTotal, cost.TotalCost, 1e-10,
-			"分组自定义定价不应叠加官方峰谷倍率（pricingAt=%v）", pricingAt)
+			"分组自定义定价不应叠加默认峰谷倍率（pricingAt=%v）", pricingAt)
 	}
 }
 
@@ -204,7 +281,7 @@ func TestCalculateCostUnified_NonDeepseekDefaultCardNotScaledByPeak(t *testing.T
 		})
 		require.NoError(t, err)
 		require.InDelta(t, total, cost.TotalCost, 1e-10,
-			"非 DeepSeek 模型不应受官方峰谷倍率影响（pricingAt=%v）", pricingAt)
+			"非 DeepSeek 模型不应受默认峰谷倍率影响（pricingAt=%v）", pricingAt)
 	}
 }
 

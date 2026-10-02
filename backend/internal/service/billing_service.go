@@ -272,8 +272,8 @@ var ErrModelPricingUnavailable = errors.New("pricing not found")
 //
 //	https://api-docs.deepseek.com/quick_start/pricing
 //
-// 高峰价 = 2× 低谷价；高峰时段 01:00–04:00 与 06:00–10:00 UTC（仅工作日），
-// 北京时间周六/周日全天低谷。时段判定见 deepseekPeakMultiplierAt。
+// 本站高峰价 = 2× 低谷价；每日 01:00–04:00 与 06:00–10:00 UTC，
+// 不排除周末及节假日。时段判定见 deepseekPeakMultiplierAt。
 const (
 	deepseekFlashOffPeakInputPrice  = 1.5e-7  // $0.15 per MTok (cache miss)
 	deepseekFlashOffPeakOutputPrice = 6.0e-7  // $0.60 per MTok
@@ -293,16 +293,10 @@ func isDeepSeekModel(model string) bool {
 	return strings.HasPrefix(strings.ToLower(strings.TrimSpace(model)), "deepseek-")
 }
 
-// deepseekPeakMultiplierAt 返回指定时刻的 DeepSeek 官方峰谷定价因子。
-// 官方口径（2026-08-23 起生效）：高峰价 = 2× 低谷价；高峰时段为
-// 01:00–04:00 与 06:00–10:00 UTC（半开区间），仅工作日；
-// 周末（北京时间周六/周日）全天低谷。北京时间用固定 +8 偏移（无夏令时）。
+// deepseekPeakMultiplierAt 返回本站 DeepSeek 默认价卡的峰谷定价因子。
+// 每日北京时间 09:00–12:00、14:00–18:00（半开区间）为双倍峰价，
+// 不排除周末及节假日；这是本站渠道定价策略，不代表官方直连规则。
 func deepseekPeakMultiplierAt(now time.Time) float64 {
-	beijing := now.In(time.FixedZone("Asia/Shanghai", 8*3600))
-	switch beijing.Weekday() {
-	case time.Saturday, time.Sunday:
-		return 1.0
-	}
 	switch h := now.UTC().Hour(); {
 	case h >= 1 && h < 4, h >= 6 && h < 10:
 		return 2.0
@@ -666,7 +660,7 @@ func (s *BillingService) initFallbackPricing() {
 	// 其余 deepseek-*（含未知型号）统一按 flash 价兜底（见 getFallbackPricing），
 	// 避免计费中断。
 	// 以下均为官方低谷价；高峰价 = 2× 低谷价（高峰时段 01:00–04:00
-	// 与 06:00–10:00 UTC，仅工作日；北京时间周六/周日全天低谷），见 deepseekPeakMultiplierAt。
+	// 与 06:00–10:00 UTC，每日均适用），见 deepseekPeakMultiplierAt。
 	s.fallbackPrices["deepseek-v4-pro"] = &ModelPricing{
 		InputPricePerToken:     deepseekProOffPeakInputPrice,  // $0.66 per MTok (cache miss, off-peak)
 		OutputPricePerToken:    deepseekProOffPeakOutputPrice, // $1.98 per MTok
@@ -1551,8 +1545,8 @@ func (s *BillingService) calculateTokenCost(resolved *ResolvedPricing, input Cos
 	// 内部已强制过）；分组/渠道自定义定价保留运营者配置，不强制覆盖官方价。
 	pricing = s.applyModelSpecificPricingPolicyEx(input.Model, pricing, resolved.Source == PricingSourceLiteLLM, pricingAt)
 
-	// DeepSeek 模型默认价卡按官方峰谷口径调整：高峰时段（01:00–04:00 与
-	// 06:00–10:00 UTC，仅工作日；北京时间周末全天低谷）按 2× 低谷价计费。
+	// DeepSeek 模型默认价卡按本站峰谷策略调整：每日高峰时段（01:00–04:00 与
+	// 06:00–10:00 UTC，不排除周末及节假日）按 2× 低谷价计费。
 	// 仅作用于默认价卡（Source=LiteLLM，无分组/渠道自定义定价）——分组/渠道
 	// 自定义定价保持运营者语义，不叠加。先克隆再乘，避免污染共享 fallbackPrices 指针。
 	if resolved.Source == PricingSourceLiteLLM && isDeepSeekModel(input.Model) {

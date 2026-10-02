@@ -688,8 +688,10 @@ func TestTryModelFilePricing_DeepSeekPeakPricing(t *testing.T) {
 					{"afternoon_peak_start", weekday(6, 0), 2},
 					{"afternoon_peak_last_minute", weekday(9, 59), 2},
 					{"afternoon_peak_end", weekday(10, 0), 1},
-					{"saturday", time.Date(2026, time.August, 22, 2, 0, 0, 0, time.UTC), 1},
-					{"sunday", time.Date(2026, time.August, 23, 7, 0, 0, 0, time.UTC), 1},
+					{"saturday", time.Date(2026, time.August, 22, 2, 0, 0, 0, time.UTC), 2},
+					{"sunday", time.Date(2026, time.August, 23, 7, 0, 0, 0, time.UTC), 2},
+					{"holiday_peak", time.Date(2026, time.October, 2, 7, 0, 0, 0, time.UTC), 2},
+					{"holiday_off_peak", time.Date(2026, time.October, 2, 10, 0, 0, 0, time.UTC), 1},
 				} {
 					t.Run(slot.name, func(t *testing.T) {
 						cost := tryModelFilePricing(bs, model.name, tokens, "", slot.at, true)
