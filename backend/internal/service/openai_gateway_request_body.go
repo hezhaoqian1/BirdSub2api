@@ -2577,6 +2577,8 @@ func supportsOpenAIReasoningEffortMax(model string) bool {
 	}
 }
 
+// validateGPT61SolCompatRequest runs after model mapping, before conversion can
+// discard unsupported explicit effort selections or disabled thinking.
 func validateGPT61SolCompatRequest(body []byte, model string) error {
 	if !openai.IsGPT61SolModelSpelling(model) {
 		return nil
