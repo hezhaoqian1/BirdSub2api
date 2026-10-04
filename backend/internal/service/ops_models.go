@@ -80,6 +80,8 @@ type OpsErrorLogDetail struct {
 	OpsErrorLog
 
 	ErrorBody string `json:"error_body"`
+	// RequestSnapshot 是报错请求的客户端输入快照（OpsRequestBodySnapshot JSON），未记录时为空。
+	RequestSnapshot string `json:"request_snapshot,omitempty"`
 
 	// Upstream context (optional)
 	UpstreamStatusCode   *int   `json:"upstream_status_code,omitempty"`

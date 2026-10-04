@@ -97,6 +97,10 @@ type OpsInsertErrorLogInput struct {
 
 	ErrorMessage string
 	ErrorBody    string
+	// RequestSnapshot 是客户端请求体快照（BuildOpsRequestBodySnapshot 的 JSON），
+	// 仅在用户可见的报错且开启 RecordRequestBodyOnError 时填充。
+	// 注意：与已移除的重放字段 request_body 不同，这里只存有界的首尾片段与摘要。
+	RequestSnapshot string
 
 	ErrorSource string
 	ErrorOwner  string

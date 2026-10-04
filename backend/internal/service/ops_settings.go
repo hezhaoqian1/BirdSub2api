@@ -379,6 +379,7 @@ func defaultOpsAdvancedSettings() *OpsAdvancedSettings {
 		IgnoreNoAvailableAccounts:       false, // Default to false - this is a real routing issue
 		IgnoreInvalidApiKeyErrors:       true,  // Legacy compatibility field; admission rejects are always excluded.
 		IgnoreInsufficientBalanceErrors: false, // 默认不忽略，余额不足可能需要关注
+		RecordRequestBodyOnError:        true,  // 默认记录报错请求的输入快照，便于排查
 		DisplayOpenAITokenStats:         false,
 		DisplayAlertEvents:              true,
 		AutoRefreshEnabled:              false,

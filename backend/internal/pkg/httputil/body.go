@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"compress/zlib"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -58,12 +59,47 @@ func (p *PrereadBody) Bytes() []byte {
 	return p.body
 }
 
+// RequestBodyObserver 接收 ReadRequestBodyWithPrealloc 读取（并解压）后的完整
+// 请求体。实现方只应保存切片引用，不得修改其内容。
+type RequestBodyObserver interface {
+	ObserveRequestBody(body []byte)
+}
+
+type requestBodyObserverKey struct{}
+
+// WithRequestBodyObserver 返回挂载了请求体观察者的 context。后续经
+// ReadRequestBodyWithPrealloc 读取该请求体时会通知观察者，用于在请求结束后
+// 回看客户端原始输入（例如报错时记录请求内容），而无需各 handler 单独传递。
+func WithRequestBodyObserver(ctx context.Context, observer RequestBodyObserver) context.Context {
+	if ctx == nil || observer == nil {
+		return ctx
+	}
+	return context.WithValue(ctx, requestBodyObserverKey{}, observer)
+}
+
+func notifyRequestBodyObserver(req *http.Request, body []byte) {
+	if req == nil {
+		return
+	}
+	if observer, ok := req.Context().Value(requestBodyObserverKey{}).(RequestBodyObserver); ok && observer != nil {
+		observer.ObserveRequestBody(body)
+	}
+}
+
 // ReadRequestBodyWithPrealloc reads request body with preallocated buffer based
 // on content length, transparently decoding any Content-Encoding the upstream
 // client used to compress the body (zstd, gzip, deflate).
 // 已由 PrereadBody 回填的请求体直接返回其完整切片（零拷贝），不检查内部
 // reader 是否已被消费——见 PrereadBody 的文档说明。
 func ReadRequestBodyWithPrealloc(req *http.Request) ([]byte, error) {
+	body, err := readRequestBodyWithPrealloc(req)
+	if err == nil {
+		notifyRequestBodyObserver(req, body)
+	}
+	return body, err
+}
+
+func readRequestBodyWithPrealloc(req *http.Request) ([]byte, error) {
 	if req == nil || req.Body == nil {
 		return nil, nil
 	}

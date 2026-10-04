@@ -795,10 +795,34 @@ export interface OpsAdvancedSettings {
   ignore_no_available_accounts: boolean
   ignore_invalid_api_key_errors: boolean
   ignore_insufficient_balance_errors: boolean
+  record_request_body_on_error: boolean
   display_openai_token_stats: boolean
   display_alert_events: boolean
   auto_refresh_enabled: boolean
   auto_refresh_interval_seconds: number
+}
+
+export interface OpsRequestSnapshotSummary {
+  size_bytes: number
+  format: 'json' | 'text' | 'binary'
+  model?: string
+  stream?: boolean
+  max_tokens?: number
+  message_count?: number
+  system_chars?: number
+  tool_count?: number
+  tool_names?: string[]
+  thinking?: unknown
+  reasoning?: unknown
+}
+
+export interface OpsRequestSnapshot {
+  summary: OpsRequestSnapshotSummary
+  truncated: boolean
+  body?: string
+  head?: string
+  tail?: string
+  omitted_bytes?: number
 }
 
 export interface OpsDataRetentionSettings {
@@ -942,6 +966,8 @@ export interface OpsErrorLog {
 
 export interface OpsErrorDetail extends OpsErrorLog {
   error_body: string
+  // 报错请求的客户端输入快照（JSON 字符串，见 OpsRequestSnapshot），未记录时缺省
+  request_snapshot?: string
 
   // Upstream context (optional; enriched by gateway services)
   upstream_status_code?: number | null

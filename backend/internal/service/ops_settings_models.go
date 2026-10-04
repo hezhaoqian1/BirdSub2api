@@ -106,10 +106,13 @@ type OpsAdvancedSettings struct {
 	// Deprecated compatibility field. It is always normalized to true.
 	IgnoreInvalidApiKeyErrors       bool `json:"ignore_invalid_api_key_errors"`
 	IgnoreInsufficientBalanceErrors bool `json:"ignore_insufficient_balance_errors"`
-	DisplayOpenAITokenStats         bool `json:"display_openai_token_stats"`
-	DisplayAlertEvents              bool `json:"display_alert_events"`
-	AutoRefreshEnabled              bool `json:"auto_refresh_enabled"`
-	AutoRefreshIntervalSec          int  `json:"auto_refresh_interval_seconds"`
+	// RecordRequestBodyOnError 开启后，用户可见的报错会附带记录其请求体快照
+	// （首尾各 32KB + 结构化摘要），便于排查与重放。默认开启。
+	RecordRequestBodyOnError bool `json:"record_request_body_on_error"`
+	DisplayOpenAITokenStats  bool `json:"display_openai_token_stats"`
+	DisplayAlertEvents       bool `json:"display_alert_events"`
+	AutoRefreshEnabled       bool `json:"auto_refresh_enabled"`
+	AutoRefreshIntervalSec   int  `json:"auto_refresh_interval_seconds"`
 }
 
 type OpsOpenAIAccountQuotaAutoPauseSettings struct {

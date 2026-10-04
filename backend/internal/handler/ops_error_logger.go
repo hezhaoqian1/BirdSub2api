@@ -19,6 +19,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
+	pkghttputil "github.com/Wei-Shaw/sub2api/internal/pkg/httputil"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/ip"
 	middleware2 "github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
@@ -31,6 +32,7 @@ const (
 	opsAccountIDKey              = "ops_account_id"
 	opsRoutingCapacityLimitedKey = "ops_routing_capacity_limited"
 	opsDedicatedErrorRecordedKey = "ops_dedicated_error_recorded"
+	opsRequestBodyHolderKey      = "ops_request_body_holder"
 
 	opsUpstreamModelKey = service.OpsUpstreamModelKey
 	opsRequestTypeKey   = "ops_request_type"
@@ -248,9 +250,20 @@ func enqueueOpsErrorLog(ops *service.OpsService, entry *service.OpsInsertErrorLo
 	}
 	queuedBytes := estimateOpsErrorLogJobBytes(entry)
 	if !reserveOpsErrorLogQueueBytes(queuedBytes) {
-		opsErrorLogDropped.Add(1)
-		maybeLogOpsErrorLogDrop()
-		return
+		if entry.RequestSnapshot == "" {
+			opsErrorLogDropped.Add(1)
+			maybeLogOpsErrorLogDrop()
+			return
+		}
+		// 请求体快照是可舍弃的附加信息：队列字节预算不足时先丢弃它，
+		// 保证错误记录本身仍能入队（故障期错误成批涌入时尤为重要）。
+		entry.RequestSnapshot = ""
+		queuedBytes = estimateOpsErrorLogJobBytes(entry)
+		if !reserveOpsErrorLogQueueBytes(queuedBytes) {
+			opsErrorLogDropped.Add(1)
+			maybeLogOpsErrorLogDrop()
+			return
+		}
 	}
 
 	select {
@@ -405,7 +418,7 @@ func estimateOpsErrorLogJobBytes(entry *service.OpsInsertErrorLogInput) int64 {
 		len(entry.InboundEndpoint) + len(entry.UpstreamEndpoint) +
 		len(entry.RequestedModel) + len(entry.UpstreamModel) + len(entry.UserAgent) +
 		len(entry.ErrorPhase) + len(entry.ErrorType) + len(entry.Severity) +
-		len(entry.ErrorMessage) + len(entry.ErrorBody) + len(entry.ErrorSource) +
+		len(entry.ErrorMessage) + len(entry.ErrorBody) + len(entry.RequestSnapshot) + len(entry.ErrorSource) +
 		len(entry.ErrorOwner) + len(entry.APIKeyPrefix)
 	if entry.UpstreamErrorMessage != nil {
 		size += len(*entry.UpstreamErrorMessage)
@@ -450,6 +463,64 @@ func setOpsRequestContext(c *gin.Context, model string, stream bool) {
 		ctx := context.WithValue(c.Request.Context(), ctxkey.Model, model)
 		c.Request = c.Request.WithContext(ctx)
 	}
+}
+
+// opsRequestBodyHolder 记录本次请求经 ReadRequestBodyWithPrealloc 读取的首个
+// （即客户端原始、已解压的）请求体引用，供报错时生成输入快照。只保存切片引用，
+// 不复制内容。
+type opsRequestBodyHolder struct {
+	body atomic.Pointer[[]byte]
+}
+
+func (h *opsRequestBodyHolder) ObserveRequestBody(body []byte) {
+	if h == nil || len(body) == 0 {
+		return
+	}
+	h.body.CompareAndSwap(nil, &body)
+}
+
+func (h *opsRequestBodyHolder) Bytes() []byte {
+	if h == nil {
+		return nil
+	}
+	if p := h.body.Load(); p != nil {
+		return *p
+	}
+	return nil
+}
+
+// installOpsRequestBodyHolder 在请求 context 上挂载请求体观察者；仅在运维监控
+// 可用且开启「报错时记录请求体」时安装，避免无谓的分配。
+func installOpsRequestBodyHolder(c *gin.Context, ops *service.OpsService) {
+	if c == nil || c.Request == nil || ops == nil {
+		return
+	}
+	if !ops.OpsAdvancedSettingsSnapshot().RecordRequestBodyOnError {
+		return
+	}
+	holder := &opsRequestBodyHolder{}
+	c.Set(opsRequestBodyHolderKey, holder)
+	c.Request = c.Request.WithContext(pkghttputil.WithRequestBodyObserver(c.Request.Context(), holder))
+}
+
+// applyOpsRequestBodySnapshot 为用户可见的报错附上请求体快照（首尾片段 + 摘要）。
+func applyOpsRequestBodySnapshot(c *gin.Context, ops *service.OpsService, entry *service.OpsInsertErrorLogInput) {
+	if c == nil || ops == nil || entry == nil {
+		return
+	}
+	if !ops.OpsAdvancedSettingsSnapshot().RecordRequestBodyOnError {
+		return
+	}
+	value, ok := c.Get(opsRequestBodyHolderKey)
+	if !ok {
+		return
+	}
+	holder, _ := value.(*opsRequestBodyHolder)
+	body := holder.Bytes()
+	if len(body) == 0 {
+		return
+	}
+	entry.RequestSnapshot = service.BuildOpsRequestBodySnapshot(body)
 }
 
 // setOpsEndpointContext stores upstream model and request type for ops error logging.
@@ -1091,6 +1162,7 @@ func OpsErrorLoggerMiddleware(ops *service.OpsService) gin.HandlerFunc {
 			releaseOpsCaptureWriter(w)
 		}()
 		c.Writer = w
+		installOpsRequestBodyHolder(c, ops)
 		c.Next()
 		w.finalizeCapture()
 
@@ -1279,6 +1351,7 @@ func OpsErrorLoggerMiddleware(ops *service.OpsService) gin.HandlerFunc {
 			entry.ClientIP = &clientIP
 		}
 
+		applyOpsRequestBodySnapshot(c, ops, entry)
 		enqueueOpsErrorLog(ops, entry)
 	}
 }
@@ -1584,6 +1657,7 @@ func logOpsStreamErrorValue(c *gin.Context, ops *service.OpsService, wireStatus 
 		entry.ClientIP = &clientIP
 	}
 
+	applyOpsRequestBodySnapshot(c, ops, entry)
 	enqueueOpsErrorLog(ops, entry)
 }
 

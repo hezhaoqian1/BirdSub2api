@@ -360,6 +360,29 @@ export default {
           upstream_detail: 'Upstream Detail',
           upstream_events: 'Upstream Events'
         },
+        requestSnapshot: {
+          title: 'Request Content',
+          copy: 'Copy',
+          copied: 'Request content copied',
+          truncatedHint: 'Large request body: only the first and last 32KB are kept, {omitted} omitted in between.',
+          omittedMarker: '/* …… {omitted} omitted …… */',
+          head: 'Head',
+          tail: 'Tail',
+          binaryHint: 'Binary request body (e.g. image upload): only the summary is recorded.',
+          fields: {
+            size: 'Size',
+            format: 'Format',
+            model: 'Model',
+            stream: 'Stream',
+            max_tokens: 'max_tokens',
+            message_count: 'Messages',
+            system_chars: 'System chars',
+            tool_count: 'Tools',
+            tool_names: 'Tool names',
+            thinking: 'Thinking',
+            reasoning: 'Reasoning'
+          }
+        },
         basicInfo: 'Basic Info',
         platform: 'Platform',
         model: 'Model',
@@ -743,6 +766,8 @@ export default {
         ignoreNoAvailableAccountsHint: 'When enabled, "No available accounts" errors will not be written to the error log (not recommended; usually a config issue).',
         ignoreInsufficientBalanceErrors: 'Ignore Insufficient Balance Errors',
         ignoreInsufficientBalanceErrorsHint: 'When enabled, insufficient account balance errors will not be written to the error log.',
+        recordRequestBodyOnError: 'Record request content on errors',
+        recordRequestBodyOnErrorHint: 'When enabled, failed user requests store their request body (first and last 32KB plus a summary), viewable and copyable in the error detail. Credential fields such as api_key and authorization_token are redacted.',
         autoRefresh: 'Auto Refresh',
         enableAutoRefresh: 'Enable auto refresh',
         enableAutoRefreshHint: 'Automatically refresh dashboard data at a fixed interval.',
