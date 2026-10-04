@@ -897,6 +897,9 @@ export default {
         apiKeyPassthrough: '自动透传（仅替换认证）',
         apiKeyPassthroughDesc:
           '仅对 Anthropic API Key 生效。开启后，messages/count_tokens 请求将透传上游并仅替换认证，保留计费/并发/审计及必要安全过滤；关闭即可回滚到现有兼容链路。',
+        forceUpstreamStream: '非流式请求强制上游流式',
+        forceUpstreamStreamDesc:
+          '需先开启自动透传。开启后，客户端的非流式请求会以流式方式请求上游，由网关拼成完整 JSON 再返回，客户端无感。用于上游挂在 Cloudflare 后、长输出非流式请求超过 120 秒报 524 的情况。',
         apiKeyAuthScheme: '上游认证方式',
         apiKeyAuthSchemeDesc: '选择转发到 Anthropic-compatible 上游时使用的 API Key 认证头。Ollama Cloud 使用 Authorization: Bearer。',
         apiKeyAuthSchemeXApiKey: 'x-api-key',
