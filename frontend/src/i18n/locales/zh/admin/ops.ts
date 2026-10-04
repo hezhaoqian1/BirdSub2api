@@ -360,6 +360,29 @@ export default {
           upstream_detail: '上游详情',
           upstream_events: '上游事件'
         },
+        requestSnapshot: {
+          title: '请求内容',
+          copy: '复制',
+          copied: '请求内容已复制',
+          truncatedHint: '请求体较大，仅保留开头和结尾各 32KB，中间省略 {omitted}。',
+          omittedMarker: '/* …… 中间省略 {omitted} …… */',
+          head: '开头',
+          tail: '结尾',
+          binaryHint: '二进制请求体（如图片上传），仅记录摘要，不保存内容。',
+          fields: {
+            size: '大小',
+            format: '格式',
+            model: '模型',
+            stream: '流式',
+            max_tokens: 'max_tokens',
+            message_count: '消息数',
+            system_chars: 'System 字符数',
+            tool_count: '工具数',
+            tool_names: '工具',
+            thinking: 'Thinking',
+            reasoning: 'Reasoning'
+          }
+        },
         basicInfo: '基本信息',
         platform: '平台',
         model: '模型',
@@ -744,6 +767,8 @@ export default {
         ignoreNoAvailableAccountsHint: '启用后，"No available accounts" 错误将不会写入错误日志（不推荐，这通常是配置问题）。',
         ignoreInsufficientBalanceErrors: '忽略余额不足错误',
         ignoreInsufficientBalanceErrorsHint: '启用后，账号余额不足（Insufficient balance）的错误将不会写入错误日志。',
+        recordRequestBodyOnError: '报错时记录请求内容',
+        recordRequestBodyOnErrorHint: '启用后，用户请求报错时会保存其请求体（开头和结尾各 32KB，并附摘要），可在错误详情中查看和复制。api_key、authorization_token 等凭据字段会被擦除。',
         autoRefresh: '自动刷新',
         enableAutoRefresh: '启用自动刷新',
         enableAutoRefreshHint: '自动刷新仪表板数据，启用后会定期拉取最新数据。',

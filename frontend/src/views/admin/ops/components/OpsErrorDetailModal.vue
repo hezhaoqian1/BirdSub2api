@@ -141,6 +141,49 @@
         </div>
       </div>
 
+      <!-- 报错请求的客户端输入快照 -->
+      <div v-if="requestSnapshot" class="rounded-xl bg-gray-50 p-6 dark:bg-dark-900" data-testid="error-detail-request-snapshot">
+        <div class="flex flex-wrap items-center justify-between gap-2">
+          <h3 class="text-sm font-black uppercase tracking-wider text-gray-900 dark:text-white">{{ t('admin.ops.errorDetail.requestSnapshot.title') }}</h3>
+          <button
+            v-if="requestSnapshotText"
+            type="button"
+            class="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs font-bold text-primary-700 hover:bg-primary-50 dark:text-primary-200 dark:hover:bg-dark-700"
+            data-testid="error-detail-request-snapshot-copy"
+            @click="copyRequestSnapshot"
+          >
+            <Icon name="copy" size="xs" :stroke-width="2" />
+            <span>{{ t('admin.ops.errorDetail.requestSnapshot.copy') }}</span>
+          </button>
+        </div>
+
+        <div class="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
+          <div v-for="row in requestSnapshotSummaryRows" :key="row.key">
+            <div class="text-xs font-bold uppercase tracking-wider text-gray-400">{{ t(`admin.ops.errorDetail.requestSnapshot.fields.${row.key}`) }}</div>
+            <div class="mt-1 break-words font-mono text-sm text-gray-900 dark:text-white">{{ row.value }}</div>
+          </div>
+        </div>
+
+        <p v-if="requestSnapshot.summary.format === 'binary'" class="mt-4 text-xs text-gray-500 dark:text-gray-400">
+          {{ t('admin.ops.errorDetail.requestSnapshot.binaryHint') }}
+        </p>
+        <template v-else>
+          <pre
+            v-if="requestSnapshot.body"
+            class="mt-4 max-h-[520px] overflow-auto rounded-xl border border-gray-200 bg-white p-4 text-xs text-gray-800 dark:border-dark-700 dark:bg-dark-800 dark:text-gray-100"
+          ><code>{{ prettyJSON(requestSnapshot.body) }}</code></pre>
+          <template v-else>
+            <p class="mt-4 text-xs text-amber-700 dark:text-amber-300">
+              {{ t('admin.ops.errorDetail.requestSnapshot.truncatedHint', { omitted: formatBytes(requestSnapshot.omitted_bytes || 0) }) }}
+            </p>
+            <div class="mt-3 text-xs font-bold uppercase tracking-wider text-gray-500 dark:text-gray-400">{{ t('admin.ops.errorDetail.requestSnapshot.head') }}</div>
+            <pre class="mt-2 max-h-[360px] overflow-auto whitespace-pre-wrap break-all rounded-xl border border-gray-200 bg-white p-4 text-xs text-gray-800 dark:border-dark-700 dark:bg-dark-800 dark:text-gray-100"><code>{{ requestSnapshot.head }}</code></pre>
+            <div class="mt-3 text-xs font-bold uppercase tracking-wider text-gray-500 dark:text-gray-400">{{ t('admin.ops.errorDetail.requestSnapshot.tail') }}</div>
+            <pre class="mt-2 max-h-[360px] overflow-auto whitespace-pre-wrap break-all rounded-xl border border-gray-200 bg-white p-4 text-xs text-gray-800 dark:border-dark-700 dark:bg-dark-800 dark:text-gray-100"><code>{{ requestSnapshot.tail }}</code></pre>
+          </template>
+        </template>
+      </div>
+
       <!-- Upstream errors list (only for request errors) -->
       <div v-if="showUpstreamList" class="rounded-xl bg-gray-50 p-6 dark:bg-dark-900">
         <div class="flex flex-wrap items-center justify-between gap-2">
@@ -231,8 +274,10 @@ import BaseDialog from '@/components/common/BaseDialog.vue'
 import Icon from '@/components/icons/Icon.vue'
 import { useAppStore } from '@/stores'
 import { opsAPI, type OpsErrorDetail } from '@/api/admin/ops'
-import { formatDateTime } from '@/utils/format'
+import { useClipboard } from '@/composables/useClipboard'
+import { formatBytes, formatDateTime } from '@/utils/format'
 import { resolveUpstreamPayload } from '../utils/errorDetailResponse'
+import { parseRequestSnapshot, requestSnapshotCopyText, requestSnapshotRows } from '../utils/requestSnapshot'
 
 interface Props {
   show: boolean
@@ -251,6 +296,7 @@ const emit = defineEmits<Emits>()
 
 const { t } = useI18n()
 const appStore = useAppStore()
+const { copyToClipboard } = useClipboard()
 
 const loading = ref(false)
 const detail = ref<OpsErrorDetail | null>(null)
@@ -284,6 +330,29 @@ const diagnosticPayloadSections = computed(() => {
     return section.value && all.findIndex(candidate => candidate.value === section.value) === index
   })
 })
+
+const requestSnapshot = computed(() => parseRequestSnapshot(detail.value?.request_snapshot))
+
+const requestSnapshotSummaryRows = computed(() => {
+  const snapshot = requestSnapshot.value
+  if (!snapshot) return []
+  return requestSnapshotRows(
+    snapshot,
+    bytes => formatBytes(bytes),
+    value => (value ? t('common.yes') : t('common.no'))
+  )
+})
+
+const requestSnapshotText = computed(() => {
+  const snapshot = requestSnapshot.value
+  if (!snapshot) return ''
+  const marker = t('admin.ops.errorDetail.requestSnapshot.omittedMarker', { omitted: formatBytes(snapshot.omitted_bytes || 0) })
+  return requestSnapshotCopyText(snapshot, marker)
+})
+
+async function copyRequestSnapshot() {
+  await copyToClipboard(requestSnapshotText.value, t('admin.ops.errorDetail.requestSnapshot.copied'))
+}
 
 function meaningfulPayload(candidate: unknown): string {
   const value = String(candidate || '').trim()
