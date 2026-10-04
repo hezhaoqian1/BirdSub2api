@@ -2341,6 +2341,18 @@ func (a *Account) IsAnthropicAPIKeyPassthroughEnabled() bool {
 	return ok && enabled
 }
 
+// IsAnthropicForceUpstreamStreamEnabled 返回 Anthropic API Key 透传账号是否对
+// 非流式请求强制以流式向上游发起（网关聚合回完整 JSON）。用于规避
+// 「缓冲式非流式上游 + Cloudflare 120s origin 读超时」导致的大输出 524。
+// 仅在透传分支生效。字段：accounts.extra.anthropic_force_upstream_stream。
+func (a *Account) IsAnthropicForceUpstreamStreamEnabled() bool {
+	if !a.IsAnthropicAPIKeyPassthroughEnabled() {
+		return false
+	}
+	enabled, ok := a.Extra["anthropic_force_upstream_stream"].(bool)
+	return ok && enabled
+}
+
 // WebSearch 模拟三态常量
 const (
 	WebSearchModeDefault  = "default"  // 跟随渠道配置

@@ -78,6 +78,20 @@ func (s *GatewayService) forwardAnthropicAPIKeyPassthroughWithInput(
 	if c != nil {
 		c.Set("anthropic_passthrough", true)
 	}
+
+	// 非流式客户端请求是否强制以流式向上游发起并在网关聚合回完整 JSON。
+	// 用于规避「缓冲式非流式上游 + Cloudflare 120s origin 读超时」的 524。
+	// 账号级开关（accounts.extra.anthropic_force_upstream_stream）或全局配置任一开启即生效。
+	forceUpstreamStream := !input.RequestStream &&
+		(account.IsAnthropicForceUpstreamStreamEnabled() ||
+			(s.cfg != nil && s.cfg.Gateway.AnthropicForceUpstreamStream))
+	// 向上游发送的 stream 标志：客户端本就流式，或启用了强制上游流式。
+	streamToUpstream := input.RequestStream || forceUpstreamStream
+	if forceUpstreamStream {
+		logger.LegacyPrintf("service.gateway",
+			"[Anthropic 自动透传] 非流式请求启用强制上游流式聚合: account=%d name=%s model=%s",
+			account.ID, account.Name, input.RequestModel)
+	}
 	// Pre-filter: strip empty text blocks (including nested in tool_result) to prevent upstream 400.
 	input.Body = StripEmptyTextBlocks(input.Body)
 	// Pre-filter: strip web-search history blocks the upstream cannot accept
@@ -85,6 +99,14 @@ func (s *GatewayService) forwardAnthropicAPIKeyPassthroughWithInput(
 	// passback-required third-party upstreams such as GLM/Kimi/DeepSeek,
 	// which reject server_tool_use with 400). input.RequestModel 已是映射后的模型 ID。
 	input.Body = FilterWebSearchHistoryBlocks(input.Body, input.RequestModel)
+	// 强制上游流式：把 wire body 的 stream 改写为 true（客户端本就流式时字段已存在，
+	// 此处仅在客户端 stream:false 且启用强制时生效）。改写在 ParsedRequest 同步之前，
+	// 保证 usage hash 与实际发送的 wire body 一致。
+	if forceUpstreamStream && !gjson.GetBytes(input.Body, "stream").Bool() {
+		if patched, err := sjson.SetBytes(input.Body, "stream", true); err == nil {
+			input.Body = patched
+		}
+	}
 	if input.Parsed != nil {
 		// 透传分支也会改写实际 wire body，成功 usage hash 依赖这里同步当前 body。
 		if err := input.Parsed.ReplaceBody(input.Body); err != nil {
@@ -95,7 +117,7 @@ func (s *GatewayService) forwardAnthropicAPIKeyPassthroughWithInput(
 	var resp *http.Response
 	retryStart := time.Now()
 	for attempt := 1; attempt <= maxRetryAttempts; attempt++ {
-		upstreamCtx, releaseUpstreamCtx := detachStreamUpstreamContext(ctx, input.RequestStream)
+		upstreamCtx, releaseUpstreamCtx := detachStreamUpstreamContext(ctx, streamToUpstream)
 		upstreamReq, wireBody, err := s.buildUpstreamRequestAnthropicAPIKeyPassthrough(upstreamCtx, c, account, input.Body, token)
 		releaseUpstreamCtx()
 		if err != nil {
@@ -266,7 +288,18 @@ func (s *GatewayService) forwardAnthropicAPIKeyPassthroughWithInput(
 		usage = streamResult.usage
 		firstTokenMs = streamResult.firstTokenMs
 		clientDisconnect = streamResult.clientDisconnect
+	} else if forceUpstreamStream && responseIsEventStream(resp) {
+		// 客户端非流式，但我们以流式取回上游：聚合成完整 JSON 再整体返回客户端。
+		usage, err = s.handleForcedUpstreamStreamAggregationAnthropicAPIKeyPassthrough(ctx, resp, c, account, input.RequestModel)
+		if err != nil {
+			var evErr *anthropicStreamEventError
+			if errors.As(err, &evErr) {
+				return s.handleForcedStreamEventErrorAnthropicAPIKeyPassthrough(ctx, c, account, resp, evErr, input.RequestModel)
+			}
+			return nil, err
+		}
 	} else {
+		// 普通非流式；若启用了强制上游流式但上游忽略 stream 返回了 JSON，也走这里兜底。
 		usage, err = s.handleNonStreamingResponseAnthropicAPIKeyPassthrough(ctx, resp, c, account)
 		if err != nil {
 			return nil, err

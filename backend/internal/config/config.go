@@ -1089,6 +1089,14 @@ type GatewayConfig struct {
 	// MaxLineSize: 上游 SSE 单行最大字节数（0使用默认值）
 	MaxLineSize int `mapstructure:"max_line_size"`
 
+	// AnthropicForceUpstreamStream: 开启后，Anthropic API Key 透传分支在客户端
+	// 以非流式（stream:false）请求时，仍然以流式（stream:true）向上游发起请求，
+	// 网关消费上游 SSE 并聚合成一个完整的 Messages JSON 再整体返回给客户端。
+	// 用于规避“缓冲式非流式上游 + 其 Cloudflare 120s origin 读超时”导致的大输出
+	// 524：流式链路全程有数据流动，不会触发该超时。客户端无感（仍收到完整 JSON）。
+	// 默认 false（不改变既有行为，opt-in）。
+	AnthropicForceUpstreamStream bool `mapstructure:"anthropic_force_upstream_stream"`
+
 	// 是否记录上游错误响应体摘要（避免输出请求内容）
 	LogUpstreamErrorBody bool `mapstructure:"log_upstream_error_body"`
 	// 上游错误响应体记录最大字节数（超过会截断）
@@ -2544,6 +2552,7 @@ func setDefaults() {
 	viper.SetDefault("gateway.image_stream_data_interval_timeout", 900)
 	viper.SetDefault("gateway.image_stream_keepalive_interval", 10)
 	viper.SetDefault("gateway.image_nonstream_keepalive_interval", 0)
+	viper.SetDefault("gateway.anthropic_force_upstream_stream", false)
 	viper.SetDefault("gateway.max_line_size", 500*1024*1024)
 	viper.SetDefault("gateway.scheduling.sticky_session_max_waiting", 3)
 	viper.SetDefault("gateway.scheduling.sticky_session_wait_timeout", 120*time.Second)

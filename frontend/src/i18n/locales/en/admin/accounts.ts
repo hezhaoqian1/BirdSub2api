@@ -789,6 +789,9 @@ export default {
         apiKeyPassthrough: 'Auto passthrough (auth only)',
         apiKeyPassthroughDesc:
           'Only applies to Anthropic API Key accounts. When enabled, messages/count_tokens are forwarded in passthrough mode with auth replacement only, while billing/concurrency/audit and safety filtering are preserved. Disable to roll back immediately.',
+        forceUpstreamStream: 'Force upstream streaming for non-stream requests',
+        forceUpstreamStreamDesc:
+          'Requires auto passthrough. When enabled, non-streaming client requests are sent upstream as streaming and the gateway assembles the full JSON response, transparently to the client. Use when the upstream sits behind Cloudflare and long non-streaming responses fail with 524 after 120s.',
         apiKeyAuthScheme: 'Upstream auth scheme',
         apiKeyAuthSchemeDesc: 'Choose the API key auth header used when forwarding to an Anthropic-compatible upstream. Ollama Cloud uses Authorization: Bearer.',
         apiKeyAuthSchemeXApiKey: 'x-api-key',
