@@ -38,18 +38,6 @@ func newSnapshotTestRouter(ops *service.OpsService, status int) *gin.Engine {
 	return router
 }
 
-// newSnapshotTestOps 返回一个 OpsService，并按 enabled 设置「报错时记录请求内容」。
-func newSnapshotTestOps(t *testing.T, enabled bool) *service.OpsService {
-	t.Helper()
-	ops := service.NewOpsService(nil, &ingressRejectSettingRepo{}, nil, nil, nil, nil, nil, nil, nil, nil, nil)
-	cfg, err := ops.GetOpsAdvancedSettings(context.Background())
-	require.NoError(t, err)
-	cfg.RecordRequestBodyOnError = enabled
-	_, err = ops.UpdateOpsAdvancedSettings(context.Background(), cfg)
-	require.NoError(t, err)
-	return ops
-}
-
 func serveSnapshotTestRequest(router *gin.Engine) *httptest.ResponseRecorder {
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(snapshotTestRequestBody))
@@ -60,7 +48,7 @@ func serveSnapshotTestRequest(router *gin.Engine) *httptest.ResponseRecorder {
 
 func TestOpsErrorLogger_RecordsRequestSnapshotOnError(t *testing.T) {
 	setupOpsErrorLogTestQueue(t, 4)
-	ops := newSnapshotTestOps(t, true)
+	ops := service.NewOpsService(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 
 	rec := serveSnapshotTestRequest(newSnapshotTestRouter(ops, http.StatusBadGateway))
 	require.Equal(t, http.StatusBadGateway, rec.Code)
@@ -75,23 +63,16 @@ func TestOpsErrorLogger_RecordsRequestSnapshotOnError(t *testing.T) {
 	require.EqualValues(t, 20000, *snap.Summary.MaxTokens)
 }
 
-func TestOpsErrorLogger_NoRequestSnapshotByDefault(t *testing.T) {
-	setupOpsErrorLogTestQueue(t, 4)
-	// 默认配置：未开启「报错时记录请求内容」。
-	ops := service.NewOpsService(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
-	cfg, err := ops.GetOpsAdvancedSettings(context.Background())
-	require.NoError(t, err)
-	require.False(t, cfg.RecordRequestBodyOnError, "recording must default to off")
-
-	serveSnapshotTestRequest(newSnapshotTestRouter(ops, http.StatusBadGateway))
-	require.Equal(t, int64(1), OpsErrorLogQueueLength())
-	job := <-opsErrorLogQueue
-	require.Empty(t, job.entry.RequestSnapshot)
-}
-
 func TestOpsErrorLogger_NoRequestSnapshotWhenDisabled(t *testing.T) {
 	setupOpsErrorLogTestQueue(t, 4)
-	ops := newSnapshotTestOps(t, false)
+	settings := &ingressRejectSettingRepo{}
+	ops := service.NewOpsService(nil, settings, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	cfg, err := ops.GetOpsAdvancedSettings(context.Background())
+	require.NoError(t, err)
+	require.True(t, cfg.RecordRequestBodyOnError, "recording must default to on")
+	cfg.RecordRequestBodyOnError = false
+	_, err = ops.UpdateOpsAdvancedSettings(context.Background(), cfg)
+	require.NoError(t, err)
 
 	serveSnapshotTestRequest(newSnapshotTestRouter(ops, http.StatusBadGateway))
 	require.Equal(t, int64(1), OpsErrorLogQueueLength())
@@ -101,7 +82,7 @@ func TestOpsErrorLogger_NoRequestSnapshotWhenDisabled(t *testing.T) {
 
 func TestOpsErrorLogger_NoRequestSnapshotOnSuccess(t *testing.T) {
 	setupOpsErrorLogTestQueue(t, 4)
-	ops := newSnapshotTestOps(t, true)
+	ops := service.NewOpsService(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 
 	rec := serveSnapshotTestRequest(newSnapshotTestRouter(ops, http.StatusOK))
 	require.Equal(t, http.StatusOK, rec.Code)
