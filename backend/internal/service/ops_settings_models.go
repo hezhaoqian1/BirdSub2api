@@ -107,7 +107,8 @@ type OpsAdvancedSettings struct {
 	IgnoreInvalidApiKeyErrors       bool `json:"ignore_invalid_api_key_errors"`
 	IgnoreInsufficientBalanceErrors bool `json:"ignore_insufficient_balance_errors"`
 	// RecordRequestBodyOnError 开启后，用户可见的报错会附带记录其请求体快照
-	// （首尾各 32KB + 结构化摘要），便于排查与重放。默认开启。
+	// （首尾各 32KB + 结构化摘要），便于排查与重放。默认关闭，需要排查时在
+	// 运维设置中开启（快照会占用数据库空间）。
 	RecordRequestBodyOnError bool `json:"record_request_body_on_error"`
 	DisplayOpenAITokenStats  bool `json:"display_openai_token_stats"`
 	DisplayAlertEvents       bool `json:"display_alert_events"`
