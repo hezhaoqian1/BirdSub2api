@@ -130,6 +130,13 @@
                         >{{ redeemResult.new_concurrency }} {{ t('redeem.requests') }}</span
                       >
                     </p>
+                    <p
+                      v-if="redeemResult.notes"
+                      data-test="redeem-result-notes"
+                      class="whitespace-pre-line break-words"
+                    >
+                      {{ t('redeem.notes') }}: {{ redeemResult.notes }}
+                    </p>
                   </div>
                 </div>
               </div>
@@ -402,6 +409,7 @@ const redeemResult = ref<{
   new_concurrency?: number
   group_name?: string
   validity_days?: number
+  notes?: string
 } | null>(null)
 const errorMessage = ref('')
 

@@ -1883,6 +1883,7 @@ export interface GenerateRedeemCodesRequest {
   validity_days?: number // 订阅类型专用
   expires_at?: string | null
   expires_in_days?: number
+  notes?: string // 兑换后对用户可见
 }
 
 export interface BatchUpdateRedeemCodeFields {

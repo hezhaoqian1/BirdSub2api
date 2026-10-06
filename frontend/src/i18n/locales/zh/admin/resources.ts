@@ -287,7 +287,9 @@ export default {
         notes: '备注',
         group: '分组'
       },
-      batchNotesPlaceholder: '输入新的备注，留空可清空备注',
+      batchNotesPlaceholder: '输入新的备注（用户兑换后可见），留空可清空备注',
+      generateNotes: '备注（兑换后用户可见）',
+      generateNotesPlaceholder: '选填，用户兑换后会在兑换页面看到这段备注',
       clearGroup: '清空分组',
       deleteAllUnused: '删除全部未使用',
       deleteCodeConfirm: '确定要删除此兑换码吗？此操作无法撤销。',

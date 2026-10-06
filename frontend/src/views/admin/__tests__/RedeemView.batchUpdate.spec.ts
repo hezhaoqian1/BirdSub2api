@@ -3,9 +3,10 @@ import { flushPromises, mount } from '@vue/test-utils'
 
 import RedeemView from '../RedeemView.vue'
 
-const { listRedeemCodes, batchUpdateRedeemCodes, getAllGroups, showSuccess, showError, showInfo } =
+const { listRedeemCodes, generateRedeemCodes, batchUpdateRedeemCodes, getAllGroups, showSuccess, showError, showInfo } =
   vi.hoisted(() => ({
     listRedeemCodes: vi.fn(),
+    generateRedeemCodes: vi.fn(),
     batchUpdateRedeemCodes: vi.fn(),
     getAllGroups: vi.fn(),
     showSuccess: vi.fn(),
@@ -17,7 +18,7 @@ vi.mock('@/api/admin', () => ({
   adminAPI: {
     redeem: {
       list: listRedeemCodes,
-      generate: vi.fn(),
+      generate: generateRedeemCodes,
       delete: vi.fn(),
       batchDelete: vi.fn(),
       batchUpdate: batchUpdateRedeemCodes,
@@ -105,6 +106,7 @@ describe('admin RedeemView batch update', () => {
     document.body.innerHTML = ''
 
     listRedeemCodes.mockReset()
+    generateRedeemCodes.mockReset()
     batchUpdateRedeemCodes.mockReset()
     getAllGroups.mockReset()
     showSuccess.mockReset()
@@ -145,8 +147,8 @@ describe('admin RedeemView batch update', () => {
     getAllGroups.mockResolvedValue([])
   })
 
-  it('submits only checked fields for selected redeem codes', async () => {
-    const wrapper = mount(RedeemView, {
+  const mountView = () =>
+    mount(RedeemView, {
       attachTo: document.body,
       global: {
         stubs: {
@@ -166,6 +168,9 @@ describe('admin RedeemView batch update', () => {
       }
     })
 
+  it('submits only checked fields for selected redeem codes', async () => {
+    const wrapper = mountView()
+
     await flushPromises()
     await wrapper.findAll('[data-test="select-code"]')[0].setValue(true)
     await wrapper.get('[data-test="batch-update-open"]').trigger('click')
@@ -183,5 +188,19 @@ describe('admin RedeemView batch update', () => {
       notes: 'maintenance'
     })
     expect(showSuccess).toHaveBeenCalledWith('admin.redeem.batchUpdateSuccess')
+  })
+
+  it('sends the user-visible note when generating codes', async () => {
+    generateRedeemCodes.mockResolvedValue([])
+    const wrapper = mountView()
+    await flushPromises()
+
+    const openButton = wrapper.findAll('button').find((b) => b.text() === 'admin.redeem.generateCodes')
+    await openButton!.trigger('click')
+    await wrapper.get('[data-test="generate-notes-input"]').setValue('进群福利')
+    await wrapper.get('[data-test="generate-notes-input"]').element.closest('form')!.dispatchEvent(new Event('submit'))
+    await flushPromises()
+
+    expect(generateRedeemCodes).toHaveBeenCalledWith(1, 'balance', 10, undefined, undefined, undefined, '进群福利')
   })
 })

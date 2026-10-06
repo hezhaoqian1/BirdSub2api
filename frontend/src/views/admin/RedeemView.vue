@@ -87,7 +87,7 @@
             />
           </template>
 
-          <template #cell-code="{ value }">
+          <template #cell-code="{ value, row }">
             <div class="flex items-center space-x-2">
               <code class="font-mono text-sm text-gray-900 dark:text-gray-100">{{ value }}</code>
               <button
@@ -111,6 +111,13 @@
                 </svg>
               </button>
             </div>
+            <p
+              v-if="row.notes"
+              class="mt-0.5 max-w-[240px] truncate text-xs text-gray-500 dark:text-dark-400"
+              :title="row.notes"
+            >
+              {{ row.notes }}
+            </p>
           </template>
 
           <template #cell-type="{ value }">
@@ -395,6 +402,17 @@
                 required
                 class="input"
               />
+            </div>
+            <div>
+              <label class="input-label">{{ t('admin.redeem.generateNotes') }}</label>
+              <textarea
+                data-test="generate-notes-input"
+                v-model="generateForm.notes"
+                rows="2"
+                maxlength="500"
+                class="input"
+                :placeholder="t('admin.redeem.generateNotesPlaceholder')"
+              ></textarea>
             </div>
             <div class="flex justify-end gap-3 pt-2">
               <button type="button" @click="showGenerateDialog = false" class="btn btn-secondary">
@@ -842,7 +860,8 @@ const generateForm = reactive({
   group_id: null as number | null,
   validity_days: 30,
   expiry_option: 'never' as RedeemCodeExpiryOption,
-  custom_expiry_days: 7
+  custom_expiry_days: 7,
+  notes: ''
 })
 
 // 监听类型变化，邀请码类型时自动设置 value 为 0
@@ -1046,7 +1065,8 @@ const handleGenerateCodes = async () => {
       generateForm.value,
       generateForm.type === 'subscription' ? generateForm.group_id : undefined,
       generateForm.type === 'subscription' ? generateForm.validity_days : undefined,
-      expiresInDays
+      expiresInDays,
+      generateForm.notes
     )
     showGenerateDialog.value = false
     generatedCodes.value = result
@@ -1056,6 +1076,7 @@ const handleGenerateCodes = async () => {
     generateForm.validity_days = 30
     generateForm.expiry_option = 'never'
     generateForm.custom_expiry_days = 7
+    generateForm.notes = ''
     loadCodes()
   } catch (error: any) {
     appStore.showError(error.response?.data?.detail || t('admin.redeem.failedToGenerate'))

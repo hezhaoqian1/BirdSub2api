@@ -778,6 +778,7 @@ export default {
     concurrentRequests: '并发请求',
     newBalance: '新余额',
     newConcurrency: '新并发数',
+    notes: '备注',
     aboutCodes: '关于兑换码',
     codeRule1: '每个兑换码只能使用一次',
     codeRule2: '兑换码可以增加余额、并发数或试用权限',

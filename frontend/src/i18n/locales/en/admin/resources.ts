@@ -280,7 +280,9 @@ export default {
         notes: 'Notes',
         group: 'Group'
       },
-      batchNotesPlaceholder: 'Enter the new note, or leave blank to clear it',
+      batchNotesPlaceholder: 'Enter the new note (visible to the user after redemption), or leave blank to clear it',
+      generateNotes: 'Note (visible to the user after redemption)',
+      generateNotesPlaceholder: 'Optional. Shown to the user on the redeem page after redemption',
       clearGroup: 'Clear group',
       deleteAllUnused: 'Delete All Unused Codes',
       deleteCode: 'Delete Redeem Code',
