@@ -110,6 +110,30 @@ describe('AnnouncementPopup', () => {
     wrapper.unmount()
   })
 
+  it('copies inline code on click but leaves code blocks alone', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true })
+    vi.stubGlobal('isSecureContext', true)
+
+    const wrapper = mount(AnnouncementPopup, {
+      props: {
+        announcement: { ...announcement, content: '群号：`716704895`\n\n```\nblock code\n```' },
+        preview: true,
+      },
+    })
+    await wrapper.vm.$nextTick()
+
+    document.body.querySelector<HTMLElement>('.markdown-body p > code')?.click()
+    document.body.querySelector<HTMLElement>('.markdown-body pre code')?.click()
+    await Promise.resolve()
+
+    expect(writeText).toHaveBeenCalledTimes(1)
+    expect(writeText).toHaveBeenCalledWith('716704895')
+
+    wrapper.unmount()
+    vi.unstubAllGlobals()
+  })
+
   it('keeps the existing user popup dismissal behavior', async () => {
     const store = useAnnouncementStore()
     store.currentPopup = announcement

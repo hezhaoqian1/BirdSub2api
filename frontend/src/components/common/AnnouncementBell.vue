@@ -268,6 +268,7 @@
                   <div
                     class="markdown-body prose prose-sm max-w-none dark:prose-invert"
                     v-html="renderMarkdown(selectedAnnouncement.content)"
+                    @click="handleCopyableCodeClick"
                   ></div>
                 </div>
               </div>
@@ -322,11 +323,13 @@ import { useAnnouncementStore } from '@/stores/announcements'
 import { formatRelativeTime, formatRelativeWithDateTime } from '@/utils/format'
 import type { UserAnnouncement } from '@/types'
 import Icon from '@/components/icons/Icon.vue'
+import { useCopyableCode } from '@/composables/useCopyableCode'
 import '@/styles/announcement-markdown.css'
 
 const { t } = useI18n()
 const appStore = useAppStore()
 const announcementStore = useAnnouncementStore()
+const { handleCopyableCodeClick } = useCopyableCode()
 
 // Configure marked
 marked.setOptions({

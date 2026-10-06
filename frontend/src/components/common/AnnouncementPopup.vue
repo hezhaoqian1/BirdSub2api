@@ -56,6 +56,7 @@
                 <div
                   class="markdown-body prose prose-sm max-w-none dark:prose-invert"
                   v-html="renderedContent"
+                  @click="handleCopyableCodeClick"
                 ></div>
               </div>
             </div>
@@ -95,6 +96,7 @@ import DOMPurify from 'dompurify'
 import { useAnnouncementStore } from '@/stores/announcements'
 import { formatRelativeWithDateTime } from '@/utils/format'
 import type { Announcement, UserAnnouncement } from '@/types'
+import { useCopyableCode } from '@/composables/useCopyableCode'
 import '@/styles/announcement-markdown.css'
 
 type PreviewAnnouncement = Pick<Announcement | UserAnnouncement, 'title' | 'content' | 'created_at'>
@@ -113,6 +115,7 @@ const emit = defineEmits<{
 
 const { t } = useI18n()
 const announcementStore = useAnnouncementStore()
+const { handleCopyableCodeClick } = useCopyableCode()
 const displayedAnnouncement = computed(() => (
   props.preview ? props.announcement : announcementStore.currentPopup
 ))
