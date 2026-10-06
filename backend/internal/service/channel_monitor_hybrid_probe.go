@@ -63,7 +63,7 @@ func runHybridProbe(ctx context.Context, monitor *ChannelMonitor, model string, 
 		point.Detail = "探测模板无效"
 		return point
 	}
-	path := adapter.buildPath(model)
+	path := monitorRequestPath(monitor.Provider, monitor.Endpoint, adapter, model)
 	if monitor.Provider == MonitorProviderGemini {
 		path = strings.Replace(path, ":generateContent", ":streamGenerateContent", 1) + "?alt=sse"
 	} else {
