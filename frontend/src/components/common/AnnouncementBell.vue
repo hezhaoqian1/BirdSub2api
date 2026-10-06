@@ -72,7 +72,7 @@
             <!-- Body -->
             <div class="max-h-[65vh] overflow-y-auto">
               <!-- Loading -->
-              <div v-if="loading" class="flex items-center justify-center py-16">
+              <div v-if="loading && announcements.length === 0" class="flex items-center justify-center py-16">
                 <div class="relative">
                   <div class="h-12 w-12 animate-spin rounded-full border-4 border-gray-200 border-t-blue-600 dark:border-dark-600 dark:border-t-blue-400"></div>
                   <div class="absolute inset-0 h-12 w-12 animate-pulse rounded-full border-4 border-blue-400/30"></div>
@@ -268,6 +268,7 @@
                   <div
                     class="markdown-body prose prose-sm max-w-none dark:prose-invert"
                     v-html="renderMarkdown(selectedAnnouncement.content)"
+                    @click="handleCopyableCodeClick"
                   ></div>
                 </div>
               </div>
@@ -322,11 +323,13 @@ import { useAnnouncementStore } from '@/stores/announcements'
 import { formatRelativeTime, formatRelativeWithDateTime } from '@/utils/format'
 import type { UserAnnouncement } from '@/types'
 import Icon from '@/components/icons/Icon.vue'
+import { useCopyableCode } from '@/composables/useCopyableCode'
 import '@/styles/announcement-markdown.css'
 
 const { t } = useI18n()
 const appStore = useAppStore()
 const announcementStore = useAnnouncementStore()
+const { handleCopyableCodeClick } = useCopyableCode()
 
 // Configure marked
 marked.setOptions({
@@ -352,6 +355,8 @@ function renderMarkdown(content: string): string {
 
 function openModal() {
   isModalOpen.value = true
+  // 打开时强制刷新，避免节流期内看不到新发布的公告
+  announcementStore.fetchAnnouncements(true)
 }
 
 function closeModal() {
