@@ -516,16 +516,14 @@ type RedeemCode struct {
 	GroupID      *int64 `json:"group_id"`
 	ValidityDays int    `json:"validity_days"`
 
-	// Notes is only populated for admin_balance/admin_concurrency types
-	// so users can see why they were charged or credited
+	// Notes 对兑换用户可见（管理员调整原因 / 兑换码备注），为空时不返回
 	Notes *string `json:"notes,omitempty"`
 
 	User  *User  `json:"user,omitempty"`
 	Group *Group `json:"group,omitempty"`
 }
 
-// AdminRedeemCode 是管理员接口使用的 redeem code DTO（包含 notes 等字段）。
-// 注意：普通用户接口不得返回 notes 等内部信息。
+// AdminRedeemCode 是管理员接口使用的 redeem code DTO（notes 始终返回，空串也保留）。
 type AdminRedeemCode struct {
 	RedeemCode
 

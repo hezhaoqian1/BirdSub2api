@@ -455,7 +455,7 @@ func TestAPIContracts(t *testing.T) {
 			name: "GET /api/v1/redeem/history",
 			setup: func(t *testing.T, deps *contractDeps) {
 				t.Helper()
-				// 普通用户兑换历史不应包含 notes 等内部字段。
+				// 兑换码备注对兑换用户可见。
 				deps.redeemRepo.SetByUser(1, []service.RedeemCode{
 					{
 						ID:        900,
@@ -465,7 +465,7 @@ func TestAPIContracts(t *testing.T) {
 						Status:    service.StatusUsed,
 						UsedBy:    ptr(int64(1)),
 						UsedAt:    ptr(deps.now),
-						Notes:     "internal-note",
+						Notes:     "进群福利",
 						CreatedAt: deps.now,
 					},
 				})
@@ -487,7 +487,8 @@ func TestAPIContracts(t *testing.T) {
 						"used_at": "2025-01-02T03:04:05Z",
 						"created_at": "2025-01-02T03:04:05Z",
 						"group_id": null,
-						"validity_days": 0
+						"validity_days": 0,
+						"notes": "进群福利"
 					}
 				]
 			}`,

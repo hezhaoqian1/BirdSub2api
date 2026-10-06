@@ -238,4 +238,13 @@ describe('RedeemView refresh after redemption', () => {
     expect(showWarning).not.toHaveBeenCalled()
     wrapper.unmount()
   })
+
+  it('shows the redeem code note after a successful redemption', async () => {
+    redeem.mockResolvedValue({ type: 'balance', value: 20, message: 'Code applied', notes: '进群福利，感谢支持' })
+
+    const wrapper = await submitCode()
+
+    expect(wrapper.get('[data-test="redeem-result-notes"]').text()).toContain('进群福利，感谢支持')
+    wrapper.unmount()
+  })
 })

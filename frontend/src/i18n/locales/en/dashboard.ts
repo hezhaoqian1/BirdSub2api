@@ -774,6 +774,7 @@ export default {
     concurrentRequests: 'concurrent requests',
     newBalance: 'New Balance',
     newConcurrency: 'New Concurrency',
+    notes: 'Note',
     aboutCodes: 'About Redeem Codes',
     codeRule1: 'Each code can only be used once',
     codeRule2: 'Codes may add balance, increase concurrency, or grant trial access',
