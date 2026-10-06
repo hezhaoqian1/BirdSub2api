@@ -72,7 +72,7 @@
             <!-- Body -->
             <div class="max-h-[65vh] overflow-y-auto">
               <!-- Loading -->
-              <div v-if="loading" class="flex items-center justify-center py-16">
+              <div v-if="loading && announcements.length === 0" class="flex items-center justify-center py-16">
                 <div class="relative">
                   <div class="h-12 w-12 animate-spin rounded-full border-4 border-gray-200 border-t-blue-600 dark:border-dark-600 dark:border-t-blue-400"></div>
                   <div class="absolute inset-0 h-12 w-12 animate-pulse rounded-full border-4 border-blue-400/30"></div>
@@ -355,6 +355,8 @@ function renderMarkdown(content: string): string {
 
 function openModal() {
   isModalOpen.value = true
+  // 打开时强制刷新，避免节流期内看不到新发布的公告
+  announcementStore.fetchAnnouncements(true)
 }
 
 function closeModal() {
