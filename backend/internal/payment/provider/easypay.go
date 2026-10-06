@@ -378,6 +378,28 @@ func (e *EasyPay) VerifyNotification(_ context.Context, rawBody string, _ map[st
 	for k := range values {
 		params[k] = values.Get(k)
 	}
+	// Reject request-only parameters. A genuine EasyPay asynchronous
+	// notification only ever carries fields the gateway itself emits (pid,
+	// trade_no, out_trade_no, type, name, money, trade_status, ...). It never
+	// echoes back the request-side return_url / notify_url.
+	//
+	// These fields matter for security, not just hygiene: in popup/submit.php
+	// mode we hand the browser a fully pkey-signed create-order URL, and
+	// easyPaySign concatenates key=value pairs without delimiting or encoding
+	// the values. An attacker-controlled return_url whose value ends in
+	// "&trade_status=TRADE_SUCCESS" therefore produces the exact same signed
+	// byte string whether that suffix is part of the return_url value or a
+	// standalone trade_status parameter — because "trade_status" is the only
+	// key that sorts between "return_url" and the following "type" key. That
+	// lets a create-order signature be re-partitioned into a forged
+	// "payment success" notification without knowing pkey. Refusing any
+	// notification that carries these request-only fields removes the only
+	// channel through which trade_status (or trade_no) can be smuggled.
+	for _, requestOnlyKey := range []string{"return_url", "notify_url"} {
+		if _, present := values[requestOnlyKey]; present {
+			return nil, fmt.Errorf("unexpected request-only parameter in notification: %s", requestOnlyKey)
+		}
+	}
 	sign := params["sign"]
 	if sign == "" {
 		return nil, fmt.Errorf("missing sign")

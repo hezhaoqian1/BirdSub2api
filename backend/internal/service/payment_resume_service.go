@@ -245,6 +245,14 @@ func CanonicalizeReturnURL(raw string, srcHost string, srcURL string) (string, e
 		return "", infraerrors.BadRequest("INVALID_RETURN_URL", "return_url must use http or https")
 	}
 	parsed.Fragment = ""
+	// Drop caller-supplied query parameters. The result page only needs the
+	// order_id / out_trade_no / resume_token / status that buildPaymentReturnURL
+	// adds server-side, while a caller-controlled query ends up inside the
+	// provider-signed return_url. For EasyPay that let a "trade_status=..." key
+	// sort to the tail of return_url and be smuggled out as a standalone
+	// notification parameter under the create-order signature (issue #7881).
+	parsed.RawQuery = ""
+	parsed.ForceQuery = false
 	if parsed.Path == "" {
 		parsed.Path = "/"
 	}
