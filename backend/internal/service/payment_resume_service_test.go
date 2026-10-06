@@ -86,8 +86,28 @@ func TestCanonicalizeReturnURL(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CanonicalizeReturnURL returned error: %v", err)
 	}
-	if got != "https://example.com/payment/result?b=2" {
-		t.Fatalf("CanonicalizeReturnURL = %q, want %q", got, "https://example.com/payment/result?b=2")
+	if got != "https://example.com/payment/result" {
+		t.Fatalf("CanonicalizeReturnURL = %q, want %q", got, "https://example.com/payment/result")
+	}
+}
+
+func TestCanonicalizeReturnURLStripsInjectedTradeStatus(t *testing.T) {
+	t.Parallel()
+
+	got, err := CanonicalizeReturnURL("https://example.com/payment/result?trade_status=TRADE_SUCCESS", "example.com", "")
+	if err != nil {
+		t.Fatalf("CanonicalizeReturnURL returned error: %v", err)
+	}
+	if got != "https://example.com/payment/result" {
+		t.Fatalf("CanonicalizeReturnURL = %q, want caller query stripped", got)
+	}
+
+	providerURL, err := buildProviderReturnURL("easypay", got, 42, "sub2_42", "")
+	if err != nil {
+		t.Fatalf("buildProviderReturnURL returned error: %v", err)
+	}
+	if strings.Contains(providerURL, "trade_status") {
+		t.Fatalf("provider return_url must not carry caller-injected trade_status: %q", providerURL)
 	}
 }
 
@@ -118,8 +138,8 @@ func TestCanonicalizeReturnURLAllowsConfiguredFrontendHost(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CanonicalizeReturnURL returned error: %v", err)
 	}
-	if got != "https://app.example.com/payment/result?from=checkout" {
-		t.Fatalf("CanonicalizeReturnURL = %q, want %q", got, "https://app.example.com/payment/result?from=checkout")
+	if got != "https://app.example.com/payment/result" {
+		t.Fatalf("CanonicalizeReturnURL = %q, want %q", got, "https://app.example.com/payment/result")
 	}
 }
 
