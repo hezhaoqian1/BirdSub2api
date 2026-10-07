@@ -36,8 +36,8 @@ const (
 	maxSameAccountRetries = 3
 	// sameAccountRetryDelay 同账号重试间隔
 	sameAccountRetryDelay = 500 * time.Millisecond
-	// maxRequestScopedRetryDelay 限制请求级瞬时错误的指数退避上限，避免高重试配置
-	// 将单次请求拖入分钟级等待。
+	// maxRequestScopedRetryDelay 限制同账号指数退避（请求级瞬时错误、上游服务端临时故障）
+	// 的单次间隔上限，避免高重试配置将单次请求拖入分钟级等待。
 	maxRequestScopedRetryDelay = 8 * time.Second
 	// singleAccountBackoffDelay 单账号分组 503 退避重试固定延时。
 	// Service 层在 SingleAccountRetry 模式下已做充分原地重试（最多 3 次、总等待 30s），
@@ -62,7 +62,8 @@ func sameAccountRetryDelayFor(failoverErr *service.UpstreamFailoverError, retryC
 	if failoverErr.SameAccountRetryDelay > 0 {
 		return failoverErr.SameAccountRetryDelay
 	}
-	if !failoverErr.RequestScopedTransient || retryCount <= 1 {
+	backoff := failoverErr.RequestScopedTransient || isUpstreamServerTransientStatus(failoverErr.StatusCode)
+	if !backoff || retryCount <= 1 {
 		return sameAccountRetryDelay
 	}
 
@@ -74,6 +75,22 @@ func sameAccountRetryDelayFor(failoverErr *service.UpstreamFailoverError, retryC
 		delay *= 2
 	}
 	return delay
+}
+
+// isUpstreamServerTransientStatus 报告上游是否以服务端临时故障拒绝了请求（过载、
+// 网关错误、源站超时等）。这类故障常以「一段时间内持续拒绝」的形式出现——例如中转
+// 站点在后端暂不可用时，会在十几秒到一分钟内对所有请求成段返回空 503——固定 0.5s 的
+// 同账号重试会全部落在同一个故障窗口里。只有账号在池模式下显式把这些状态码列入
+// pool_mode_retry_status_codes 时才会走到同账号重试，因此这里改为指数退避
+// （0.5s、1s、2s、4s、8s，之后封顶 8s），用重试次数换取跨过故障窗口的时间。
+func isUpstreamServerTransientStatus(statusCode int) bool {
+	switch statusCode {
+	case http.StatusInternalServerError, http.StatusBadGateway, http.StatusServiceUnavailable,
+		http.StatusGatewayTimeout, 520, 521, 522, 523, 524, 529:
+		return true
+	default:
+		return false
+	}
 }
 
 func sameAccountRetryAllowed(failoverErr *service.UpstreamFailoverError, retryCount, retryLimit int) bool {

@@ -63,6 +63,39 @@ func TestSameAccountRetryDelayFor(t *testing.T) {
 		err := &service.UpstreamFailoverError{SameAccountRetryDelay: 3 * time.Second}
 		require.Equal(t, 3*time.Second, sameAccountRetryDelayFor(err, 1))
 	})
+
+	t.Run("explicit delay wins over server transient backoff", func(t *testing.T) {
+		err := &service.UpstreamFailoverError{StatusCode: http.StatusServiceUnavailable, SameAccountRetryDelay: 3 * time.Second}
+		require.Equal(t, 3*time.Second, sameAccountRetryDelayFor(err, 6))
+	})
+}
+
+func TestSameAccountRetryDelayForUpstreamServerTransientBacksOff(t *testing.T) {
+	want := []time.Duration{
+		500 * time.Millisecond, time.Second, 2 * time.Second, 4 * time.Second,
+		8 * time.Second, 8 * time.Second, 8 * time.Second, 8 * time.Second,
+	}
+	for _, status := range []int{
+		http.StatusInternalServerError, http.StatusBadGateway, http.StatusServiceUnavailable,
+		http.StatusGatewayTimeout, 520, 524, 529,
+	} {
+		err := &service.UpstreamFailoverError{StatusCode: status, RetryableOnSameAccount: true}
+		var total time.Duration
+		for i, d := range want {
+			got := sameAccountRetryDelayFor(err, i+1)
+			require.Equalf(t, d, got, "status %d retry %d", status, i+1)
+			total += got
+		}
+		// 8 次重试累计约 39.5s，足以跨过中位数 ~11s、p90 ~34s 的上游拒单窗口。
+		require.Equal(t, 39500*time.Millisecond, total)
+	}
+}
+
+func TestSameAccountRetryDelayForClientAndAuthStatusesKeepFixedDelay(t *testing.T) {
+	for _, status := range []int{http.StatusUnauthorized, http.StatusForbidden, http.StatusTooManyRequests, http.StatusBadRequest} {
+		err := &service.UpstreamFailoverError{StatusCode: status, RetryableOnSameAccount: true}
+		require.Equalf(t, 500*time.Millisecond, sameAccountRetryDelayFor(err, 6), "status %d", status)
+	}
 }
 
 func TestSameAccountRetryAllowedUsesDeadlineInsteadOfPoolCount(t *testing.T) {
