@@ -36,6 +36,7 @@ func RegisterAdminRoutes(
 
 		// 仪表盘
 		registerDashboardRoutes(admin, h)
+		registerProfitRoutes(admin, h)
 
 		// 用户管理
 		registerUserManagementRoutes(admin, h)
@@ -294,6 +295,15 @@ func registerDashboardRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 		dashboard.POST("/api-keys-usage", h.Admin.Dashboard.GetBatchAPIKeysUsage)
 		dashboard.GET("/user-breakdown", h.Admin.Dashboard.GetUserBreakdown)
 		dashboard.POST("/aggregation/backfill", h.Admin.Dashboard.BackfillAggregation)
+	}
+}
+
+func registerProfitRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
+	profit := admin.Group("/profit")
+	{
+		profit.GET("/report", h.Admin.Profit.GetReport)
+		profit.GET("/cost-backfill/preview", h.Admin.Profit.PreviewCostBackfill)
+		profit.POST("/cost-backfill", h.Admin.Profit.ApplyCostBackfill)
 	}
 }
 
