@@ -698,6 +698,14 @@ func (s *BillingService) initFallbackPricing() {
 		CacheReadPricePerToken: 0.03e-6,
 		SupportsCacheBreakdown: false,
 	}
+	// GLM-5.3-Prime 为阿里云百炼优速模式（Prime），z.ai 未上架；新加坡站列表价约 $2.80/$8.80，缓存命中 $0.56，
+	// 恰为 glm-5.3 的 2 倍。若被 strings.Contains("glm-5.3") 抢走会按标准价少收一半。
+	s.fallbackPrices["glm-5.3-prime"] = &ModelPricing{
+		InputPricePerToken:     2.8e-6, // $2.80 per MTok
+		OutputPricePerToken:    8.8e-6, // $8.80 per MTok
+		CacheReadPricePerToken: 0.56e-6,
+		SupportsCacheBreakdown: false,
+	}
 	s.fallbackPrices["glm-5.3"] = &ModelPricing{
 		InputPricePerToken:     1.4e-6, // $1.40 per MTok
 		OutputPricePerToken:    4.4e-6, // $4.40 per MTok
@@ -1075,9 +1083,12 @@ func (s *BillingService) getFallbackPricing(model string) *ModelPricing {
 	// 智谱 GLM（z.ai 公开 SKU：glm-5.3 / glm-5.3-flash / glm-5.2 / glm-5.1 / glm-5 / glm-5-turbo / glm-4.7 / glm-4.6 / glm-4.5 等）
 	// 匹配顺序：先判别最高 tier，再依次降级。
 	// 注意：带小数点的型号必须排在裸 "glm-5" 之前，否则会被 strings.Contains 抢走；
-	// glm-5.3-flash 必须排在 glm-5.3 之前（前者包含后者子串）。
+	// glm-5.3-flash / glm-5.3-prime 必须排在 glm-5.3 之前（前者包含后者子串）。
 	if strings.Contains(modelLower, "glm-5.3-flash") || strings.Contains(modelLower, "glm-5.3flash") {
 		return s.fallbackPrices["glm-5.3-flash"]
+	}
+	if strings.Contains(modelLower, "glm-5.3-prime") || strings.Contains(modelLower, "glm-5.3prime") {
+		return s.fallbackPrices["glm-5.3-prime"]
 	}
 	if strings.Contains(modelLower, "glm-5.3") {
 		return s.fallbackPrices["glm-5.3"]
