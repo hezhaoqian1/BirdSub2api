@@ -16,7 +16,8 @@ import (
 func ResponsesToAnthropicRequest(req *ResponsesRequest) (*AnthropicRequest, error) {
 	isOpus55 := claude.IsOpus55(req.Model)
 	isSonnet55 := claude.IsSonnet55(req.Model)
-	system, messages, err := convertResponsesInputToAnthropic(req.Instructions, req.Input, isOpus55 || isSonnet55)
+	isHaiku55 := claude.IsHaiku55(req.Model)
+	system, messages, err := convertResponsesInputToAnthropic(req.Instructions, req.Input, isOpus55 || isSonnet55 || isHaiku55)
 	if err != nil {
 		return nil, err
 	}
@@ -54,6 +55,37 @@ func ResponsesToAnthropicRequest(req *ResponsesRequest) (*AnthropicRequest, erro
 			return nil, fmt.Errorf("convert tool_choice: %w", err)
 		}
 		out.ToolChoice = tc
+	}
+
+	// Haiku 5.5 is adaptive-only but, unlike the other 5.5 models, accepts
+	// forced tool use and thinking.type=disabled at effort high or below.
+	if isHaiku55 {
+		if req.Temperature != nil && req.TopP != nil {
+			return nil, fmt.Errorf("claude-haiku-5-5 does not accept temperature and top_p together")
+		}
+		if req.Temperature != nil && *req.Temperature != 1 {
+			return nil, fmt.Errorf("claude-haiku-5-5 does not support non-default temperature")
+		}
+		if req.TopP != nil && *req.TopP != 0.99 {
+			return nil, fmt.Errorf("claude-haiku-5-5 does not support non-default top_p")
+		}
+		effort := "medium"
+		if req.Reasoning != nil && req.Reasoning.Effort != "" {
+			effort = req.Reasoning.Effort
+		}
+		if effort == "none" {
+			out.Thinking = &AnthropicThinking{Type: "disabled"}
+			out.OutputConfig = &AnthropicOutputConfig{Effort: "low"}
+			return out, nil
+		}
+		switch effort {
+		case "low", "medium", "high", "xhigh", "max":
+		default:
+			return nil, fmt.Errorf("%s does not support reasoning effort %q; use none, low, medium, high, xhigh or max", req.Model, effort)
+		}
+		out.Thinking = &AnthropicThinking{Type: "adaptive"}
+		out.OutputConfig = &AnthropicOutputConfig{Effort: effort}
+		return out, nil
 	}
 
 	// The 5.5 models reject manual thinking and forced tool use. Sonnet 5.5
