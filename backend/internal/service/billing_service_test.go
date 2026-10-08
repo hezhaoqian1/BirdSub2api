@@ -193,6 +193,22 @@ func TestGetModelPricing_GLM52UsesOwnPrice(t *testing.T) {
 	require.InDelta(t, 0.26e-6, got.CacheReadPricePerToken, 1e-12)
 }
 
+// 回归:glm-5.3-prime 必须命中自己的兜底价,不能被 strings.Contains("glm-5.3") 抢成标准价。
+// 历史 bug:使用记录按 $1.40/$4.40 计费,比百炼 Prime 列表价 $2.80/$8.80 少收一半。
+func TestGetModelPricing_GLM53PrimeUsesOwnPrice(t *testing.T) {
+	svc := newTestBillingService()
+
+	for _, model := range []string{"glm-5.3-prime", "GLM-5.3-Prime"} {
+		got, err := svc.GetModelPricing(model)
+		require.NoError(t, err, model)
+		require.NotNil(t, got, model)
+
+		require.InDelta(t, 2.8e-6, got.InputPricePerToken, 1e-12, model)
+		require.InDelta(t, 8.8e-6, got.OutputPricePerToken, 1e-12, model)
+		require.InDelta(t, 0.56e-6, got.CacheReadPricePerToken, 1e-12, model)
+	}
+}
+
 func TestGetModelPricing_UnknownClaudeModelFallsBackToSonnet(t *testing.T) {
 	svc := newTestBillingService()
 
@@ -585,6 +601,13 @@ func TestGetFallbackPricing_FamilyMatching(t *testing.T) {
 			expectedInput:     0.15e-6,
 			expectedOutput:    floatPtr(0.5e-6),
 			expectedCacheRead: floatPtr(0.03e-6),
+		},
+		{
+			name:              "glm 5.3 prime",
+			model:             "glm-5.3-prime",
+			expectedInput:     2.8e-6,
+			expectedOutput:    floatPtr(8.8e-6),
+			expectedCacheRead: floatPtr(0.56e-6),
 		},
 		{
 			name:              "glm 5.2 flagship",
