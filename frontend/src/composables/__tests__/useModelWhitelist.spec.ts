@@ -71,6 +71,17 @@ describe('useModelWhitelist', () => {
     ]))
   })
 
+  it('Claude Haiku 5.5 出现在 Claude 模型列表并使用官方 ID 预设', () => {
+    expect(getModelsByPlatform('claude')).toContain('claude-haiku-5-5')
+    expect(getModelsByPlatform('antigravity')).not.toContain('claude-haiku-5-5')
+    expect(getPresetMappingsByPlatform('claude')).toEqual(expect.arrayContaining([
+      expect.objectContaining({ label: 'Haiku 5.5', from: 'claude-haiku-5-5', to: 'claude-haiku-5-5' })
+    ]))
+    expect(getPresetMappingsByPlatform('bedrock')).toEqual(expect.arrayContaining([
+      expect.objectContaining({ label: 'Haiku 5.5', from: 'claude-haiku-5-5', to: 'us.anthropic.claude-haiku-5-5' })
+    ]))
+  })
+
   it('xAI 模型列表包含 Grok 4.5 官方模型和别名', () => {
     const models = getModelsByPlatform('grok')
 

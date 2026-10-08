@@ -426,6 +426,21 @@ func (s *BillingService) initFallbackPricing() {
 		CacheCreation1hPrice:       4e-6,
 		SupportsCacheBreakdown:     true,
 	}
+	// Claude Haiku 5.5 is priced by prompt length: $0.10 / $0.50 per MTok up to
+	// 100K prompt tokens, and 5x on every input-side and output item above it
+	// ($0.50 / $2.50, cache read $0.05, 5m write $0.625, 1h write $1).
+	s.fallbackPrices["claude-haiku-5-5"] = &ModelPricing{
+		InputPricePerToken:          0.1e-6,
+		OutputPricePerToken:         0.5e-6,
+		CacheCreationPricePerToken:  0.125e-6,
+		CacheReadPricePerToken:      0.01e-6,
+		CacheCreation5mPrice:        0.125e-6,
+		CacheCreation1hPrice:        0.2e-6,
+		SupportsCacheBreakdown:      true,
+		LongContextInputThreshold:   100_000,
+		LongContextInputMultiplier:  5,
+		LongContextOutputMultiplier: 5,
+	}
 	// Claude Fable 5.x uses the same input/output and cache-write prices, while
 	// Fable 5.1 reduces cache reads from $1 to $0.25 per MTok.
 	s.fallbackPrices["claude-fable-5"] = &ModelPricing{
@@ -1006,6 +1021,10 @@ func (s *BillingService) getFallbackPricing(model string) *ModelPricing {
 	}
 	if claude.IsSonnet55(modelLower) {
 		return s.fallbackPrices["claude-sonnet-5-5"]
+	}
+	// 必须先于下方 "haiku" 子串兜底：否则会落到 claude-3-haiku 价卡。
+	if claude.IsHaiku55(modelLower) {
+		return s.fallbackPrices["claude-haiku-5-5"]
 	}
 	if strings.Contains(modelLower, "opus") {
 		// "opus-5" 必须先判：不能用裸 "5" 匹配，否则 claude-opus-4-5 会被误判。
@@ -1861,6 +1880,16 @@ func (s *BillingService) applyModelSpecificPricingPolicyEx(model string, pricing
 			cloned.OutputPricePerToken = deepseekFlashOffPeakOutputPrice
 			cloned.CacheReadPricePerToken = deepseekFlashOffPeakCacheRead
 		}
+		return &cloned
+	}
+	// Claude Haiku 5.5：远端价格表可能只有基础档价格而缺少 >100K 长上下文档，
+	// 默认价卡下补齐官方 5x 档位，避免长 prompt 按低档少收。
+	if forceDeepSeekRates && claude.IsHaiku55(model) && pricing.LongContextInputThreshold <= 0 {
+		cloned := *pricing
+		cloned.LongContextInputThreshold = 100_000
+		cloned.LongContextThresholdInclusive = false
+		cloned.LongContextInputMultiplier = 5
+		cloned.LongContextOutputMultiplier = 5
 		return &cloned
 	}
 	normalized := normalizeKnownOpenAICodexModel(model)
