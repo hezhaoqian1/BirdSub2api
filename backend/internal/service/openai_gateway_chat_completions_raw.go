@@ -100,6 +100,13 @@ func (s *OpenAIGatewayService) forwardAsRawChatCompletions(
 	if upstreamModel != originalModel {
 		upstreamBody = ReplaceModelInBody(body, upstreamModel)
 	}
+	if defaultedBody, injected := applyAccountDefaultReasoningEffort(upstreamBody, account); injected {
+		// 注入的默认值同样受分组推理强度上限/映射约束；若策略拒绝该值则放弃注入，
+		// 不能因网关自己补的参数拒掉客户端请求。
+		if policyBody, _, policyErr := ApplyOpenAIReasoningEffortPolicyFromContext(ctx, defaultedBody); policyErr == nil {
+			upstreamBody = policyBody
+		}
+	}
 	if normalizedBody, normalized := NormalizeGLMOpenAIReasoningEffort(upstreamBody, upstreamModel); normalized {
 		upstreamBody = normalizedBody
 	}

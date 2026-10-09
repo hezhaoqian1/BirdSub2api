@@ -326,6 +326,9 @@ func (s *adminServiceImpl) DuplicateAccount(ctx context.Context, id int64, actor
 	if err := NormalizeOpenCodeGoProtocolRulesCredentials(input.Credentials); err != nil {
 		return nil, err
 	}
+	if err := NormalizeDefaultReasoningEffortCredentials(input.Credentials); err != nil {
+		return nil, err
+	}
 	duplicate, err := buildAccountForCreate(input, accountExtra)
 	if err != nil {
 		return nil, err
@@ -525,6 +528,9 @@ func (s *adminServiceImpl) CreateAccount(ctx context.Context, input *CreateAccou
 	if err := NormalizeOpenCodeGoProtocolRulesCredentials(input.Credentials); err != nil {
 		return nil, err
 	}
+	if err := NormalizeDefaultReasoningEffortCredentials(input.Credentials); err != nil {
+		return nil, err
+	}
 	// Never persist ephemeral SSO/password secrets after OAuth conversion.
 	input.Credentials = SanitizeStoredCredentials(input.Platform, input.Credentials)
 
@@ -656,6 +662,9 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 			return nil, err
 		}
 		if err := NormalizeOpenCodeGoProtocolRulesCredentials(account.Credentials); err != nil {
+			return nil, err
+		}
+		if err := NormalizeDefaultReasoningEffortCredentials(account.Credentials); err != nil {
 			return nil, err
 		}
 		// Strip SSO/password residue that must never sit next to OAuth tokens.
@@ -1103,6 +1112,9 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 		return nil, err
 	}
 	if err := NormalizeOpenCodeGoProtocolRulesCredentials(input.Credentials); err != nil {
+		return nil, err
+	}
+	if err := NormalizeDefaultReasoningEffortCredentials(input.Credentials); err != nil {
 		return nil, err
 	}
 	// Bulk may mix platforms; always drop ephemeral SSO/password keys (cookie
