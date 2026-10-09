@@ -1715,6 +1715,20 @@
           </div>
         </div>
 
+        <!-- Default Reasoning Effort (CN providers) -->
+        <div v-if="isCNPlatform" class="border-t border-gray-200 pt-4 dark:border-dark-600">
+          <label class="input-label">{{ t('admin.accounts.defaultReasoningEffort') }}</label>
+          <select v-model="defaultReasoningEffort" class="input">
+            <option value="">{{ t('admin.accounts.defaultReasoningEffortOff') }}</option>
+            <option v-for="effort in DEFAULT_REASONING_EFFORT_OPTIONS" :key="effort" :value="effort">
+              {{ effort }}
+            </option>
+          </select>
+          <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+            {{ t('admin.accounts.defaultReasoningEffortHint') }}
+          </p>
+        </div>
+
         <!-- Custom Error Codes Section -->
         <div class="border-t border-gray-200 pt-4 dark:border-dark-600">
           <div class="mb-3 flex items-center justify-between">
@@ -4417,6 +4431,9 @@ const DEFAULT_POOL_MODE_RETRY_STATUS_CODES = [401, 403, 429]
 const poolModeEnabled = ref(false)
 const poolModeRetryCount = ref(DEFAULT_POOL_MODE_RETRY_COUNT)
 const poolModeRetryStatusCodesInput = ref('')
+// 账号级默认推理强度：仅在请求未指定 reasoning_effort 且未关闭 thinking 时由网关注入。
+const DEFAULT_REASONING_EFFORT_OPTIONS = ['low', 'medium', 'high', 'max'] as const
+const defaultReasoningEffort = ref('')
 
 function parsePoolModeRetryStatusCodes(input: string): number[] {
   if (!input || !input.trim()) return []
@@ -5403,6 +5420,7 @@ const resetForm = () => {
   poolModeEnabled.value = false
   poolModeRetryCount.value = DEFAULT_POOL_MODE_RETRY_COUNT
   poolModeRetryStatusCodesInput.value = ''
+  defaultReasoningEffort.value = ''
   customErrorCodesEnabled.value = false
   selectedErrorCodes.value = []
   customErrorCodeInput.value = null
@@ -5912,6 +5930,10 @@ const handleSubmit = async () => {
     if (parsedRetryStatusCodes.length > 0) {
       credentials.pool_mode_retry_status_codes = parsedRetryStatusCodes
     }
+  }
+
+  if (isCNPlatform.value && defaultReasoningEffort.value) {
+    credentials.default_reasoning_effort = defaultReasoningEffort.value
   }
 
   // Add custom error codes if enabled

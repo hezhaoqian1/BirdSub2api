@@ -479,6 +479,20 @@
           </div>
         </div>
 
+        <!-- Default Reasoning Effort (CN providers) -->
+        <div v-if="isCNApiKeyAccount" class="border-t border-gray-200 pt-4 dark:border-dark-600">
+          <label class="input-label">{{ t('admin.accounts.defaultReasoningEffort') }}</label>
+          <select v-model="defaultReasoningEffort" class="input">
+            <option value="">{{ t('admin.accounts.defaultReasoningEffortOff') }}</option>
+            <option v-for="effort in DEFAULT_REASONING_EFFORT_OPTIONS" :key="effort" :value="effort">
+              {{ effort }}
+            </option>
+          </select>
+          <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+            {{ t('admin.accounts.defaultReasoningEffortHint') }}
+          </p>
+        </div>
+
         <!-- Custom Error Codes Section -->
         <div class="border-t border-gray-200 pt-4 dark:border-dark-600">
           <div class="mb-3 flex items-center justify-between">
@@ -3546,6 +3560,9 @@ const GROK_CLIENT_TOOL_CACHE_EXTRA_KEY = 'grok_client_tool_cache_enabled'
 const poolModeEnabled = ref(false)
 const poolModeRetryCount = ref(DEFAULT_POOL_MODE_RETRY_COUNT)
 const poolModeRetryStatusCodesInput = ref('')
+// 账号级默认推理强度：仅在请求未指定 reasoning_effort 且未关闭 thinking 时由网关注入。
+const DEFAULT_REASONING_EFFORT_OPTIONS = ['low', 'medium', 'high', 'max'] as const
+const defaultReasoningEffort = ref('')
 
 function parsePoolModeRetryStatusCodes(input: string): number[] {
   if (!input || !input.trim()) return []
@@ -4491,6 +4508,8 @@ const syncFormFromAccount = (newAccount: Account | null) => {
       Number(credentials.pool_mode_retry_count ?? DEFAULT_POOL_MODE_RETRY_COUNT)
     )
     poolModeRetryStatusCodesInput.value = formatPoolModeRetryStatusCodes(credentials.pool_mode_retry_status_codes)
+    defaultReasoningEffort.value =
+      typeof credentials.default_reasoning_effort === 'string' ? credentials.default_reasoning_effort : ''
 
     // Load custom error codes
     customErrorCodesEnabled.value = credentials.custom_error_codes_enabled === true
@@ -5289,6 +5308,12 @@ const handleSubmit = async () => {
         delete newCredentials.pool_mode
         delete newCredentials.pool_mode_retry_count
         delete newCredentials.pool_mode_retry_status_codes
+      }
+
+      if (isCNApiKeyAccount.value && defaultReasoningEffort.value) {
+        newCredentials.default_reasoning_effort = defaultReasoningEffort.value
+      } else {
+        delete newCredentials.default_reasoning_effort
       }
 
       // Add custom error codes if enabled

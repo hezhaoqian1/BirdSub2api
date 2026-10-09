@@ -850,6 +850,9 @@ export default {
       poolModeRetryStatusCodes: 'Retry Status Codes',
       poolModeRetryStatusCodesHint:
         'Comma-separated HTTP status codes (100-599) that trigger same-account retry in pool mode. Leave blank to use defaults ({default}). Upstream server-side transient errors (500/502/503/504/52x/529) back off exponentially: 0.5s, 1s, 2s, 4s, 8s, then 8s each (e.g. 8 retries wait about 40s); other codes retry every 0.5s.',
+      defaultReasoningEffort: 'Default reasoning effort (when request omits it)',
+      defaultReasoningEffortOff: 'Not set (use upstream default)',
+      defaultReasoningEffortHint: 'The gateway adds this value only when the request has no reasoning_effort and thinking is not disabled. A value sent by the client always wins, and the group reasoning-effort ceiling still applies. Useful for upstreams whose default reasoning is shallow.',
       customErrorCodes: 'Custom Error Codes',
       customErrorCodesHint: 'Only stop scheduling for selected error codes',
       customErrorCodesWarning:
