@@ -376,29 +376,10 @@ func (e *EasyPay) VerifyNotification(_ context.Context, rawBody string, _ map[st
 	// url.ParseQuery already decodes values — no additional decode needed.
 	params := make(map[string]string)
 	for k := range values {
-		params[k] = values.Get(k)
-	}
-	// Reject request-only parameters. A genuine EasyPay asynchronous
-	// notification only ever carries fields the gateway itself emits (pid,
-	// trade_no, out_trade_no, type, name, money, trade_status, ...). It never
-	// echoes back the request-side return_url / notify_url.
-	//
-	// These fields matter for security, not just hygiene: in popup/submit.php
-	// mode we hand the browser a fully pkey-signed create-order URL, and
-	// easyPaySign concatenates key=value pairs without delimiting or encoding
-	// the values. An attacker-controlled return_url whose value ends in
-	// "&trade_status=TRADE_SUCCESS" therefore produces the exact same signed
-	// byte string whether that suffix is part of the return_url value or a
-	// standalone trade_status parameter — because "trade_status" is the only
-	// key that sorts between "return_url" and the following "type" key. That
-	// lets a create-order signature be re-partitioned into a forged
-	// "payment success" notification without knowing pkey. Refusing any
-	// notification that carries these request-only fields removes the only
-	// channel through which trade_status (or trade_no) can be smuggled.
-	for _, requestOnlyKey := range []string{"return_url", "notify_url"} {
-		if _, present := values[requestOnlyKey]; present {
-			return nil, fmt.Errorf("unexpected request-only parameter in notification: %s", requestOnlyKey)
+		if !easyPayNotifyAllowedParams[k] {
+			return nil, fmt.Errorf("unexpected notify param: %s", k)
 		}
+		params[k] = values.Get(k)
 	}
 	sign := params["sign"]
 	if sign == "" {
@@ -622,4 +603,27 @@ func easyPaySign(params map[string]string, pkey string) string {
 
 func easyPayVerifySign(params map[string]string, pkey string, sign string) bool {
 	return hmac.Equal([]byte(easyPaySign(params, pkey)), []byte(sign))
+}
+
+// easyPayNotifyAllowedParams is the exact parameter set a genuine EasyPay
+// (彩虹易支付-compatible) async notification carries. Order-creation-only
+// fields (notify_url, return_url, cid, device, clientip, ...) must never
+// appear in a callback: because the sign base string concatenates values
+// unescaped, a signed order URL whose return_url embeds e.g.
+// "trade_status=TRADE_SUCCESS" could otherwise be replayed as a forged
+// payment-success notification (issue #7881). Rejecting unknown keys closes
+// the whole smuggling class; genuinely paid orders rejected by an exotic
+// upstream variant are still recovered by the upstream QueryOrder reconcile
+// path.
+var easyPayNotifyAllowedParams = map[string]bool{
+	"pid":          true,
+	"trade_no":     true,
+	"out_trade_no": true,
+	"type":         true,
+	"name":         true,
+	"money":        true,
+	"trade_status": true,
+	"param":        true,
+	"sign":         true,
+	"sign_type":    true,
 }

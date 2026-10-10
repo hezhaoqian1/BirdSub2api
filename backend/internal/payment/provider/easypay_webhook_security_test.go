@@ -75,7 +75,7 @@ func TestEasyPayNotificationRejectsReturnURLSignatureSmuggling(t *testing.T) {
 	if err == nil {
 		t.Fatal("forged notification with smuggled trade_status must be rejected")
 	}
-	if !strings.Contains(err.Error(), "return_url") {
+	if !strings.Contains(err.Error(), "return_url") && !strings.Contains(err.Error(), "notify_url") {
 		t.Fatalf("expected rejection to cite the request-only parameter, got: %v", err)
 	}
 }
