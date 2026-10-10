@@ -159,6 +159,21 @@ describe('admin UsageTable tooltip', () => {
     expect(wrapper.text()).toContain('Output TPS')
   })
 
+  it('hides output TPS when showOutputTps is false', () => {
+    const row = { ...baseImageRow, image_count: 0, billing_mode: 'token', output_tokens: 1000, duration_ms: 20_000, first_token_ms: 10_000 }
+    const wrapper = mount(UsageTable, {
+      props: {
+        data: [row],
+        loading: false,
+        columns: [{ key: 'latency', label: 'Latency' }],
+        showOutputTps: false,
+      },
+      global: { stubs: { DataTable: DataTableStub, EmptyState: true, Icon: true, Teleport: true } },
+    })
+    expect(wrapper.find('[data-testid="output-tps"]').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('Output TPS')
+  })
+
   beforeEach(() => {
     locale = 'en'
     vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({

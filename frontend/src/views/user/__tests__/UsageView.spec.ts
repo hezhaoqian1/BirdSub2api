@@ -159,7 +159,7 @@ function mountUsageView() {
         DateRangePicker: true,
         Icon: true,
         UsageStatsCards: chartStub,
-        UsageTable: { ...chartStub, props: ['columns'] },
+        UsageTable: { ...chartStub, props: ['columns', 'showOutputTps'] },
         UserErrorRequestsTable: chartStub,
         ModelDistributionChart: chartStub,
         GroupDistributionChart: chartStub,
@@ -221,6 +221,7 @@ describe('user UsageView', () => {
     await flushPromises()
 
     expect(wrapper.findComponent(UsageTable).props('columns').map((column: { key: string }) => column.key)).toContain('latency')
+    expect(wrapper.findComponent(UsageTable).props('showOutputTps')).toBe(false)
     expect(query).toHaveBeenCalled()
     expect(getStats).toHaveBeenCalled()
     expect(getDashboardModels).toHaveBeenCalled()
