@@ -4,7 +4,7 @@ import { defineComponent, ref } from 'vue'
 
 import UsageView from '../UsageView.vue'
 
-const { list, exportList, getStats, getSnapshotV2, getById, getModelStats, listErrorLogs, routeQuery, aoaToSheet, sheetAddAoa, saveAs, xlsxWrite } = vi.hoisted(() => {
+const { list, exportList, getStats, getSnapshotV2, getById, getModelStats, getAccountStats, listErrorLogs, routeQuery, aoaToSheet, sheetAddAoa, saveAs, xlsxWrite } = vi.hoisted(() => {
   vi.stubGlobal('localStorage', {
     getItem: vi.fn(() => null),
     setItem: vi.fn(),
@@ -18,6 +18,7 @@ const { list, exportList, getStats, getSnapshotV2, getById, getModelStats, listE
     getSnapshotV2: vi.fn(),
     getById: vi.fn(),
     getModelStats: vi.fn(),
+    getAccountStats: vi.fn(),
     listErrorLogs: vi.fn(),
     routeQuery: {} as Record<string, string>,
 		aoaToSheet: vi.fn(() => ({})),
@@ -58,6 +59,7 @@ vi.mock('@/api/admin', () => ({
     dashboard: {
       getSnapshotV2,
       getModelStats,
+      getAccountStats,
     },
     users: {
       getById,
@@ -170,7 +172,7 @@ const mountRouteFilteredUsageView = () => mount(UsageView, {
     UsageTable: true, UsageExportProgress: true, UsageCleanupDialog: true,
     UserBalanceHistoryModal: true, Pagination: true, Select: true,
     DateRangePicker: true, Icon: true, TokenUsageTrend: true,
-    ModelDistributionChart: true, GroupDistributionChart: true,
+    ModelDistributionChart: true, GroupDistributionChart: true, AccountDistributionChart: true,
     EndpointDistributionChart: true, UserTokenRanking: true,
   } },
 })
@@ -799,4 +801,50 @@ describe('admin UsageView model audit export', () => {
 		expect(row.slice(4, 8)).toEqual(['gpt-5.6-sol', 'gpt-5.5', 'gpt-5.4', 'Yes'])
 		expect(saveAs).toHaveBeenCalledTimes(1)
 	})
+})
+
+
+describe('admin UsageView upstream account distribution', () => {
+  beforeEach(() => {
+    Object.keys(routeQuery).forEach(key => delete routeQuery[key])
+    list.mockReset().mockResolvedValue({ items: [], total: 0, pages: 0 })
+    getStats.mockReset().mockResolvedValue({ endpoints: [] })
+    getSnapshotV2.mockReset().mockResolvedValue({ trend: [], groups: [] })
+    getModelStats.mockReset().mockResolvedValue({ models: [] })
+    getAccountStats.mockReset().mockResolvedValue({ accounts: [] })
+  })
+
+  it('loads accounts on demand and refreshes them with the usage filters', async () => {
+    const wrapper = mountRouteFilteredUsageView()
+    await flushPromises()
+    expect(getAccountStats).not.toHaveBeenCalled()
+    await wrapper.get('[data-testid="usage-distribution-account"]').trigger('click')
+    await flushPromises()
+    expect(getAccountStats).toHaveBeenCalledTimes(1)
+    const vm = wrapper.vm as any
+    vm.filters.group_id = 5
+    vm.filters.billing_mode = 'token'
+    vm.filters.model = 'test-model'
+    vm.applyFilters()
+    await flushPromises()
+    expect(getAccountStats).toHaveBeenLastCalledWith(expect.objectContaining({ group_id: 5, model: 'test-model', billing_mode: 'token' }))
+    wrapper.unmount()
+  })
+
+  it('discards an older account response after filters change', async () => {
+    let resolveOld!: (data: unknown) => void
+    getAccountStats.mockImplementationOnce(() => new Promise(resolve => { resolveOld = resolve }))
+    const wrapper = mountRouteFilteredUsageView()
+    await flushPromises()
+    await wrapper.get('[data-testid="usage-distribution-account"]').trigger('click')
+    const vm = wrapper.vm as any
+    vm.filters.group_id = 8
+    vm.applyFilters()
+    await flushPromises()
+    resolveOld({ accounts: [{ account_id: 99 }] })
+    await flushPromises()
+    expect(vm.accountStats).toEqual([])
+    expect(vm.accountStatsLoading).toBe(false)
+    wrapper.unmount()
+  })
 })
