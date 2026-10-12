@@ -134,6 +134,17 @@ type GroupStat struct {
 	AccountCost float64 `json:"account_cost"` // 账号成本
 }
 
+// AccountStat aggregates recorded usage by upstream account.
+type AccountStat struct {
+	AccountID   int64   `json:"account_id"`
+	AccountName string  `json:"account_name"`
+	Requests    int64   `json:"requests"`
+	TotalTokens int64   `json:"total_tokens"`
+	Cost        float64 `json:"cost"`         // 标准计费
+	ActualCost  float64 `json:"actual_cost"`  // 实际扣除
+	AccountCost float64 `json:"account_cost"` // 账号成本
+}
+
 // UserUsageTrendPoint represents user usage trend data point
 type UserUsageTrendPoint struct {
 	Date       string  `json:"date"`

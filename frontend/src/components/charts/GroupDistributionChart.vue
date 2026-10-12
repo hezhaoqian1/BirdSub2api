@@ -1,5 +1,5 @@
 <template>
-  <div class="card p-4">
+  <div :class="embedded ? 'p-4' : 'card p-4'">
     <div class="mb-4 flex items-center justify-between gap-3">
       <h3 class="text-sm font-semibold text-gray-900 dark:text-white">
         {{ t('admin.dashboard.groupDistribution') }}
@@ -34,10 +34,10 @@
       <LoadingSpinner />
     </div>
     <div v-else-if="displayGroupStats.length > 0 && chartData" class="flex flex-col items-center gap-4 sm:flex-row sm:gap-6">
-      <div class="h-48 w-48 shrink-0">
+      <div v-if="!(expandedKey && enableAccountBreakdown)" class="h-48 w-48 shrink-0">
         <Doughnut :data="chartData" :options="doughnutOptions" />
       </div>
-      <div class="max-h-48 w-full min-w-0 flex-1 overflow-auto">
+      <div :class="expandedKey && enableAccountBreakdown ? 'max-h-[28rem]' : 'max-h-48'" class="w-full min-w-0 flex-1 overflow-auto">
         <table class="w-full text-xs">
           <thead>
             <tr class="text-gray-500 dark:text-gray-400">
@@ -86,7 +86,29 @@
               <!-- User breakdown sub-rows -->
               <tr v-if="expandedKey === `group-${group.group_id}`">
                 <td :colspan="distributionColspan" class="p-0">
+                  <div v-if="enableAccountBreakdown" class="flex gap-2 bg-gray-50 p-2 dark:bg-dark-800">
+                    <button
+                      v-for="source in ['user', 'account'] as const"
+                      :key="source"
+                      type="button"
+                      class="rounded px-2 py-1 text-xs font-medium"
+                      :class="breakdownSource === source ? 'bg-primary-100 text-primary-700 dark:bg-primary-900/30 dark:text-primary-300' : 'text-gray-500 hover:text-gray-700 dark:text-gray-400'"
+                      :aria-pressed="breakdownSource === source"
+                      :data-testid="`group-breakdown-${source}`"
+                      @click="switchBreakdownSource(source, group.group_id)"
+                    >{{ t(source === 'user' ? 'admin.dashboard.userUsage' : 'admin.dashboard.accountUsage') }}</button>
+                  </div>
+                  <AccountDistributionChart
+                    v-if="enableAccountBreakdown && breakdownSource === 'account'"
+                    v-model:metric="accountMetric"
+                    :account-stats="accountBreakdownItems"
+                    :loading="breakdownLoading"
+                    :error="accountBreakdownError"
+                    :show-chart="false"
+                    @retry="loadBreakdown(group.group_id)"
+                  />
                   <UserBreakdownSubTable
+                    v-else
                     :items="breakdownItems"
                     :loading="breakdownLoading"
                     :show-account-cost="showAccountCost"
@@ -108,14 +130,15 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Chart as ChartJS, ArcElement, Tooltip, Legend } from 'chart.js'
 import { Doughnut } from 'vue-chartjs'
 import LoadingSpinner from '@/components/common/LoadingSpinner.vue'
+import AccountDistributionChart from './AccountDistributionChart.vue'
 import UserBreakdownSubTable from './UserBreakdownSubTable.vue'
-import type { GroupStat, UserBreakdownItem } from '@/types'
-import { getUserBreakdown } from '@/api/admin/dashboard'
+import type { GroupStat, AccountStat, UserBreakdownItem } from '@/types'
+import { getUserBreakdown, getAccountStats } from '@/api/admin/dashboard'
 
 ChartJS.register(ArcElement, Tooltip, Legend)
 
@@ -125,6 +148,8 @@ type DistributionMetric = 'tokens' | 'actual_cost'
 
 const props = withDefaults(defineProps<{
   groupStats: GroupStat[]
+  embedded?: boolean
+  enableAccountBreakdown?: boolean
   loading?: boolean
   metric?: DistributionMetric
   showMetricToggle?: boolean
@@ -135,6 +160,8 @@ const props = withDefaults(defineProps<{
   filters?: Record<string, any>
 }>(), {
   loading: false,
+  embedded: false,
+  enableAccountBreakdown: false,
   metric: 'tokens',
   showMetricToggle: false,
   enableBreakdown: true,
@@ -151,29 +178,55 @@ const breakdownLoading = ref(false)
 const showAccountCost = computed(() => props.showAccountCost)
 const distributionColspan = computed(() => showAccountCost.value ? 6 : 5)
 
-const toggleBreakdown = async (type: string, id: number | string) => {
+const breakdownSource = ref<'user' | 'account'>('user')
+const accountMetric = ref<'tokens' | 'actual_cost' | 'account_cost'>('account_cost')
+const accountBreakdownItems = ref<AccountStat[]>([])
+const accountBreakdownError = ref(false)
+let breakdownRequestSeq = 0
+
+const loadBreakdown = async (groupId: number) => {
+  const seq = ++breakdownRequestSeq
+  breakdownLoading.value = true
+  breakdownItems.value = []
+  accountBreakdownItems.value = []
+  accountBreakdownError.value = false
+  const params = { ...props.filters, start_date: props.startDate, end_date: props.endDate, group_id: groupId }
+  try {
+    if (props.enableAccountBreakdown && breakdownSource.value === 'account') {
+      const res = await getAccountStats(params)
+      if (seq === breakdownRequestSeq) accountBreakdownItems.value = res.accounts || []
+    } else {
+      const res = await getUserBreakdown(params)
+      if (seq === breakdownRequestSeq) breakdownItems.value = res.users || []
+    }
+  } catch {
+    if (seq === breakdownRequestSeq) accountBreakdownError.value = true
+  } finally {
+    if (seq === breakdownRequestSeq) breakdownLoading.value = false
+  }
+}
+
+const toggleBreakdown = (type: string, id: number) => {
   const key = `${type}-${id}`
   if (expandedKey.value === key) {
     expandedKey.value = null
+    ++breakdownRequestSeq
     return
   }
   expandedKey.value = key
-  breakdownLoading.value = true
-  breakdownItems.value = []
-  try {
-    const res = await getUserBreakdown({
-      ...props.filters,
-      start_date: props.startDate,
-      end_date: props.endDate,
-      group_id: Number(id),
-    })
-    breakdownItems.value = res.users || []
-  } catch {
-    breakdownItems.value = []
-  } finally {
-    breakdownLoading.value = false
-  }
+  void loadBreakdown(id)
 }
+
+const switchBreakdownSource = (source: 'user' | 'account', groupId: number) => {
+  if (breakdownSource.value === source) return
+  breakdownSource.value = source
+  void loadBreakdown(groupId)
+}
+
+watch(() => [props.startDate, props.endDate, props.filters, props.groupStats], () => {
+  expandedKey.value = null
+  ++breakdownRequestSeq
+}, { deep: true })
 
 const chartColors = [
   '#3b82f6',

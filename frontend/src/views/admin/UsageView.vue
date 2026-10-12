@@ -36,15 +36,40 @@
             :end-date="endDate"
             :filters="breakdownFilters"
           />
-          <GroupDistributionChart
-            v-model:metric="groupDistributionMetric"
-            :group-stats="groupStats"
-            :loading="chartsLoading"
-            :show-metric-toggle="true"
-            :start-date="startDate"
-            :end-date="endDate"
-            :filters="breakdownFilters"
-          />
+          <div class="card min-w-0">
+            <div class="flex gap-1 border-b border-gray-100 px-4 pt-3 dark:border-dark-700" role="group" :aria-label="t('admin.dashboard.usageDimension')">
+              <button
+                v-for="source in ['group', 'account'] as const"
+                :key="source"
+                type="button"
+                class="border-b-2 px-3 pb-2 text-sm font-medium transition-colors"
+                :class="usageDistributionSource === source ? 'border-primary-500 text-primary-600 dark:text-primary-400' : 'border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400'"
+                :aria-pressed="usageDistributionSource === source"
+                :data-testid="`usage-distribution-${source}`"
+                @click="usageDistributionSource = source"
+              >{{ t(source === 'group' ? 'admin.dashboard.byGroup' : 'admin.dashboard.byAccount') }}</button>
+            </div>
+            <GroupDistributionChart
+              v-if="usageDistributionSource === 'group'"
+              embedded
+              enable-account-breakdown
+              v-model:metric="groupDistributionMetric"
+              :group-stats="groupStats"
+              :loading="chartsLoading"
+              :show-metric-toggle="true"
+              :start-date="startDate"
+              :end-date="endDate"
+              :filters="breakdownFilters"
+            />
+            <AccountDistributionChart
+              v-else
+              v-model:metric="accountDistributionMetric"
+              :account-stats="accountStats"
+              :loading="accountStatsLoading"
+              :error="accountStatsError"
+              @retry="loadAccountStats"
+            />
+          </div>
         </div>
         <div class="grid grid-cols-1 gap-6 lg:grid-cols-2">
           <EndpointDistributionChart
@@ -203,9 +228,10 @@ import OpsErrorDetailModal from '@/views/admin/ops/components/OpsErrorDetailModa
 import { listErrorLogs } from '@/api/admin/ops'
 import type { OpsErrorLog } from '@/api/admin/ops'
 import ModelDistributionChart from '@/components/charts/ModelDistributionChart.vue'; import GroupDistributionChart from '@/components/charts/GroupDistributionChart.vue'; import TokenUsageTrend from '@/components/charts/TokenUsageTrend.vue'
+import AccountDistributionChart from '@/components/charts/AccountDistributionChart.vue'
 import EndpointDistributionChart from '@/components/charts/EndpointDistributionChart.vue'
 import Icon from '@/components/icons/Icon.vue'
-import type { AdminUsageLog, TrendDataPoint, ModelStat, GroupStat, EndpointStat, AdminUser } from '@/types'; import type { AdminUsageStatsResponse, AdminUsageQueryParams } from '@/api/admin/usage'
+import type { AdminUsageLog, TrendDataPoint, ModelStat, GroupStat, AccountStat, EndpointStat, AdminUser } from '@/types'; import type { AdminUsageStatsResponse, AdminUsageQueryParams } from '@/api/admin/usage'
 
 const { t } = useI18n()
 const appStore = useAppStore()
@@ -222,6 +248,12 @@ const loadedModelSources = reactive<Record<ModelDistributionSource, boolean>>({
   upstream: false,
   mapping: false,
 })
+const usageDistributionSource = ref<'group' | 'account'>('group')
+const accountDistributionMetric = ref<'tokens' | 'actual_cost' | 'account_cost'>('account_cost')
+const accountStats = ref<AccountStat[]>([])
+const accountStatsLoading = ref(false)
+const accountStatsError = ref(false)
+let accountStatsReqSeq = 0
 const groupDistributionMetric = ref<DistributionMetric>('tokens')
 const endpointDistributionMetric = ref<DistributionMetric>('tokens')
 const endpointDistributionSource = ref<EndpointSource>('inbound')
@@ -241,6 +273,10 @@ const balanceHistoryUser = ref<AdminUser | null>(null)
 
 const breakdownFilters = computed(() => {
   const f: Record<string, any> = {}
+  if (filters.value.model) f.model = filters.value.model
+  if (filters.value.billing_mode) f.billing_mode = filters.value.billing_mode
+  if (filters.value.stream != null) f.stream = filters.value.stream
+  if (filters.value.upstream_model_mismatch != null) f.upstream_model_mismatch = filters.value.upstream_model_mismatch
   if (filters.value.user_id) f.user_id = filters.value.user_id
   if (filters.value.api_key_id) f.api_key_id = filters.value.api_key_id
   if (filters.value.account_id) f.account_id = filters.value.account_id
@@ -486,7 +522,42 @@ const loadModelStats = async (source: ModelDistributionSource, force = false) =>
   }
 }
 
+const loadAccountStats = async () => {
+  const seq = ++accountStatsReqSeq
+  accountStatsLoading.value = true
+  accountStatsError.value = false
+  accountStats.value = []
+  try {
+    const requestType = filters.value.request_type
+    const legacyStream = requestType ? requestTypeToLegacyStream(requestType) : filters.value.stream
+    const response = await adminAPI.dashboard.getAccountStats({
+      start_date: filters.value.start_date || startDate.value,
+      end_date: filters.value.end_date || endDate.value,
+      user_id: filters.value.user_id,
+      api_key_id: filters.value.api_key_id,
+      account_id: filters.value.account_id,
+      group_id: filters.value.group_id,
+      model: filters.value.model,
+      request_type: requestType,
+      stream: legacyStream == null ? undefined : legacyStream,
+      native_compaction_v2: filters.value.native_compaction_v2,
+      billing_type: filters.value.billing_type,
+      billing_mode: filters.value.billing_mode,
+      upstream_model_mismatch: filters.value.upstream_model_mismatch,
+    })
+    if (seq === accountStatsReqSeq) accountStats.value = response.accounts || []
+  } catch {
+    if (seq === accountStatsReqSeq) accountStatsError.value = true
+  } finally {
+    if (seq === accountStatsReqSeq) accountStatsLoading.value = false
+  }
+}
+watch(usageDistributionSource, (source) => {
+  if (source === 'account') void loadAccountStats()
+})
+
 const loadChartData = async () => {
+  if (usageDistributionSource.value === 'account') void loadAccountStats()
   const seq = ++chartReqSeq
   chartsLoading.value = true
   try {

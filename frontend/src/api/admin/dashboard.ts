@@ -9,6 +9,7 @@ import type {
   TrendDataPoint,
   ModelStat,
   GroupStat,
+  AccountStat,
   ApiKeyUsageTrendPoint,
   UserUsageTrendPoint,
   UserSpendingRankingResponse,
@@ -121,6 +122,21 @@ export interface GroupStatsParams {
   native_compaction_v2?: boolean | null
   billing_type?: number | null
 	upstream_model_mismatch?: boolean
+}
+
+export interface AccountStatsParams extends TrendParams {
+  billing_mode?: string
+}
+
+export interface AccountStatsResponse {
+  accounts: AccountStat[]
+  start_date: string
+  end_date: string
+}
+
+export async function getAccountStats(params?: AccountStatsParams): Promise<AccountStatsResponse> {
+  const { data } = await apiClient.get<AccountStatsResponse>('/admin/dashboard/accounts', { params })
+  return data
 }
 
 export interface GroupStatsResponse {
@@ -338,6 +354,7 @@ export const dashboardAPI = {
   getUsageTrend,
   getModelStats,
   getGroupStats,
+  getAccountStats,
   getSnapshotV2,
   getApiKeyUsageTrend,
   getUserUsageTrend,
