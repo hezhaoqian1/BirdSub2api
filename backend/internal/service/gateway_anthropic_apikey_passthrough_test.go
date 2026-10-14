@@ -1581,7 +1581,8 @@ func TestGatewayService_AnthropicAPIKeyPassthrough_StreamingTimeoutAfterClientDi
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		_, _ = pw.Write([]byte(`data: {"type":"message_start","message":{"usage":{"input_tokens":9}}}` + "\n"))
+		// 事件按边界整块写出，需完整事件才会触发写入并探测到客户端断开。
+		_, _ = pw.Write([]byte(`data: {"type":"message_start","message":{"usage":{"input_tokens":9}}}` + "\n\n"))
 		// 保持上游连接静默，触发数据间隔超时分支。
 		time.Sleep(1500 * time.Millisecond)
 		_ = pw.Close()
@@ -1916,4 +1917,94 @@ func TestSonnet55BedrockCCCompatTransformsBeforeValidation(t *testing.T) {
 			require.Equal(t, "low", gjson.GetBytes(prepared, "output_config.effort").String())
 		})
 	}
+}
+
+func TestGatewayService_AnthropicAPIKeyPassthrough_StreamingReadErrorDropsIncompleteEvent(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+
+	svc := &GatewayService{
+		cfg: &config.Config{
+			Gateway: config.GatewayConfig{
+				MaxLineSize: defaultMaxLineSize,
+			},
+		},
+	}
+
+	// 上游在 JSON 字符串未闭合时断开：半截事件不得写给客户端，否则 handler 补写的
+	// error 帧会与它拼成同一个 SSE 事件。
+	complete := "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":3}}}\n\n"
+	partial := "event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"hello wor"
+	resp := &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+		Body: &streamReadCloser{
+			payload: []byte(complete + partial),
+			err:     errors.New("read tcp: connection reset by peer"),
+		},
+	}
+
+	result, err := svc.handleStreamingResponseAnthropicAPIKeyPassthrough(context.Background(), resp, c, &Account{ID: 6}, time.Now(), "claude-opus-5-5")
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "stream read error")
+	require.NotNil(t, result)
+	require.Equal(t, 3, result.usage.InputTokens)
+	require.Equal(t, complete, rec.Body.String())
+}
+
+func TestGatewayService_AnthropicAPIKeyPassthrough_StreamingEOFWithoutTerminalDropsIncompleteEvent(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+
+	svc := &GatewayService{
+		cfg: &config.Config{
+			Gateway: config.GatewayConfig{
+				MaxLineSize: defaultMaxLineSize,
+			},
+		},
+	}
+
+	complete := "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":3}}}\n\n"
+	partial := "event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"delta\":{\"text\":\"hel"
+	resp := &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+		Body:       io.NopCloser(strings.NewReader(complete + partial)),
+	}
+
+	_, err := svc.handleStreamingResponseAnthropicAPIKeyPassthrough(context.Background(), resp, c, &Account{ID: 6}, time.Now(), "claude-opus-5-5")
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "missing terminal event")
+	require.Equal(t, complete, rec.Body.String())
+}
+
+func TestGatewayService_AnthropicAPIKeyPassthrough_StreamingFlushesTrailingTerminalEventWithoutBlankLine(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+
+	svc := &GatewayService{
+		cfg: &config.Config{
+			Gateway: config.GatewayConfig{
+				MaxLineSize: defaultMaxLineSize,
+			},
+		},
+	}
+
+	body := "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":3}}}\n\n" +
+		"event: message_stop\ndata: {\"type\":\"message_stop\"}"
+	resp := &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+		Body:       io.NopCloser(strings.NewReader(body)),
+	}
+
+	_, err := svc.handleStreamingResponseAnthropicAPIKeyPassthrough(context.Background(), resp, c, &Account{ID: 6}, time.Now(), "claude-opus-5-5")
+	require.NoError(t, err)
+	require.Equal(t, body+"\n\n", rec.Body.String())
 }

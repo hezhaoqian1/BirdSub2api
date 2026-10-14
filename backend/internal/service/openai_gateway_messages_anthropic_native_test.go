@@ -3,10 +3,12 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -212,4 +214,44 @@ func TestNativeAnthropicPassthroughLeavesOtherThinkingUntouched(t *testing.T) {
 			require.JSONEq(t, tt.body, string(upstream.lastBody))
 		})
 	}
+}
+
+type nativeAnthropicTruncatedBody struct {
+	payload []byte
+	sent    bool
+}
+
+func (b *nativeAnthropicTruncatedBody) Read(p []byte) (int, error) {
+	if !b.sent {
+		b.sent = true
+		return copy(p, b.payload), nil
+	}
+	return 0, fmt.Errorf("read tcp: connection reset by peer")
+}
+
+func (b *nativeAnthropicTruncatedBody) Close() error { return nil }
+
+// 上游在 JSON 字符串未闭合时断开：半截事件不得写给客户端，否则 handler 补写的
+// error 帧会与它拼成同一个 SSE 事件，客户端解析 JSON 失败。
+func TestNativeAnthropicPassthroughStreamDropsIncompleteEventOnReadError(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	body := []byte(`{"model":"k3","max_tokens":32,"stream":true,"messages":[{"role":"user","content":"hi"}]}`)
+	complete := "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_1\",\"usage\":{\"input_tokens\":93}}}\n\n"
+	partial := "event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"po"
+	upstream := &httpUpstreamRecorder{resp: &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+		Body:       &nativeAnthropicTruncatedBody{payload: []byte(complete + partial)},
+	}}
+	svc := &OpenAIGatewayService{cfg: rawChatCompletionsTestConfig(), httpUpstream: upstream}
+
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewReader(body))
+	c.Request.Header.Set("Content-Type", "application/json")
+
+	_, err := svc.ForwardAsAnthropic(context.Background(), c, nativeAnthropicTestAccount(), body, "", "")
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "stream read error")
+	require.Equal(t, complete, recorder.Body.String())
 }

@@ -17,7 +17,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"strings"
 	"sync/atomic"
@@ -420,12 +419,26 @@ func (s *OpenAIGatewayService) handleNativeAnthropicStreamingResponse(
 		keepaliveTimer.Reset(keepaliveInterval)
 	}
 	inPartialEvent := false
+	// 按 SSE 事件缓冲，收到事件边界才写给客户端；上游中途断开时丢弃半截事件，
+	// 避免与 handler 补写的 error 帧拼成同一个事件（见 Anthropic 透传同名处理）。
+	var pendingEvent []byte
 
 	for {
 		select {
 		case ev, ok := <-events:
 			if !ok {
 				if !clientDisconnected {
+					if len(pendingEvent) > 0 {
+						if sawTerminalEvent {
+							pendingEvent = append(pendingEvent, '\n')
+							if _, err := w.Write(pendingEvent); err != nil {
+								clientDisconnected = true
+							}
+						} else {
+							logger.LegacyPrintf("service.gateway", "[CN Anthropic 直通] Dropping incomplete SSE event at upstream EOF: account=%d bytes=%d", account.ID, len(pendingEvent))
+						}
+						pendingEvent = pendingEvent[:0]
+					}
 					flusher.Flush()
 				}
 				if !sawTerminalEvent {
@@ -435,6 +448,10 @@ func (s *OpenAIGatewayService) handleNativeAnthropicStreamingResponse(
 				return s.nativeAnthropicStreamResult(c, resp, usage, firstTokenMs, clientDisconnected, originalModel, billingModel, upstreamModel, reasoningEffort, startTime), nil
 			}
 			if ev.err != nil {
+				if len(pendingEvent) > 0 {
+					logger.LegacyPrintf("service.gateway", "[CN Anthropic 直通] Dropping incomplete SSE event after upstream read error: account=%d bytes=%d", account.ID, len(pendingEvent))
+					pendingEvent = pendingEvent[:0]
+				}
 				if sawTerminalEvent {
 					return s.nativeAnthropicStreamResult(c, resp, usage, firstTokenMs, clientDisconnected, originalModel, billingModel, upstreamModel, reasoningEffort, startTime), nil
 				}
@@ -474,19 +491,21 @@ func (s *OpenAIGatewayService) handleNativeAnthropicStreamingResponse(
 			}
 
 			if !clientDisconnected {
-				restored := string(reverseToolNamesIfPresent(c, []byte(line)))
-				if _, err := io.WriteString(w, restored); err != nil {
-					clientDisconnected = true
-					logger.LegacyPrintf("service.gateway", "[CN Anthropic 直通] Client disconnected during streaming, continue draining upstream for usage: account=%d", account.ID)
-				} else if _, err := io.WriteString(w, "\n"); err != nil {
-					clientDisconnected = true
-					logger.LegacyPrintf("service.gateway", "[CN Anthropic 直通] Client disconnected during streaming, continue draining upstream for usage: account=%d", account.ID)
-				} else if line == "" {
-					// 按 SSE 事件边界刷出，减少每行 flush 带来的 syscall 开销。
-					flusher.Flush()
-					lastDataAt = time.Now()
-					resetKeepaliveTimer()
+				pendingEvent = append(pendingEvent, reverseToolNamesIfPresent(c, []byte(line))...)
+				pendingEvent = append(pendingEvent, '\n')
+				if line == "" {
+					// 按 SSE 事件边界整块写出并刷新，减少每行 flush 带来的 syscall 开销。
+					_, err := w.Write(pendingEvent)
+					pendingEvent = pendingEvent[:0]
 					inPartialEvent = false
+					if err != nil {
+						clientDisconnected = true
+						logger.LegacyPrintf("service.gateway", "[CN Anthropic 直通] Client disconnected during streaming, continue draining upstream for usage: account=%d", account.ID)
+					} else {
+						flusher.Flush()
+						lastDataAt = time.Now()
+						resetKeepaliveTimer()
+					}
 				} else {
 					inPartialEvent = true
 				}
