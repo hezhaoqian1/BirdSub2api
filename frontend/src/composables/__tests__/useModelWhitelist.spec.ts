@@ -101,9 +101,16 @@ describe('useModelWhitelist', () => {
   })
 
   it('Claude Haiku 5.5 出现在 Claude 模型列表并使用官方 ID 预设', () => {
+    const models: string[] = getModelsByPlatform('anthropic')
+    const mapping: Record<string, string> | null = buildModelMappingObject('whitelist', models, [])
+
+    expect(mapping?.['claude-haiku-5-5']).toBe('claude-haiku-5-5')
     expect(getModelsByPlatform('claude')).toContain('claude-haiku-5-5')
     expect(getModelsByPlatform('antigravity')).not.toContain('claude-haiku-5-5')
     expect(getPresetMappingsByPlatform('claude')).toEqual(expect.arrayContaining([
+      expect.objectContaining({ label: 'Haiku 5.5', from: 'claude-haiku-5-5', to: 'claude-haiku-5-5' })
+    ]))
+    expect(getPresetMappingsByPlatform('anthropic')).toEqual(expect.arrayContaining([
       expect.objectContaining({ label: 'Haiku 5.5', from: 'claude-haiku-5-5', to: 'claude-haiku-5-5' })
     ]))
     expect(getPresetMappingsByPlatform('bedrock')).toEqual(expect.arrayContaining([

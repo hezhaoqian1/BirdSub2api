@@ -6,7 +6,9 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestIsHaiku55(t *testing.T) {
+// TestIsHaiku55ExtraRegions 覆盖上游 effort_catalog_test.go 未包含的区域前缀
+// 与推理强度档位断言。命名避开上游同名用例，防止后续同步上游时重复声明。
+func TestIsHaiku55ExtraRegions(t *testing.T) {
 	t.Parallel()
 	for _, model := range []string{
 		"claude-haiku-5-5",
@@ -23,17 +25,4 @@ func TestIsHaiku55(t *testing.T) {
 		require.False(t, IsHaiku55(model), model)
 	}
 	require.Nil(t, EffortLevelsForModel("claude-haiku-4-5-20251001"))
-}
-
-func TestDefaultModelsContainsHaiku55(t *testing.T) {
-	t.Parallel()
-
-	for _, model := range DefaultModels {
-		if model.ID == "claude-haiku-5-5" {
-			require.Equal(t, "Claude Haiku 5.5", model.DisplayName)
-			require.Equal(t, "2026-10-07T00:00:00Z", model.CreatedAt)
-			return
-		}
-	}
-	t.Fatal("claude-haiku-5-5 missing from DefaultModels")
 }

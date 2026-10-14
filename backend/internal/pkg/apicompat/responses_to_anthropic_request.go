@@ -57,42 +57,13 @@ func ResponsesToAnthropicRequest(req *ResponsesRequest) (*AnthropicRequest, erro
 		out.ToolChoice = tc
 	}
 
-	// Haiku 5.5 is adaptive-only but, unlike the other 5.5 models, accepts
-	// forced tool use and thinking.type=disabled at effort high or below.
-	if isHaiku55 {
-		if req.Temperature != nil && req.TopP != nil {
-			return nil, fmt.Errorf("claude-haiku-5-5 does not accept temperature and top_p together")
-		}
-		if req.Temperature != nil && *req.Temperature != 1 {
-			return nil, fmt.Errorf("claude-haiku-5-5 does not support non-default temperature")
-		}
-		if req.TopP != nil && *req.TopP != 0.99 {
-			return nil, fmt.Errorf("claude-haiku-5-5 does not support non-default top_p")
-		}
-		effort := "medium"
-		if req.Reasoning != nil && req.Reasoning.Effort != "" {
-			effort = req.Reasoning.Effort
-		}
-		if effort == "none" {
-			out.Thinking = &AnthropicThinking{Type: "disabled"}
-			out.OutputConfig = &AnthropicOutputConfig{Effort: "low"}
-			return out, nil
-		}
-		switch effort {
-		case "low", "medium", "high", "xhigh", "max":
-		default:
-			return nil, fmt.Errorf("%s does not support reasoning effort %q; use none, low, medium, high, xhigh or max", req.Model, effort)
-		}
-		out.Thinking = &AnthropicThinking{Type: "adaptive"}
-		out.OutputConfig = &AnthropicOutputConfig{Effort: effort}
-		return out, nil
-	}
-
-	// The 5.5 models reject manual thinking and forced tool use. Sonnet 5.5
-	// additionally supports between_tools to disable up-front thinking.
+	// The 5.5 models reject manual thinking. Opus/Sonnet 5.5 additionally reject
+	// forced tool use; Haiku 5.5 accepts it (starts with the tool call, no thinking
+	// block). Sonnet 5.5 supports between_tools to disable up-front thinking;
+	// Haiku 5.5 uses disabled (at high effort or below) instead.
 	// Resolve the upstream model before conversion: client aliases need not
 	// identify a Claude model.
-	if isOpus55 || isSonnet55 {
+	if isOpus55 || isSonnet55 || isHaiku55 {
 		var choice struct {
 			Type string `json:"type"`
 		}
@@ -101,7 +72,7 @@ func ResponsesToAnthropicRequest(req *ResponsesRequest) (*AnthropicRequest, erro
 				return nil, fmt.Errorf("invalid tool_choice: %w", err)
 			}
 		}
-		if choice.Type == "any" || choice.Type == "tool" {
+		if (choice.Type == "any" || choice.Type == "tool") && !isHaiku55 {
 			return nil, fmt.Errorf("%s does not support forced tool_choice; use auto or none", req.Model)
 		}
 		effort := "medium"
@@ -114,6 +85,17 @@ func ResponsesToAnthropicRequest(req *ResponsesRequest) (*AnthropicRequest, erro
 				return nil, fmt.Errorf("claude-sonnet-5-5 does not support non-default top_p")
 			}
 		}
+		if isHaiku55 {
+			if req.Temperature != nil && *req.Temperature != 1 {
+				return nil, fmt.Errorf("claude-haiku-5-5 does not support non-default temperature")
+			}
+			if req.TopP != nil && *req.TopP != 0.99 {
+				return nil, fmt.Errorf("claude-haiku-5-5 does not support non-default top_p")
+			}
+			if req.Temperature != nil && req.TopP != nil {
+				return nil, fmt.Errorf("claude-haiku-5-5 does not allow temperature and top_p together; omit both")
+			}
+		}
 		if req.Reasoning != nil && req.Reasoning.Effort != "" {
 			effort = req.Reasoning.Effort
 		}
@@ -122,6 +104,16 @@ func ResponsesToAnthropicRequest(req *ResponsesRequest) (*AnthropicRequest, erro
 			// thinking mode. between_tools still preserves signed progress
 			// blocks produced during tool use.
 			out.Thinking = &AnthropicThinking{Type: "between_tools"}
+			if out.OutputConfig == nil {
+				out.OutputConfig = &AnthropicOutputConfig{}
+			}
+			out.OutputConfig.Effort = "low"
+			return out, nil
+		}
+		if isHaiku55 && effort == "none" {
+			// Haiku 5.5's lowest thinking mode is disabled (valid at high
+			// effort or below); low keeps token spend minimal like Sonnet above.
+			out.Thinking = &AnthropicThinking{Type: "disabled"}
 			if out.OutputConfig == nil {
 				out.OutputConfig = &AnthropicOutputConfig{}
 			}
