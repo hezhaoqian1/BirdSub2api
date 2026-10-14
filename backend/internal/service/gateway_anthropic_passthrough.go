@@ -570,7 +570,17 @@ func (s *GatewayService) handleStreamingResponseAnthropicAPIKeyPassthrough(
 			}
 			if ev.err != nil {
 				if len(pendingEvent) > 0 {
-					logger.LegacyPrintf("service.gateway", "[Anthropic passthrough] Dropping incomplete SSE event after upstream read error: account=%d bytes=%d", account.ID, len(pendingEvent))
+					if sawTerminalEvent {
+						// 终止事件已收到、仅缺结尾空行：补上事件边界送达，避免客户端丢失 message_stop。
+						pendingEvent = append(pendingEvent, '\n')
+						if _, err := w.Write(pendingEvent); err != nil {
+							clientDisconnected = true
+						} else {
+							flusher.Flush()
+						}
+					} else {
+						logger.LegacyPrintf("service.gateway", "[Anthropic passthrough] Dropping incomplete SSE event after upstream read error: account=%d bytes=%d", account.ID, len(pendingEvent))
+					}
 					pendingEvent = pendingEvent[:0]
 				}
 				if sawTerminalEvent {

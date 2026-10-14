@@ -2008,3 +2008,34 @@ func TestGatewayService_AnthropicAPIKeyPassthrough_StreamingFlushesTrailingTermi
 	require.NoError(t, err)
 	require.Equal(t, body+"\n\n", rec.Body.String())
 }
+
+func TestGatewayService_AnthropicAPIKeyPassthrough_StreamingReadErrorKeepsTerminalEventMissingBlankLine(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+
+	svc := &GatewayService{
+		cfg: &config.Config{
+			Gateway: config.GatewayConfig{
+				MaxLineSize: defaultMaxLineSize,
+			},
+		},
+	}
+
+	// message_stop 已收到、结尾空行到达前连接中断：终止事件仍应补齐边界送达。
+	body := "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":3}}}\n\n" +
+		"event: message_stop\ndata: {\"type\":\"message_stop\"}\n"
+	resp := &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+		Body: &streamReadCloser{
+			payload: []byte(body),
+			err:     errors.New("read tcp: connection reset by peer"),
+		},
+	}
+
+	_, err := svc.handleStreamingResponseAnthropicAPIKeyPassthrough(context.Background(), resp, c, &Account{ID: 6}, time.Now(), "claude-opus-5-5")
+	require.NoError(t, err)
+	require.Equal(t, body+"\n", rec.Body.String())
+}
