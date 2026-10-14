@@ -1607,12 +1607,10 @@ func TestOpenAIStreamingTimeout(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "stream data interval timeout") {
 		t.Fatalf("expected stream timeout error, got %v", err)
 	}
-	if !strings.Contains(rec.Body.String(), "\"type\":\"error\"") || !strings.Contains(rec.Body.String(), "stream_timeout") {
-		t.Fatalf("expected OpenAI-compatible error SSE event, got %q", rec.Body.String())
-	}
-	payload := strings.TrimSpace(strings.TrimPrefix(rec.Body.String(), "event: error\ndata: "))
-	require.Equal(t, "stream_timeout", gjson.Get(payload, "code").String())
-	require.False(t, gjson.Get(payload, "error").Exists())
+	require.True(t, strings.HasPrefix(rec.Body.String(), "event: response.failed\ndata: "), "expected a Responses terminal event, got %q", rec.Body.String())
+	payload := strings.TrimSpace(strings.TrimPrefix(rec.Body.String(), "event: response.failed\ndata: "))
+	require.Equal(t, "response.failed", gjson.Get(payload, "type").String())
+	require.Equal(t, "stream_timeout", gjson.Get(payload, "response.error.code").String())
 	require.True(t, IsResponseCommitted(c))
 }
 
@@ -1705,22 +1703,23 @@ func TestOpenAIStreamingReadErrorAfterOutputUsesResponsesErrorSchema(t *testing.
 			require.NotContains(t, body, "stream ID")
 			require.NotContains(t, body, "response.completed")
 			require.NotContains(t, body, "[DONE]")
-			require.Equal(t, 1, strings.Count(body, "event: error\n"))
+			// Codex 只把 response.failed 当作终止事件处理，裸 event: error 会被静默忽略。
+			require.NotContains(t, body, "event: error\n")
+			require.Equal(t, 1, strings.Count(body, "event: response.failed\n"))
 			require.True(t, IsResponseCommitted(c), "the handler must not append another failure")
 			var events []gjson.Result
 			for _, line := range strings.Split(body, "\n") {
 				if strings.HasPrefix(line, "data: ") {
 					event := gjson.Parse(strings.TrimPrefix(line, "data: "))
-					if event.Get("type").String() == "error" {
+					if event.Get("type").String() == "response.failed" {
 						events = append(events, event)
 					}
 				}
 			}
 			require.Len(t, events, 1)
-			require.Equal(t, tc.code, events[0].Get("code").String())
-			require.NotEmpty(t, events[0].Get("message").String())
-			require.False(t, events[0].Get("error").Exists(), "Responses errors have top-level fields")
-			require.True(t, events[0].Get("param").Exists())
+			require.Equal(t, "failed", events[0].Get("response.status").String())
+			require.Equal(t, tc.code, events[0].Get("response.error.code").String())
+			require.NotEmpty(t, events[0].Get("response.error.message").String())
 		})
 	}
 }
@@ -2839,12 +2838,10 @@ func TestOpenAIStreamingTooLong(t *testing.T) {
 	if !errors.Is(err, bufio.ErrTooLong) {
 		t.Fatalf("expected ErrTooLong, got %v", err)
 	}
-	if !strings.Contains(rec.Body.String(), "\"type\":\"error\"") || !strings.Contains(rec.Body.String(), "response_too_large") {
-		t.Fatalf("expected OpenAI-compatible error SSE event, got %q", rec.Body.String())
-	}
-	payload := strings.TrimSpace(strings.TrimPrefix(rec.Body.String(), "event: error\ndata: "))
-	require.Equal(t, "response_too_large", gjson.Get(payload, "code").String())
-	require.False(t, gjson.Get(payload, "error").Exists())
+	require.True(t, strings.HasPrefix(rec.Body.String(), "event: response.failed\ndata: "), "expected a Responses terminal event, got %q", rec.Body.String())
+	payload := strings.TrimSpace(strings.TrimPrefix(rec.Body.String(), "event: response.failed\ndata: "))
+	require.Equal(t, "response.failed", gjson.Get(payload, "type").String())
+	require.Equal(t, "response_too_large", gjson.Get(payload, "response.error.code").String())
 	require.True(t, IsResponseCommitted(c))
 }
 

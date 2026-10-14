@@ -1280,3 +1280,86 @@ func TestForwardAsRawChatCompletions_RestoresMappedResponseModel(t *testing.T) {
 		}
 	}
 }
+
+// 上游在 JSON 字符串未闭合时断开：半截事件不得写给客户端，否则 handler 补发的
+// error 帧会与它拼成同一个 SSE 事件，客户端解析 JSON 失败。
+func TestForwardAsRawChatCompletions_StreamReadErrorDropsTruncatedEvent(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	body := []byte(`{"model":"deepseek-v4-pro","messages":[{"role":"user","content":"hello"}],"stream":true}`)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader(body))
+	c.Request.Header.Set("Content-Type", "application/json")
+
+	complete := `data: {"id":"chatcmpl_trunc","object":"chat.completion.chunk","model":"deepseek-v4-pro","choices":[{"index":0,"delta":{"content":"hello "}}]}` + "\n\n"
+	partial := `data: {"id":"chatcmpl_trunc","object":"chat.completion.chunk","model":"deepseek-v4-pro","choices":[{"index":0,"delta":{"content":"wor`
+	upstream := &httpUpstreamRecorder{resp: &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"text/event-stream"}, "x-request-id": []string{"rid_trunc"}},
+		Body: &openAIChatStreamReadErrorCloser{
+			payload: []byte(complete + partial),
+			err:     errors.New("read: connection reset by peer"),
+		},
+	}}
+	svc := &OpenAIGatewayService{cfg: rawChatCompletionsTestConfig(), httpUpstream: upstream}
+
+	result, err := svc.forwardAsRawChatCompletions(context.Background(), c, rawChatCompletionsTestAccount(), body, "")
+	require.Error(t, err)
+	require.NotNil(t, result)
+	code, _, ok := OpenAIUpstreamStreamReadErrorDetails(err)
+	require.True(t, ok)
+	require.Equal(t, OpenAIUpstreamStreamReadErrorCode, code)
+	require.Equal(t, complete, rec.Body.String())
+}
+
+// 缺结尾空行但 data 完整的事件仍要送达，并补上事件边界。
+func TestForwardAsRawChatCompletions_CompleteEventMissingBlankLineIsDelivered(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	body := []byte(`{"model":"deepseek-v4-pro","messages":[{"role":"user","content":"hello"}],"stream":true}`)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader(body))
+	c.Request.Header.Set("Content-Type", "application/json")
+
+	upstreamBody := `data: {"id":"chatcmpl_tail","object":"chat.completion.chunk","model":"deepseek-v4-pro","choices":[{"index":0,"delta":{"content":"ok"}}]}` + "\n\n" +
+		`data: {"id":"chatcmpl_tail","object":"chat.completion.chunk","model":"deepseek-v4-pro","choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":3,"completion_tokens":1,"total_tokens":4}}` + "\n"
+	upstream := &httpUpstreamRecorder{resp: &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"text/event-stream"}, "x-request-id": []string{"rid_tail"}},
+		Body:       io.NopCloser(strings.NewReader(upstreamBody)),
+	}}
+	svc := &OpenAIGatewayService{cfg: rawChatCompletionsTestConfig(), httpUpstream: upstream}
+
+	result, err := svc.forwardAsRawChatCompletions(context.Background(), c, rawChatCompletionsTestAccount(), body, "")
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.Equal(t, 4, result.Usage.InputTokens+result.Usage.OutputTokens)
+	require.Equal(t, upstreamBody+"\n", rec.Body.String())
+}
+
+// 只用单个换行分隔事件的不规范上游：逐事件转发，字节与上游一致，不退化成攒到结尾。
+func TestForwardAsRawChatCompletions_SingleNewlineSeparatedEventsStillStream(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	body := []byte(`{"model":"deepseek-v4-pro","messages":[{"role":"user","content":"hello"}],"stream":true}`)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader(body))
+	c.Request.Header.Set("Content-Type", "application/json")
+
+	upstreamBody := `data: {"id":"chatcmpl_nl","object":"chat.completion.chunk","model":"deepseek-v4-pro","choices":[{"index":0,"delta":{"content":"a"}}]}` + "\n" +
+		`data: {"id":"chatcmpl_nl","object":"chat.completion.chunk","model":"deepseek-v4-pro","choices":[{"index":0,"delta":{"content":"b"},"finish_reason":"stop"}]}` + "\n" +
+		"data: [DONE]\n"
+	upstream := &httpUpstreamRecorder{resp: &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"text/event-stream"}, "x-request-id": []string{"rid_nl"}},
+		Body:       io.NopCloser(strings.NewReader(upstreamBody)),
+	}}
+	svc := &OpenAIGatewayService{cfg: rawChatCompletionsTestConfig(), httpUpstream: upstream}
+
+	_, err := svc.forwardAsRawChatCompletions(context.Background(), c, rawChatCompletionsTestAccount(), body, "")
+	require.NoError(t, err)
+	require.Equal(t, upstreamBody+"\n", rec.Body.String())
+}

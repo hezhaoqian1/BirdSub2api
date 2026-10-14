@@ -3,6 +3,7 @@ package service
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
@@ -270,8 +271,55 @@ func TestOpenAIResponseFlush_OutputWithoutTerminalFlushesResidualWithoutFailover
 	require.False(t, errors.As(err, &failoverErr))
 	require.NotNil(t, result)
 	gotBody, flushes := recorder.snapshot()
-	require.Equal(t, body, gotBody)
-	require.Equal(t, []string{body}, flushes)
+	// 完整但缺结尾空行的事件补上边界后送达：handler 随后追加的 response.failed
+	// 才不会与它拼成同一个 SSE 事件。
+	require.Equal(t, body+"\n", gotBody)
+	require.Equal(t, []string{body + "\n"}, flushes)
+}
+
+func TestOpenAIResponseFlush_ReadErrorDropsTruncatedEventBeforeResponseFailed(t *testing.T) {
+	complete := "event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"hello\"}\n\n"
+	partial := "event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"wor"
+	recorder := newOpenAIResponseFlushRecorder()
+
+	_, err := runOpenAIResponseFlushTest(recorder, &openAIResponseFlushReadError{
+		payload: []byte(complete + partial),
+		err:     errors.New("read tcp: connection reset by peer"),
+	}, config.GatewayConfig{})
+
+	require.ErrorContains(t, err, "stream read error")
+	gotBody, _ := recorder.snapshot()
+	require.True(t, strings.HasPrefix(gotBody, complete), "complete events must be delivered unchanged")
+	require.NotContains(t, gotBody, `"delta":"wor`, "the truncated event must never reach the client")
+	for _, frame := range strings.Split(strings.TrimSuffix(gotBody, "\n\n"), "\n\n") {
+		var data []string
+		for _, line := range strings.Split(frame, "\n") {
+			if value, ok := extractOpenAISSEDataLine(line); ok {
+				data = append(data, value)
+			}
+		}
+		require.True(t, json.Valid([]byte(strings.Join(data, "\n"))), "every SSE event must carry valid JSON: %q", frame)
+	}
+	require.Equal(t, 1, strings.Count(gotBody, "event: response.failed\n"))
+	require.NotContains(t, gotBody, "event: error\n")
+}
+
+func TestOpenAIResponseFlush_LargeEventTruncatedMidJSONIsNotPartiallyFlushed(t *testing.T) {
+	// 超过 4KB 写缓冲的事件在断开前也不能有任何字节出站。
+	complete := "data: {\"type\":\"response.output_text.delta\",\"delta\":\"hello\"}\n\n"
+	partial := "data: {\"type\":\"response.output_text.delta\",\"delta\":\"" + strings.Repeat("x", 16*1024)
+	recorder := newOpenAIResponseFlushRecorder()
+
+	_, err := runOpenAIResponseFlushTest(recorder, &openAIResponseFlushReadError{
+		payload: []byte(complete + partial),
+		err:     errors.New("read tcp: connection reset by peer"),
+	}, config.GatewayConfig{})
+
+	require.Error(t, err)
+	gotBody, _ := recorder.snapshot()
+	require.True(t, strings.HasPrefix(gotBody, complete))
+	require.NotContains(t, gotBody, strings.Repeat("x", 64))
+	require.Contains(t, gotBody, "event: response.failed\n")
 }
 
 func TestOpenAIResponseFlush_PreambleWithoutTerminalRemainsBufferedForFailover(t *testing.T) {

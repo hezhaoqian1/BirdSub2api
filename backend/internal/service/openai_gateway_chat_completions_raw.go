@@ -356,6 +356,8 @@ func (s *OpenAIGatewayService) streamRawChatCompletions(
 	clientDisconnected := false
 	clientOutputStarted := false
 	pendingLines := make([]string, 0, 8)
+	// openEventLines 暂存尚未到 SSE 事件边界（空行）的行，见扫描循环。
+	openEventLines := make([]string, 0, 4)
 	refusalDetector := newOpenAIChatSilentRefusalDetector(requestBodyLen)
 	var terminal openAIRawStreamTerminalState
 
@@ -413,16 +415,55 @@ func (s *OpenAIGatewayService) streamRawChatCompletions(
 		line = stripEmptyChatToolCallIdentityFromSSELine(line)
 
 		line = s.replaceModelInSSELine(line, upstreamModel, originalModel)
-		writeLine(line)
-		if line == "" {
-			if !clientDisconnected && clientOutputStarted {
-				c.Writer.Flush()
+		if line != "" {
+			// 不规范上游只用单个换行分隔事件：已暂存的 data 完整时先原样写出，
+			// 保持逐事件流式，不退化成攒到结尾。
+			if _, isData := extractOpenAISSEDataLine(line); isData && openAISSEEventLinesComplete(openEventLines) {
+				for _, eventLine := range openEventLines {
+					writeLine(eventLine)
+				}
+				openEventLines = openEventLines[:0]
+				if !clientDisconnected && clientOutputStarted {
+					c.Writer.Flush()
+				}
 			}
+			// 事件到边界前只暂存：上游在事件中途断开时，半截事件不能先写给客户端，
+			// 否则 handler 补发的 error 帧会与它拼成同一个 SSE 事件，客户端解析 JSON 失败。
+			openEventLines = append(openEventLines, line)
 			continue
 		}
+		for _, eventLine := range openEventLines {
+			writeLine(eventLine)
+		}
+		openEventLines = openEventLines[:0]
+		writeLine(line)
 		if !clientDisconnected && clientOutputStarted {
 			c.Writer.Flush()
 		}
+	}
+	// 上游结束时仍未到事件边界：data 完整（只缺结尾空行）时补上边界送达，否则是被截断的
+	// 半截事件，丢弃。客户端取消时不会再追加任何帧，保持原样不补边界。
+	if len(openEventLines) > 0 {
+		readErr := scanner.Err()
+		canceled := errors.Is(readErr, context.Canceled) || errors.Is(readErr, context.DeadlineExceeded)
+		if openAISSEEventLinesComplete(openEventLines) {
+			for _, eventLine := range openEventLines {
+				writeLine(eventLine)
+			}
+			if !canceled {
+				writeLine("")
+			}
+			if !clientDisconnected && clientOutputStarted {
+				c.Writer.Flush()
+			}
+		} else {
+			logger.L().Warn("openai chat_completions raw: dropping incomplete SSE event at upstream end",
+				zap.String("request_id", requestID),
+				zap.Int64("account_id", account.ID),
+				zap.Int("lines", len(openEventLines)),
+			)
+		}
+		openEventLines = nil
 	}
 
 	resultWithUsage := func() *OpenAIForwardResult {

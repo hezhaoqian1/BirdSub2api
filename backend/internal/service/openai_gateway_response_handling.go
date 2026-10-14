@@ -263,6 +263,8 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 	bareErrorAccountSideEffectsPending := false
 	pendingSSEEventType := ""
 	eventInProgress := false
+	// openEvent 暂存非 guarded 流中尚未到事件边界的行（见 processSSELine）。
+	var openEvent []byte
 	eventStartsClientOutput := false
 	eventStartsTTFTOutput := false
 	eventShouldFlush := false
@@ -319,14 +321,15 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 			return
 		}
 		errorEventSent = true
-		// Responses error events use top-level code/message/param fields. A nested
-		// Chat Completions error envelope loses the classification in strict clients.
-		payload := `{"type":"error","sequence_number":0,"code":` + strconv.Quote(code) + `,"message":` + strconv.Quote(message) + `,"param":null}`
+		// 流中途失败以 response.failed 收尾：这是 Responses 协议的终止事件，Codex 据此
+		// 分类重试，openai SDK 也按终止事件处理；裸 `event: error` 会被 Codex 静默忽略，
+		// 客户端只能看到「stream closed before response.completed」。
 		if err := flushBuffered(); err != nil {
 			clientDisconnected = true
 			return
 		}
-		if _, err := writePendingString("event: error\ndata: " + payload + "\n\n"); err != nil {
+		failedSource, _ := json.Marshal(map[string]any{"error": map[string]string{"code": code, "message": message}})
+		if _, err := writePendingString(buildOpenAIResponseFailedSSE(responseID, originalModel, failedSource, message)); err != nil {
 			clientDisconnected = true
 			return
 		}
@@ -371,7 +374,71 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 		clientOutputStarted = true
 		lastDownstreamWriteAt = time.Now()
 	}
+	// appendOpenEvent 把未到事件边界的行暂存进 openEvent。暂存仍受内存上限约束：
+	// 首字暂存阶段与 staging 共用同一上限（超限按 staging 溢出 failover）；之后的
+	// 异常超大事件退回逐段写出，只放弃该事件的截断保护，不让内存无界增长。
+	appendOpenEvent := func(line string) {
+		// 不规范上游只用单个换行分隔事件：已暂存的 data 完整时先原样转入写缓冲，
+		// 保持逐事件转发，不退化成攒到结尾（字节与改造前一致）。
+		if _, isData := extractOpenAISSEDataLine(line); isData && len(openEvent) > 0 && openAISSEEventDataComplete(openEvent) {
+			if _, err := writePendingString(string(openEvent)); err != nil {
+				handlePendingWriteError(err)
+			}
+			openEvent = openEvent[:0]
+		}
+		openEvent = append(openEvent, line...)
+		openEvent = append(openEvent, '\n')
+		eventInProgress = true
+		if firstOutputStage != nil && !firstOutputStage.closed {
+			if firstOutputStage.Buffered()+int64(len(openEvent)) > firstOutputStage.limit {
+				handlePendingWriteError(fmt.Errorf("%w: buffered=%d open_event=%d limit=%d",
+					errOpenAIFirstOutputStageLimit, firstOutputStage.Buffered(), len(openEvent), firstOutputStage.limit))
+				openEvent = openEvent[:0]
+			}
+			return
+		}
+		if len(openEvent) > openAISSEOpenEventMaxBytes {
+			if _, err := writePendingString(string(openEvent)); err != nil {
+				handlePendingWriteError(err)
+			}
+			openEvent = openEvent[:0]
+		}
+	}
+	// settleOpenEvent 在上游结束（EOF/读错误/超时）时处理未到边界的事件：
+	//   - 已收到终止事件：原样送达，不额外补字节（既有 EOF 语义）；
+	//   - data 是完整 JSON：送达；closeBoundary 时补上事件边界，使随后可能追加的
+	//     错误/终止帧（本函数或 handler 兜底）不会并入同一事件；
+	//   - 否则是被截断的半截事件：丢弃（SSE 规范同样不派发未结束的事件）。
+	// 客户端取消时不会再追加任何帧，传 closeBoundary=false 保持原样。
+	// guarded 流送达时保留 eventInProgress，由 finalizeStream 的 completeGuardedEvent 派发与刷出。
+	settleOpenEvent := func(closeBoundary bool) {
+		if len(openEvent) == 0 {
+			return
+		}
+		deliver := sawTerminalEvent || openAISSEEventDataComplete(openEvent)
+		if deliver && !clientDisconnected && !failureDelivered {
+			payload := string(openEvent)
+			if closeBoundary && !sawTerminalEvent {
+				payload += "\n"
+			}
+			if _, err := writePendingString(payload); err != nil {
+				handlePendingWriteError(err)
+			}
+			if !stageFirstOutput {
+				eventInProgress = false
+			}
+		} else {
+			logger.LegacyPrintf("service.openai_gateway", "Dropping incomplete SSE event at upstream end: account=%d bytes=%d", account.ID, len(openEvent))
+			// 被丢弃事件的刷出/首字意图随之作废：若此前没有字节出站，仍可安全 failover。
+			eventInProgress = false
+			eventShouldFlush = false
+			eventStartsClientOutput = false
+			eventStartsTTFTOutput = false
+		}
+		openEvent = openEvent[:0]
+	}
 	finalizeStream := func() (*openaiStreamingResult, error) {
+		settleOpenEvent(true)
 		if stageFirstOutput && eventInProgress {
 			// EOF dispatches the final SSE event even without a trailing blank line.
 			completeGuardedEvent(true)
@@ -418,6 +485,7 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 		if scanErr == nil {
 			return nil, nil, false
 		}
+		settleOpenEvent(!errors.Is(scanErr, context.Canceled) && !errors.Is(scanErr, context.DeadlineExceeded))
 		if errors.Is(scanErr, errOpenAIFirstOutputScannerLimit) && !firstOutputProgressObserved {
 			logger.LegacyPrintf("service.openai_gateway", "SSE token exceeded guarded first-output limit: account=%d limit=%d error=%v", account.ID, openAIFirstOutputStageMaxBytes+openAIFirstOutputScannerFramingAllowance, scanErr)
 			failoverErr := s.newOpenAIStreamFailoverError(
@@ -709,13 +777,8 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 					shouldFlush = true
 				}
 				eventShouldFlush = eventShouldFlush || shouldFlush
-				if _, err := writePendingString(line); err != nil {
-					handlePendingWriteError(err)
-				} else if _, err := writePendingString("\n"); err != nil {
-					handlePendingWriteError(err)
-				} else {
-					eventInProgress = true
-				}
+				// 与 event:/注释行一起进事件缓冲，到空行边界才整块写出。
+				appendOpenEvent(line)
 			}
 
 			// Record first token time
@@ -738,6 +801,7 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 				eventStartsClientOutput = false
 				eventStartsTTFTOutput = false
 				eventShouldFlush = false
+				openEvent = openEvent[:0]
 				return
 			}
 			if failureDelivered {
@@ -746,13 +810,15 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 				eventStartsClientOutput = false
 				eventStartsTTFTOutput = false
 				eventShouldFlush = false
+				openEvent = openEvent[:0]
 				return
 			}
 			if !clientDisconnected {
-				if _, err := writePendingString("\n"); err != nil {
+				if _, err := writePendingString(string(openEvent) + "\n"); err != nil {
 					handlePendingWriteError(err)
 				}
 			}
+			openEvent = openEvent[:0]
 			if streamEarlyErr == nil {
 				completeGuardedEvent(queueDrained)
 			}
@@ -772,6 +838,7 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 				terminalFailurePending = false
 				eventInProgress = false
 				eventShouldFlush = false
+				openEvent = openEvent[:0]
 				return
 			}
 			shouldFlush = eventShouldFlush || (queueDrained && clientOutputStarted)
@@ -781,12 +848,16 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 			}
 		}
 		if !clientDisconnected && !failureDelivered && !suppressCurrentEvent {
-			if _, err := writePendingString(line); err != nil {
-				handlePendingWriteError(err)
-			} else if _, err := writePendingString("\n"); err != nil {
+			if line != "" {
+				// 事件到边界前只进事件缓冲：4KB 写缓冲满时会自动刷出，半截事件一旦
+				// 出站，上游中途断开后补发的终止帧会与它拼成同一个 SSE 事件。
+				appendOpenEvent(line)
+			} else if _, err := writePendingString(string(openEvent) + "\n"); err != nil {
+				openEvent = openEvent[:0]
 				handlePendingWriteError(err)
 			} else {
-				eventInProgress = line != ""
+				openEvent = openEvent[:0]
+				eventInProgress = false
 				if shouldFlush {
 					if err := flushBuffered(); err != nil {
 						clientDisconnected = true
@@ -937,6 +1008,7 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 					return resultWithUsage(), grokStreamIdleFailoverError(account, streamInterval)
 				}
 			}
+			settleOpenEvent(true)
 			sendErrorEvent("stream_timeout", "Upstream response stream timed out")
 			return resultWithUsage(), fmt.Errorf("stream data interval timeout")
 
@@ -997,6 +1069,32 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 		}
 	}
 
+}
+
+// openAISSEOpenEventMaxBytes 限制首字输出之后单个未结束 SSE 事件的暂存上限。正常
+// 事件远小于此值；超出时退回逐段写出，避免异常上游让内存无界增长。
+const openAISSEOpenEventMaxBytes = 8 << 20
+
+// openAISSEEventDataComplete 报告暂存事件的 data 是否完整：按 SSE 规则以 "\n" 拼接
+// 各 data 行后为合法 JSON（或 [DONE]）。用于区分「只缺结尾空行的完整事件」与
+// 「上游中途断开留下的半截事件」。
+func openAISSEEventDataComplete(event []byte) bool {
+	return openAISSEEventLinesComplete(strings.Split(strings.TrimSuffix(string(event), "\n"), "\n"))
+}
+
+// openAISSEEventLinesComplete 是 openAISSEEventDataComplete 的按行版本。
+func openAISSEEventLinesComplete(lines []string) bool {
+	var data []string
+	for _, line := range lines {
+		if value, ok := extractOpenAISSEDataLine(line); ok {
+			data = append(data, value)
+		}
+	}
+	if len(data) == 0 {
+		return false
+	}
+	joined := strings.TrimSpace(strings.Join(data, "\n"))
+	return joined == "[DONE]" || json.Valid([]byte(joined))
 }
 
 // extractOpenAISSEDataLine 低开销提取 SSE `data:` 行内容。
