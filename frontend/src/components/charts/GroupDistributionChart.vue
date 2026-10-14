@@ -105,6 +105,8 @@
                     :loading="breakdownLoading"
                     :error="accountBreakdownError"
                     :show-chart="false"
+                    embedded
+                    :show-account-cost="showAccountCost"
                     @retry="loadBreakdown(group.group_id)"
                   />
                   <UserBreakdownSubTable
