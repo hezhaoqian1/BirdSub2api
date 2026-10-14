@@ -1,5 +1,48 @@
 <template>
-  <div class="p-4">
+  <!-- Embedded mode: compact sub-table matching UserBreakdownSubTable style -->
+  <div v-if="embedded" class="bg-gray-50/50 dark:bg-dark-700/30">
+    <div v-if="loading" class="flex items-center justify-center py-3">
+      <LoadingSpinner />
+    </div>
+    <div v-else-if="error" class="flex items-center justify-center gap-2 py-2 text-xs text-gray-400">
+      <span>{{ t('admin.dashboard.accountStatsFailed') }}</span>
+      <button type="button" class="text-primary-600 hover:underline" @click="emit('retry')">{{ t('admin.dashboard.retryAccountStats') }}</button>
+    </div>
+    <div v-else-if="displayAccountStats.length === 0" class="py-2 text-center text-xs text-gray-400">
+      {{ t('admin.dashboard.noDataAvailable') }}
+    </div>
+    <table v-else class="w-full text-xs">
+      <tbody>
+        <tr
+          v-for="account in displayAccountStats"
+          :key="account.account_id"
+          class="border-t border-gray-100/50 dark:border-dark-700/50"
+        >
+          <td class="max-w-[120px] truncate py-1 pl-6 text-gray-600 dark:text-gray-300" :title="accountLabel(account)">
+            {{ accountLabel(account) }}
+          </td>
+          <td class="py-1 text-right text-gray-500 dark:text-gray-400">
+            {{ formatNumber(account.requests) }}
+          </td>
+          <td class="py-1 text-right text-gray-500 dark:text-gray-400">
+            {{ formatTokens(account.total_tokens) }}
+          </td>
+          <td class="py-1 text-right text-green-600 dark:text-green-400">
+            ${{ formatCost(account.actual_cost) }}
+          </td>
+          <td v-if="showAccountCost" class="py-1 text-right text-orange-500 dark:text-orange-400">
+            ${{ formatCost(account.account_cost) }}
+          </td>
+          <td class="py-1 pr-1 text-right text-gray-400 dark:text-gray-500">
+            ${{ formatCost(account.cost) }}
+          </td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- Standalone mode: full chart + table with header -->
+  <div v-else class="p-4">
     <div class="mb-4 flex flex-wrap items-center justify-between gap-3">
       <h3 class="text-sm font-semibold text-gray-900 dark:text-white">
         {{ t('admin.dashboard.accountDistribution') }}
@@ -128,11 +171,15 @@ const props = withDefaults(defineProps<{
   metric?: DistributionMetric
   error?: boolean
   showChart?: boolean
+  embedded?: boolean
+  showAccountCost?: boolean
 }>(), {
   loading: false,
   metric: 'account_cost',
   error: false,
   showChart: true,
+  embedded: false,
+  showAccountCost: true,
 })
 
 const emit = defineEmits<{
