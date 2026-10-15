@@ -1209,6 +1209,22 @@ func (s *PricingService) validatePricingURL(raw string) (string, error) {
 
 // GetModelPricing 获取模型价格（带模糊匹配）
 func (s *PricingService) GetModelPricing(modelName string) *LiteLLMModelPricing {
+	// DeepSeek 展示与扣费共用人民币数值的低谷价；峰谷倍率仍由计费层应用。
+	// 远端 USD 目录不覆盖本站口径，分组/渠道自定义价格仍由上层处理。
+	if isDeepSeekModel(modelName) {
+		pricing := &LiteLLMModelPricing{
+			InputCostPerToken:       deepseekFlashOffPeakInputPrice,
+			OutputCostPerToken:      deepseekFlashOffPeakOutputPrice,
+			CacheReadInputTokenCost: deepseekFlashOffPeakCacheRead,
+			LiteLLMProvider:         "deepseek", Mode: "chat", SupportsPromptCaching: true,
+		}
+		if isDeepSeekProModel(modelName) {
+			pricing.InputCostPerToken = deepseekProOffPeakInputPrice
+			pricing.OutputCostPerToken = deepseekProOffPeakOutputPrice
+			pricing.CacheReadInputTokenCost = deepseekProOffPeakCacheRead
+		}
+		return pricing
+	}
 	// 与实际扣费共用本站 Kimi 人民币数值价卡，避免可用渠道等直接读取
 	// PricingService 的页面展示远端 USD 价。分组/渠道自定义价格仍在上层覆盖。
 	if card := kimiDefaultPricing(modelName); card != nil {
