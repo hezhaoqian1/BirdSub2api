@@ -264,23 +264,20 @@ func resolvedChannelTimeMultiplier(resolved *ResolvedPricing, at time.Time) floa
 // sources can price the requested model.
 var ErrModelPricingUnavailable = errors.New("pricing not found")
 
-// ---- DeepSeek 官方低谷价（$/token）----
-// 2026-09-10 官方公告：DeepSeek-V4.1-Flash（新名 deepseek-flash）大幅降价，
-// Flash 低谷价降为 $0.15/$0.60/$0.003 per MTok（输入缓存未命中/输出/缓存命中）；
-// deepseek-v4-pro 继续按 Pro 价计费，见官方更新日志与现行价格页。
-// Source: https://api-docs.deepseek.com/zh-cn/updates
-//
-//	https://api-docs.deepseek.com/quick_start/pricing
+// ---- DeepSeek 本站低谷价（美元额度/token）----
+// 本站 ¥1 购买 $1 额度，使用官方人民币数值，不做汇率换算。
+// Flash 输入/输出/缓存读取为 $1/$4/$0.02 per MTok；Pro 为 $4.5/$13.5/$0.15。
+// Source (2026-10-15): https://api-docs.deepseek.com/zh-cn/quick_start/pricing/
 //
 // 本站高峰价 = 2× 低谷价；每日 01:00–04:00 与 06:00–10:00 UTC，
 // 不排除周末及节假日。时段判定见 deepseekPeakMultiplierAt。
 const (
-	deepseekFlashOffPeakInputPrice  = 1.5e-7  // $0.15 per MTok (cache miss)
-	deepseekFlashOffPeakOutputPrice = 6.0e-7  // $0.60 per MTok
-	deepseekFlashOffPeakCacheRead   = 3e-9    // $0.003 per MTok (cache hit)
-	deepseekProOffPeakInputPrice    = 6.6e-7  // $0.66 per MTok (cache miss)
-	deepseekProOffPeakOutputPrice   = 1.98e-6 // $1.98 per MTok
-	deepseekProOffPeakCacheRead     = 2.2e-8  // $0.022 per MTok (cache hit)
+	deepseekFlashOffPeakInputPrice  = 1e-6    // $1 per MTok (cache miss)
+	deepseekFlashOffPeakOutputPrice = 4e-6    // $4 per MTok
+	deepseekFlashOffPeakCacheRead   = 0.02e-6 // $0.02 per MTok (cache hit)
+	deepseekProOffPeakInputPrice    = 4.5e-6  // $4.5 per MTok (cache miss)
+	deepseekProOffPeakOutputPrice   = 13.5e-6 // $13.5 per MTok
+	deepseekProOffPeakCacheRead     = 0.15e-6 // $0.15 per MTok (cache hit)
 )
 
 // isDeepSeekModel 判断模型名是否为 DeepSeek 模型（大小写不敏感）。
@@ -676,18 +673,18 @@ func (s *BillingService) initFallbackPricing() {
 	// deepseek-v4-flash-vision-exp；deepseek-chat / deepseek-reasoner 已停止服务，
 	// 其余 deepseek-*（含未知型号）统一按 flash 价兜底（见 getFallbackPricing），
 	// 避免计费中断。
-	// 以下均为官方低谷价；高峰价 = 2× 低谷价（高峰时段 01:00–04:00
+	// 以下均为本站人民币数值低谷价；高峰价 = 2× 低谷价（高峰时段 01:00–04:00
 	// 与 06:00–10:00 UTC，每日均适用），见 deepseekPeakMultiplierAt。
 	s.fallbackPrices["deepseek-v4-pro"] = &ModelPricing{
-		InputPricePerToken:     deepseekProOffPeakInputPrice,  // $0.66 per MTok (cache miss, off-peak)
-		OutputPricePerToken:    deepseekProOffPeakOutputPrice, // $1.98 per MTok
-		CacheReadPricePerToken: deepseekProOffPeakCacheRead,   // $0.022 per MTok (cache hit)
+		InputPricePerToken:     deepseekProOffPeakInputPrice,  // $4.5 per MTok (cache miss, off-peak)
+		OutputPricePerToken:    deepseekProOffPeakOutputPrice, // $13.5 per MTok
+		CacheReadPricePerToken: deepseekProOffPeakCacheRead,   // $0.15 per MTok (cache hit)
 		SupportsCacheBreakdown: false,
 	}
 	s.fallbackPrices["deepseek-v4-flash"] = &ModelPricing{
-		InputPricePerToken:     deepseekFlashOffPeakInputPrice,  // $0.15 per MTok (cache miss, off-peak)
-		OutputPricePerToken:    deepseekFlashOffPeakOutputPrice, // $0.60 per MTok
-		CacheReadPricePerToken: deepseekFlashOffPeakCacheRead,   // $0.003 per MTok (cache hit)
+		InputPricePerToken:     deepseekFlashOffPeakInputPrice,  // $1 per MTok (cache miss, off-peak)
+		OutputPricePerToken:    deepseekFlashOffPeakOutputPrice, // $4 per MTok
+		CacheReadPricePerToken: deepseekFlashOffPeakCacheRead,   // $0.02 per MTok (cache hit)
 		SupportsCacheBreakdown: false,
 	}
 	s.fallbackPrices["deepseek-v4-flash-vision-exp"] = &ModelPricing{
@@ -1830,8 +1827,8 @@ func (s *BillingService) applyModelSpecificPricingPolicyEx(model string, pricing
 			}
 		}
 	}
-	// DeepSeek 模型：无论 JSON/远端价格表给什么价，一律强制官方低谷价
-	// （Flash 三档为 2026-09-10 官方降价后口径）。这是覆盖远端旧价的关键——远端
+	// DeepSeek 模型：无论 JSON/远端价格表给什么价，一律强制本站人民币数值低谷价
+	// （2026-10-15 核对的官方人民币价数值）。这是覆盖远端旧价的关键——远端
 	// 仓库不可改，生产会先拉到旧价，必须在此兜底修正；克隆后再覆盖，避免污染
 	// 共享 fallbackPrices 指针。
 	// 档位判定：含 "deepseek-v4-pro" 的版本化名称（如 deepseek-v4-pro-0813）归 pro 档，
