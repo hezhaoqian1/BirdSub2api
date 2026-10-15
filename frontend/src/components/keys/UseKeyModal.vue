@@ -1701,6 +1701,26 @@ function generateOpenCodeConfig(platform: string, baseUrl: string, apiKey: strin
         }
       }
     },
+    'gemini-4-argon': {
+      name: 'Gemini 4 Argon',
+      limit: { context: 1048576, output: 32768 },
+      modalities: { input: ['text', 'image', 'pdf'], output: ['text'] }
+    },
+    'gemini-3.8-flash': {
+      name: 'Gemini 3.8 Flash',
+      limit: { context: 1048576, output: 65536 },
+      modalities: { input: ['text', 'image', 'pdf'], output: ['text'] }
+    },
+    'gemini-3.6-flash': {
+      name: 'Gemini 3.6 Flash',
+      limit: { context: 1048576, output: 65536 },
+      modalities: { input: ['text', 'image', 'pdf'], output: ['text'] }
+    },
+    'gemini-3.5-flash-lite': {
+      name: 'Gemini 3.5 Flash-Lite',
+      limit: { context: 1048576, output: 65536 },
+      modalities: { input: ['text', 'image', 'pdf'], output: ['text'] }
+    },
     'gemini-3.5-flash': {
       name: 'Gemini 3.5 Flash',
       limit: {

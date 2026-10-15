@@ -460,6 +460,20 @@ func (s *BillingService) initFallbackPricing() {
 		SupportsCacheBreakdown:     true,
 	}
 
+	// Gemini 4 Argon: introductory USD rates through 2026-11-30.
+	// From 2026-12-01 the official rates are $4/$20/$0.20 per MTok.
+	// Implicit cache reads only; explicit cache creation is not supported.
+	s.fallbackPrices["gemini-4-argon"] = &ModelPricing{
+		InputPricePerToken:     2e-6,
+		OutputPricePerToken:    10e-6,
+		CacheReadPricePerToken: 0.1e-6,
+	}
+	s.fallbackPrices["gemini-3.5-flash-lite"] = &ModelPricing{
+		InputPricePerToken:     0.3e-6,
+		OutputPricePerToken:    2.5e-6,
+		CacheReadPricePerToken: 0.03e-6,
+	}
+
 	// Gemini 3.1 Pro
 	s.fallbackPrices["gemini-3.1-pro"] = &ModelPricing{
 		InputPricePerToken:         2e-6,   // $2 per MTok
@@ -970,6 +984,12 @@ func (s *BillingService) initFallbackPricing() {
 // getFallbackPricing 根据模型系列获取回退价格
 func (s *BillingService) getFallbackPricing(model string) *ModelPricing {
 	modelLower := strings.ToLower(model)
+	// Match these distinct SKUs exactly, including native/Vertex resource names.
+	// Do not accidentally price image, TTS, or unknown Argon variants as text.
+	switch canonical := normalizeModelNameForPricing(modelLower); canonical {
+	case "gemini-4-argon", "gemini-3.5-flash-lite":
+		return s.fallbackPrices[canonical]
+	}
 	if modelLower == "jev-latest" {
 		return s.fallbackPrices["jev-latest"]
 	}

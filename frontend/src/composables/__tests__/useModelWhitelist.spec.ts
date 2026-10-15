@@ -8,6 +8,14 @@ import { buildModelMappingObject, getModelsByPlatform, getPresetMappingsByPlatfo
 import { BUILTIN_PLATFORM_CATALOG, resetPlatformCatalog, setPlatformCatalog } from '@/constants/platformCatalog'
 
 describe('useModelWhitelist', () => {
+  it('Gemini API catalog and presets include current text models', () => {
+    for (const model of ['gemini-4-argon', 'gemini-3.8-flash', 'gemini-3.6-flash', 'gemini-3.5-flash-lite']) {
+      expect(getModelsByPlatform('gemini')).toContain(model)
+      expect(getPresetMappingsByPlatform('gemini')).toContainEqual(expect.objectContaining({ from: model, to: model }))
+    }
+    expect(getModelsByPlatform('antigravity')).not.toContain('gemini-4-argon')
+  })
+
   it('平台清单中没有内置模型列表的多协议供应商不预填白名单', () => {
     setPlatformCatalog({
       ...BUILTIN_PLATFORM_CATALOG,

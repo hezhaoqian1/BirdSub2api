@@ -11,6 +11,10 @@ func TestDefaultModels_ContainsImageModels(t *testing.T) {
 	}
 
 	required := []string{
+		"gemini-4-argon",
+		"gemini-3.8-flash",
+		"gemini-3.6-flash",
+		"gemini-3.5-flash-lite",
 		"gemini-2.5-flash-image",
 		"gemini-3.1-flash-image",
 	}
@@ -31,7 +35,7 @@ func TestGoogleOneModels_ExcludeUnsupportedNewAndImageModels(t *testing.T) {
 			t.Fatalf("expected Google One model %q to map to itself", id)
 		}
 	}
-	for _, id := range []string{"gemini-2.5-flash-image", "gemini-3.1-flash-image", "gemini-3.5-flash"} {
+	for _, id := range []string{"gemini-2.5-flash-image", "gemini-3.1-flash-image", "gemini-3.5-flash", "gemini-4-argon", "gemini-3.8-flash", "gemini-3.5-flash-lite"} {
 		if _, ok := mapping[id]; ok {
 			t.Fatalf("did not expect unsupported Google One model %q", id)
 		}
