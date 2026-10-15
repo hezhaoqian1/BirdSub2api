@@ -652,6 +652,27 @@ describe('UseKeyModal', () => {
     expect(wrapper.findAll('pre code').map((code) => code.text()).join('\n')).not.toContain('x-openai-actor-authorization')
   })
 
+  it('renders current Gemini models with a safe Argon single-request output limit', async () => {
+    const wrapper = mount(UseKeyModal, {
+      props: { show: true, apiKey: 'sk-test', baseUrl: 'https://example.com/v1', platform: 'gemini' },
+      global: {
+        stubs: {
+          BaseDialog: { template: '<div><slot /><slot name="footer" /></div>' },
+          Icon: { template: '<span />' }
+        }
+      }
+    })
+    const tab = wrapper.findAll('button').find((button) => button.text().includes('keys.useKeyModal.cliTabs.opencode'))
+    expect(tab).toBeDefined()
+    await tab!.trigger('click')
+    await nextTick()
+    const text = wrapper.get('pre code').text()
+    for (const model of ['gemini-4-argon', 'gemini-3.8-flash', 'gemini-3.6-flash', 'gemini-3.5-flash-lite']) {
+      expect(text).toContain('"' + model + '"')
+    }
+    expect(text).toContain('"output": 32768')
+  })
+
   it('renders GPT-5.4 mini entry in OpenCode config', async () => {
     const wrapper = mount(UseKeyModal, {
       props: {

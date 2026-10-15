@@ -26,6 +26,28 @@ This local copy serves as a fallback when the remote file cannot be downloaded d
 - Docker container network limitations
 
 ## Update Process
+
+Gemini text-model additions were checked against Google's official model and
+[pricing documentation](https://ai.google.dev/gemini-api/docs/pricing) on 2026-10-15.
+The bundled catalog and billing fallbacks include Gemini 4 Argon ($2 input / $10
+output / $0.10 cached input per million tokens), Gemini 3.8/3.7/3.6 Flash
+($0.75/$3.75/$0.075), and Gemini 3.5 Flash-Lite ($0.30/$2.50/$0.03).
+Gemini 3.7 is retained only as a billing compatibility entry: Google deprecated
+it and automatically routes its API requests to 3.8. It is not added to the
+recommended API model presets.
+These use USD rates, independently of the Kimi/DeepSeek credit convention above.
+Argon's introductory rates end on 2026-11-30 and double on 2026-12-01; the Flash
+promotional rates double on 2027-01-01. Refresh both the bundled catalog and
+hard-coded billing fallbacks at those dates if remote pricing is unavailable.
+
+Argon supports implicit cache reads, not explicit cache creation. Its 1M-token
+shared context is not a single GenerateContent response limit: the client preset
+uses the conservative 32K non-streaming limit. Automatic continuation for long
+decode is not implemented here. Native GenerateContent and streaming requests
+reuse the existing forwarding path. API catalog entries do not grant upstream
+access; existing account/group allowlists still apply. Legacy Google One OAuth
+and the Antigravity default catalog are not expanded to claim Argon availability.
+
 The pricingService will:
 1. First attempt to download the latest version from GitHub
 2. If download fails, use this local copy as fallback
