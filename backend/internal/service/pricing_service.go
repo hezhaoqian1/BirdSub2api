@@ -1209,6 +1209,18 @@ func (s *PricingService) validatePricingURL(raw string) (string, error) {
 
 // GetModelPricing 获取模型价格（带模糊匹配）
 func (s *PricingService) GetModelPricing(modelName string) *LiteLLMModelPricing {
+	// 与实际扣费共用本站 Kimi 人民币数值价卡，避免可用渠道等直接读取
+	// PricingService 的页面展示远端 USD 价。分组/渠道自定义价格仍在上层覆盖。
+	if card := kimiDefaultPricing(modelName); card != nil {
+		return &LiteLLMModelPricing{
+			InputCostPerToken:                   card.InputPricePerToken,
+			OutputCostPerToken:                  card.OutputPricePerToken,
+			CacheReadInputTokenCost:             card.CacheReadPricePerToken,
+			CacheCreationInputTokenCost:         card.CacheCreationPricePerToken,
+			CacheCreationInputTokenCostAbove1hr: card.CacheCreation1hPrice,
+			LiteLLMProvider:                     "moonshot", Mode: "chat", SupportsPromptCaching: true,
+		}
+	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 

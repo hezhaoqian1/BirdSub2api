@@ -813,51 +813,17 @@ func (s *BillingService) initFallbackPricing() {
 	}
 
 	// ---- 月之暗面 Kimi（K 系列）----
-	// Source: https://platform.moonshot.cn/docs/pricing/overview (元/百万 tokens 口径)
-	//       交叉验证：https://www.tmtpost.com/7961404.html (USD 口径)
-	// Moonshot V1 (¥2/¥5/¥10 多 tier) 公开页未直接标注 USD 价，本分支不覆盖，避免误计价。
-	// K2-0905 / K2-0711 官方页面未保留定价，不覆盖。
-	// Kimi K3 国际站 USD 价目：https://platform.kimi.ai/docs/pricing/chat-k3.md
+	// 本站 ¥1 购买 $1 额度：人民币价格数值直接作为美元额度单价，不做汇率换算。
+	// Source (2026-10-15): https://platform.kimi.com/docs/pricing/chat
+	// K2.5 / K2 / K2-thinking 保留历史人民币价；Moonshot V1 不在本价卡范围内。
 	// Kimi Code bare aliases（k3 / k3-256k）官方无按 token 价目；复用 API Platform
 	// kimi-k3 档位作代理计费 fallback（同 kimi-for-coding 对 K2.6 的处理口径）。
-	s.fallbackPrices["kimi-k3"] = &ModelPricing{
-		InputPricePerToken:     3e-6,    // $3.00 per MTok (cache miss)
-		OutputPricePerToken:    15e-6,   // $15.00 per MTok
-		CacheReadPricePerToken: 0.30e-6, // $0.30 per MTok (cache hit)
-		SupportsCacheBreakdown: false,
+	for _, model := range []string{
+		"kimi-k3", "kimi-k2.7-code", "kimi-k2.7-code-highspeed", "kimi-k2.6",
+		"kimi-for-coding", "kimi-k2.5", "kimi-k2-thinking", "kimi-k2",
+	} {
+		s.fallbackPrices[model] = kimiDefaultPricing(model)
 	}
-	s.fallbackPrices["kimi-k2.6"] = &ModelPricing{
-		InputPricePerToken:     0.95e-6, // $0.95 per MTok (cache miss)
-		OutputPricePerToken:    4e-6,    // $4.00 per MTok
-		CacheReadPricePerToken: 0.15e-6, // $0.15 per MTok (cache hit, ¥1.10)
-		SupportsCacheBreakdown: false,
-	}
-	// kimi-for-coding 走 Kimi Coding endpoint，按当前 K2.6 coding 档位兜底计费。
-	s.fallbackPrices["kimi-for-coding"] = &ModelPricing{
-		InputPricePerToken:     0.95e-6,
-		OutputPricePerToken:    4e-6,
-		CacheReadPricePerToken: 0.15e-6,
-		SupportsCacheBreakdown: false,
-	}
-	s.fallbackPrices["kimi-k2.5"] = &ModelPricing{
-		InputPricePerToken:     0.60e-6, // $0.60 per MTok
-		OutputPricePerToken:    3e-6,    // $3.00 per MTok
-		CacheReadPricePerToken: 0.098e-6,
-		SupportsCacheBreakdown: false,
-	}
-	s.fallbackPrices["kimi-k2-thinking"] = &ModelPricing{
-		InputPricePerToken:     0.56e-6, // ¥4/百万 ≈ $0.56
-		OutputPricePerToken:    2.24e-6, // ¥16/百万
-		CacheReadPricePerToken: 0.14e-6, // ¥1/百万
-		SupportsCacheBreakdown: false,
-	}
-	s.fallbackPrices["kimi-k2"] = &ModelPricing{
-		InputPricePerToken:     0.56e-6, // ¥4/百万
-		OutputPricePerToken:    2.24e-6, // ¥16/百万
-		CacheReadPricePerToken: 0.14e-6, // ¥1/百万
-		SupportsCacheBreakdown: false,
-	}
-
 	// ---- MiniMax M 系列 ----
 	// Source: https://platform.minimax.io/docs/guides/pricing-paygo
 	// 注意：MiniMax M3 在 >512K context 时价格翻倍，本兜底采用 ≤512K 标准 tier（保守口径，对用户有利）。
@@ -1157,30 +1123,9 @@ func (s *BillingService) getFallbackPricing(model string) *ModelPricing {
 		return s.fallbackPrices["glm-4-32b-0414-128k"]
 	}
 
-	// 月之暗面 Kimi（kimi-k3 / k3 / k3-256k / kimi-k2.6 / kimi-for-coding / kimi-k2.5 / kimi-k2-thinking / kimi-k2）
-	// K2-0905 / K2-0711 官方未保留定价，不进入 fallback。
-	// K3 规则置于 K2 前：API Platform 仅官方 kimi-k3（及 / 路径后缀）；
-	// Code bare aliases 仅精确 k3 / k3-256k 或 /k3|/k3-256k 后缀，避免 kimi-k30 等未知型号误命中。
-	// 注意：kimi-k3[1m] 是 Claude Code 上下文选择语法，不是 Kimi API 模型 ID，不进入 fallback。
-	if strings.Contains(modelLower, "kimi-for-coding") {
-		return s.fallbackPrices["kimi-for-coding"]
-	}
-	if modelLower == "kimi-k3" || strings.HasSuffix(modelLower, "/kimi-k3") ||
-		modelLower == "k3" || modelLower == "k3-256k" ||
-		strings.HasSuffix(modelLower, "/k3") || strings.HasSuffix(modelLower, "/k3-256k") {
-		return s.fallbackPrices["kimi-k3"]
-	}
-	if strings.Contains(modelLower, "kimi-k2.6") || strings.Contains(modelLower, "kimi-k2-6") {
-		return s.fallbackPrices["kimi-k2.6"]
-	}
-	if strings.Contains(modelLower, "kimi-k2.5") || strings.Contains(modelLower, "kimi-k2-5") {
-		return s.fallbackPrices["kimi-k2.5"]
-	}
-	if strings.Contains(modelLower, "kimi-k2-thinking") || strings.Contains(modelLower, "kimi-k2-thinking-") {
-		return s.fallbackPrices["kimi-k2-thinking"]
-	}
-	if strings.Contains(modelLower, "kimi-k2") || strings.Contains(modelLower, "kimi/k2") {
-		return s.fallbackPrices["kimi-k2"]
+	// Kimi 默认价卡与动态价格覆盖共用别名解析。
+	if key := kimiPricingModel(modelLower); key != "" {
+		return s.fallbackPrices[key]
 	}
 
 	// MiniMax M 系列（M3 / M2.7 / M2.5 / M2.1 / M2；含 highspeed 变体）
@@ -1867,13 +1812,23 @@ func (s *BillingService) applyModelSpecificPricingPolicy(model string, pricing *
 }
 
 // applyModelSpecificPricingPolicyEx 与 applyModelSpecificPricingPolicy 相同，
-// 但由调用方控制是否强制 DeepSeek 官方价（forceDeepSeekRates），并显式传入
+// 但由调用方控制是否强制本站默认价卡（forceDefaultRates），并显式传入
 // 计费时点 pricingAt（保留调用方时点接口；当前默认价卡不依赖切换时点）。
 // calculateTokenCost 对分组/渠道自定义定价（Source 非 LiteLLM）传 false：
 // 强制覆盖会把运营者配置的售价盖回官方价，违反自定义定价语义。
-func (s *BillingService) applyModelSpecificPricingPolicyEx(model string, pricing *ModelPricing, forceDeepSeekRates bool, pricingAt time.Time) *ModelPricing {
+func (s *BillingService) applyModelSpecificPricingPolicyEx(model string, pricing *ModelPricing, forceDefaultRates bool, pricingAt time.Time) *ModelPricing {
 	if pricing == nil {
 		return nil
+	}
+	// 默认价卡统一用人民币数值计美元额度；远端 USD 目录不能覆盖本站口径。
+	// 分组/渠道自定义价格在此传 false，继续按管理员配置计费。
+	if forceDefaultRates {
+		if key := kimiPricingModel(model); key != "" {
+			if card := s.fallbackPrices[key]; card != nil {
+				cloned := *card
+				return &cloned
+			}
+		}
 	}
 	// DeepSeek 模型：无论 JSON/远端价格表给什么价，一律强制官方低谷价
 	// （Flash 三档为 2026-09-10 官方降价后口径）。这是覆盖远端旧价的关键——远端
@@ -1884,7 +1839,7 @@ func (s *BillingService) applyModelSpecificPricingPolicyEx(model string, pricing
 	// 官方更新日志确认 V4 Pro 继续提供且计费方式不变。
 	// 高峰时段倍率不在本函数处理，由 calculateTokenCost 按 deepseekPeakMultiplierAt
 	// 对默认价卡另行叠加（分组/渠道自定义定价不叠加）。
-	if forceDeepSeekRates && isDeepSeekModel(model) {
+	if forceDefaultRates && isDeepSeekModel(model) {
 		cloned := *pricing
 		if isDeepSeekProModel(model) {
 			cloned.InputPricePerToken = deepseekProOffPeakInputPrice
@@ -1901,7 +1856,7 @@ func (s *BillingService) applyModelSpecificPricingPolicyEx(model string, pricing
 	}
 	// Claude Haiku 5.5：远端价格表可能只有基础档价格而缺少 >100K 长上下文档，
 	// 默认价卡下补齐官方 5x 档位，避免长 prompt 按低档少收。
-	if forceDeepSeekRates && claude.IsHaiku55(model) && pricing.LongContextInputThreshold <= 0 {
+	if forceDefaultRates && claude.IsHaiku55(model) && pricing.LongContextInputThreshold <= 0 {
 		cloned := *pricing
 		cloned.LongContextInputThreshold = 100_000
 		cloned.LongContextThresholdInclusive = false
