@@ -465,8 +465,8 @@ func TestGatewayServiceRecordUsage_DeepSeekAccountStatsUsesRequestPricingAtAndUp
 		name        string
 		offPeakCost float64
 	}{
-		{"deepseek-v4-flash", 1000*1.5e-7 + 500*6e-7 + 1000*3e-9},
-		{"deepseek-v4-pro", 1000*6.6e-7 + 500*1.98e-6 + 1000*2.2e-8},
+		{"deepseek-v4-flash", 1000*1e-6 + 500*4e-6 + 1000*0.02e-6},
+		{"deepseek-v4-pro", 1000*4.5e-6 + 500*13.5e-6 + 1000*0.15e-6},
 	} {
 		for _, slot := range []struct {
 			name       string
