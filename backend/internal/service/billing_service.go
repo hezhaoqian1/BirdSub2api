@@ -1062,6 +1062,10 @@ func (s *BillingService) getFallbackPricing(model string) *ModelPricing {
 		return s.fallbackPrices["gemini-3.8-flash"]
 	}
 
+	// Resolve dated snapshots before broad Flash/Pro aliases.
+	if card := deepseekDefaultPricing(modelLower); card != nil {
+		return card
+	}
 	// DeepSeek 系列：官方模型 V4 Pro/Flash（含 vision-exp）按各自价卡；
 	// 其余 deepseek-*（含已停服的 deepseek-chat / deepseek-reasoner 与未知型号）
 	// 统一按 flash 价兜底，避免计费中断。新名字由 fallback warn 日志
@@ -1847,29 +1851,16 @@ func (s *BillingService) applyModelSpecificPricingPolicyEx(model string, pricing
 			}
 		}
 	}
-	// DeepSeek 模型：无论 JSON/远端价格表给什么价，一律强制本站人民币数值低谷价
-	// （2026-10-15 核对的官方人民币价数值）。这是覆盖远端旧价的关键——远端
-	// 仓库不可改，生产会先拉到旧价，必须在此兜底修正；克隆后再覆盖，避免污染
-	// 共享 fallbackPrices 指针。
-	// 档位判定：含 "deepseek-v4-pro" 的版本化名称（如 deepseek-v4-pro-0813）归 pro 档，
-	// 其余 deepseek-*（含已停服的 chat/reasoner 与未知型号）统一归 flash 档。
-	// 官方更新日志确认 V4 Pro 继续提供且计费方式不变。
-	// 高峰时段倍率不在本函数处理，由 calculateTokenCost 按 deepseekPeakMultiplierAt
-	// 对默认价卡另行叠加（分组/渠道自定义定价不叠加）。
-	if forceDefaultRates && isDeepSeekModel(model) {
-		cloned := *pricing
-		if isDeepSeekProModel(model) {
-			cloned.InputPricePerToken = deepseekProOffPeakInputPrice
-			cloned.OutputPricePerToken = deepseekProOffPeakOutputPrice
-			cloned.CacheReadPricePerToken = deepseekProOffPeakCacheRead
-		} else {
-			// deepseek-flash（= V4.1-Flash）、deepseek-v4-flash /
-			// deepseek-v4-flash-vision-exp 与其余 deepseek-* 共用 flash 价。
-			cloned.InputPricePerToken = deepseekFlashOffPeakInputPrice
-			cloned.OutputPricePerToken = deepseekFlashOffPeakOutputPrice
-			cloned.CacheReadPricePerToken = deepseekFlashOffPeakCacheRead
+	// Share the exact snapshot/default card with display and fallback pricing.
+	// Peak multiplication remains in calculateTokenCost; custom prices are preserved.
+	if forceDefaultRates {
+		if card := deepseekDefaultPricing(model); card != nil {
+			cloned := *pricing
+			cloned.InputPricePerToken = card.InputPricePerToken
+			cloned.OutputPricePerToken = card.OutputPricePerToken
+			cloned.CacheReadPricePerToken = card.CacheReadPricePerToken
+			return &cloned
 		}
-		return &cloned
 	}
 	// Claude Haiku 5.5：远端价格表可能只有基础档价格而缺少 >100K 长上下文档，
 	// 默认价卡下补齐官方 5x 档位，避免长 prompt 按低档少收。

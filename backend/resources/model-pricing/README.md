@@ -9,7 +9,7 @@ The original file is maintained by the LiteLLM project and mirrored into the `pr
 
 ## Purpose
 
-DeepSeek entries use this site's credit convention as of 2026-10-15: ¥1 purchases
+DeepSeek entries use this site's credit convention as of 2026-10-16: ¥1 purchases
 $1 of credit, so official CNY price numbers are stored as dollar-denominated credit
 rates without currency conversion. Off-peak input/output/cache-read rates per
 million tokens are $1/$4/$0.02 for Flash and $4.5/$13.5/$0.15 for Pro.
@@ -17,6 +17,16 @@ The runtime pricing policy also applies these rates when the remote USD catalog
 is loaded. Existing daily peak windows (09:00–12:00 and 14:00–18:00 Beijing time,
 including weekends and holidays) still charge 2× these rates. Group and user
 multipliers are unchanged and continue to apply separately.
+
+Explicit snapshots have separate Bailian CNY cards (input/output/cache read per
+million tokens): `deepseek-v4-flash-0731` is $1.5/$4.5/$0.3 and
+`deepseek-v4-pro-0813` is $4.5/$13.5/$0.9 off-peak. The cache prices use Bailian's
+20% input-price rule. Sources: [model pricing](https://help.aliyun.com/zh/model-studio/model-pricing)
+and [context cache](https://help.aliyun.com/zh/model-studio/context-cache).
+Unversioned aliases keep the direct API defaults above because production mixes
+official and reseller routes under these names. In particular, do not globally
+apply Bailian's legacy `deepseek-v4-pro` price to the direct API alias. Explicit
+snapshot cards do not change account model mappings or group/user multipliers.
 
 This local copy serves as a fallback when the remote file cannot be downloaded due to:
 - Network restrictions
