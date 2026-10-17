@@ -9,7 +9,7 @@ import random
 import re
 from fractions import Fraction
 
-VERSION = '1.2.1'
+VERSION = '1.2.2'
 ROOT = pathlib.Path(__file__).parent
 SUITES = {
     'speed': ('速度与流式协议', '3 次相同输出任务；区分首思考、首正文、总耗时、尾部等待'),
