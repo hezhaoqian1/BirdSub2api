@@ -23,7 +23,11 @@ var hybridProbeKeys = map[int64]int64{}
 
 func hybridActivityFor(groupID int64) *hybridGroupActivity {
 	value, _ := hybridBusinessActivity.LoadOrStore(groupID, &hybridGroupActivity{})
-	return value.(*hybridGroupActivity)
+	activity, ok := value.(*hybridGroupActivity)
+	if !ok {
+		panic("invalid hybrid activity entry")
+	}
+	return activity
 }
 
 func BeginHybridBusinessRequest(groupID int64) func() {
@@ -47,8 +51,11 @@ func HybridBusinessActivity(groupID int64) (int64, time.Time) {
 
 func HybridBusinessActivitySnapshot(visit func(groupID int64, inFlight int64, lastActivity time.Time)) {
 	hybridBusinessActivity.Range(func(key, value any) bool {
-		groupID := key.(int64)
-		activity := value.(*hybridGroupActivity)
+		groupID, keyOK := key.(int64)
+		activity, valueOK := value.(*hybridGroupActivity)
+		if !keyOK || !valueOK {
+			return true
+		}
 		_, lastActivity := HybridBusinessActivity(groupID)
 		visit(groupID, activity.inFlight.Load(), lastActivity)
 		return true

@@ -666,7 +666,7 @@ func validateHaiku55Request(body []byte) error {
 	case "enabled":
 		return fmt.Errorf("claude-haiku-5-5 requires adaptive thinking; omit thinking or use thinking.type=adaptive and output_config.effort")
 	case "between_tools":
-		return fmt.Errorf("claude-haiku-5-5 does not support thinking.type=between_tools; use adaptive or disabled")
+		return fmt.Errorf("claude-haiku-5-5 requires adaptive thinking; thinking.type=between_tools is unsupported (use thinking.type=disabled at high effort or below)")
 	case "disabled":
 		effort := gjson.GetBytes(body, "output_config.effort").String()
 		if effort == "xhigh" || effort == "max" {
@@ -679,7 +679,7 @@ func validateHaiku55Request(body []byte) error {
 	temperature := gjson.GetBytes(body, "temperature")
 	topP := gjson.GetBytes(body, "top_p")
 	if temperature.Exists() && topP.Exists() {
-		return fmt.Errorf("claude-haiku-5-5 does not accept temperature and top_p together")
+		return fmt.Errorf("claude-haiku-5-5 does not allow temperature and top_p together; omit both")
 	}
 	if temperature.Exists() && (temperature.Type != gjson.Number || temperature.Float() != 1) {
 		return fmt.Errorf("claude-haiku-5-5 does not support non-default temperature")

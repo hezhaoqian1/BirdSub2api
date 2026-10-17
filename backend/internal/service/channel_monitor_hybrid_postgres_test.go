@@ -21,12 +21,12 @@ func TestHybridPostgresPersistence(t *testing.T) {
 	}
 	db, err := sql.Open("postgres", dsn)
 	require.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	db.SetMaxOpenConns(1)
 	schema := "hybrid_test_" + uuid.NewString()[:8]
 	_, err = db.Exec("CREATE SCHEMA " + schema)
 	require.NoError(t, err)
-	defer db.Exec("DROP SCHEMA " + schema + " CASCADE")
+	defer func() { _, _ = db.Exec("DROP SCHEMA " + schema + " CASCADE") }()
 	_, err = db.Exec("SET search_path TO " + schema)
 	require.NoError(t, err)
 	_, err = db.Exec(`CREATE TABLE usage_logs(id bigserial,request_id text,first_token_ms bigint,group_id bigint,requested_model text,model text,api_key_id bigint,created_at timestamptz,actual_cost numeric,input_tokens bigint,output_tokens bigint,cache_read_tokens bigint,cache_creation_tokens bigint,request_type integer);

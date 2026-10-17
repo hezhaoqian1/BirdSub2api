@@ -16,9 +16,9 @@ func buildSSE(events [][2]string) string {
 	var b strings.Builder
 	for _, ev := range events {
 		if ev[0] != "" {
-			b.WriteString("event: " + ev[0] + "\n")
+			_, _ = b.WriteString("event: " + ev[0] + "\n")
 		}
-		b.WriteString("data: " + ev[1] + "\n\n")
+		_, _ = b.WriteString("data: " + ev[1] + "\n\n")
 	}
 	return b.String()
 }
@@ -260,7 +260,7 @@ func TestAssembleAnthropicStreamToMessage_ContentLimit(t *testing.T) {
 
 func TestAssembleAnthropicStreamToMessage_IdleTimeout(t *testing.T) {
 	pr, pw := io.Pipe()
-	defer pw.Close()
+	defer func() { _ = pw.Close() }()
 	go func() {
 		_, _ = io.WriteString(pw, buildSSE([][2]string{{"message_start", testMessageStart}}))
 		// 之后保持连接不关闭、也不再发送数据：模拟上游卡死。

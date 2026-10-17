@@ -93,7 +93,7 @@ func runHybridProbe(ctx context.Context, monitor *ChannelMonitor, model string, 
 		point.Detail = "探测连接失败或请求超时"
 		return point
 	}
-	defer response.Body.Close()
+	defer func() { _ = response.Body.Close() }()
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
 		point.Detail = fmt.Sprintf("探测返回 HTTP %d", response.StatusCode)
 		return point
@@ -125,7 +125,7 @@ func runHybridProbe(ctx context.Context, monitor *ChannelMonitor, model string, 
 				elapsed := time.Since(started).Milliseconds()
 				point.TTFTMs = &elapsed
 			}
-			text.WriteString(delta)
+			_, _ = text.WriteString(delta)
 		}
 		if done {
 			terminal = true

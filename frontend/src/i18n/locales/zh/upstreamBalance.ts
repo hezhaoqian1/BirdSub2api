@@ -1,0 +1,21 @@
+export default {
+  configureShort: '配置',
+  sub2apiTokenHint: '此 Sub2API 密钥设置了额度，返回的是密钥剩余额度。查询真实钱包余额需要使用上游支持返回钱包余额的密钥。',
+  title: '上游余额', configure: '配置余额查询', refresh: '刷新', refreshing: '查询中…', refreshPage: '刷新本页余额',
+  account: '账户余额', token: '令牌额度', subscription: '订阅额度', unlimited: '不限额', pending: '余额待查询',
+  disabled: '余额查询已关闭', unknownWallet: '账户余额未知', stale: '上次余额', shared: '共享钱包 #{id}',
+  updated: '更新于 {time}', failed: '查询失败', requestFailed: '余额查询请求失败，请重试',
+  mode: '查询方式', auto: '自动识别（使用现有 API Key）', sub2api: 'Sub2API 钱包 / 订阅',
+  new_api: 'New API 账户余额（访问令牌）', tokenMode: 'New API 令牌额度（API Key）',
+  sharedMode: '共用另一个账号的钱包', disabledMode: '关闭查询',
+  accessToken: '访问令牌', accessTokenHint: '上游控制台 → 安全与访问 → 访问令牌，创建具有读取个人账户权限的令牌。部分旧版在个人设置中提供；它与模型调用 API Key 不同。',
+  tokenSaved: '已保存，留空保持原令牌', tokenPlaceholder: '粘贴上游面板访问令牌',
+  userId: '上游用户 ID', userIdHint: '填写上游个人资料中的数字用户 ID。',
+  encryptionMissing: '服务器尚未设置固定 TOTP_ENCRYPTION_KEY，暂不能保存访问令牌。',
+  owner: '钱包来源账号 ID', ownerHint: '先让来源账号成功查到账户余额，再填写它在本站的账号 ID。仅关联同一上游的同一实际钱包；令牌额度不可共享。',
+  sharedConfirm: '我确认这些账号使用同一个上游钱包',
+  save: '保存并查询', saving: '保存中…', cancel: '取消', saveFailed: '保存失败，请重试',
+  autoHint: '新增和导入的 API Key 账号默认自动识别。此页面打开时每 5 分钟更新；手动刷新间隔至少 30 秒。查询失败保留上次结果，不影响账号调度。',
+  tokenHint: '这里只能查到令牌额度。要看真实账户余额，请配置访问令牌，或在上游开启“允许查询用户额度”。',
+  quotaHint: '上游未提供可确认的货币换算，保留原始额度单位。', rawQuota: '原始额度', low: '余额不足'
+}

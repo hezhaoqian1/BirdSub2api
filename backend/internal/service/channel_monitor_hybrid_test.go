@@ -148,7 +148,7 @@ func TestHybridConfigValidation(t *testing.T) {
 func TestHybridPassiveCountsAndExclusions(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	require.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	minute := time.Now().UTC().Truncate(time.Minute)
 	mock.ExpectQuery("WITH usage_observations AS").WithArgs(int64(1), "model", int64(9), minute, minute.Add(time.Minute)).WillReturnRows(sqlmock.NewRows([]string{"success", "ttft", "owner", "status", "upstream_status", "error_type", "message"}).AddRow(true, 2000, "", 0, 0, "", "").AddRow(false, nil, "client", 401, 0, "", "invalid api key").AddRow(false, nil, "provider", 502, 401, "", "invalid api key"))
 	svc := &HybridMonitorService{db: db}
@@ -164,7 +164,7 @@ func TestHybridPassiveCountsAndExclusions(t *testing.T) {
 func TestHybridUserSnapshotPrivacy(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	require.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	rule := hybridTestRule()
 	cfg := HybridMonitorConfig{Enabled: true, Rules: []HybridMonitorRule{rule}}
 	raw, _ := json.Marshal(cfg)

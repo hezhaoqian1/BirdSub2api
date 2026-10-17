@@ -460,14 +460,6 @@ func (s *BillingService) initFallbackPricing() {
 		SupportsCacheBreakdown:     true,
 	}
 
-	// Gemini 4 Argon: introductory USD rates through 2026-11-30.
-	// From 2026-12-01 the official rates are $4/$20/$0.20 per MTok.
-	// Implicit cache reads only; explicit cache creation is not supported.
-	s.fallbackPrices["gemini-4-argon"] = &ModelPricing{
-		InputPricePerToken:     2e-6,
-		OutputPricePerToken:    10e-6,
-		CacheReadPricePerToken: 0.1e-6,
-	}
 	s.fallbackPrices["gemini-3.5-flash-lite"] = &ModelPricing{
 		InputPricePerToken:     0.3e-6,
 		OutputPricePerToken:    2.5e-6,
@@ -516,6 +508,27 @@ func (s *BillingService) initFallbackPricing() {
 		InputPricePerToken:     0.75e-6,
 		OutputPricePerToken:    3.75e-6,
 		CacheReadPricePerToken: 0.075e-6,
+		SupportsCacheBreakdown: false,
+	}
+
+	// Gemini 4 Argon (Google AI pricing: $2 input / $10 output / $0.10 cached
+	// input per MTok, promotional through 2026-11-30; official rates double to
+	// $4/$20/$0.20 from 2026-12-01). One rate covers every prompt length.
+	// Antigravity's -high/-low/-medium aliases are matched below so unavailable
+	// remote pricing never records token-bearing requests at $0.
+	s.fallbackPrices["gemini-4-argon"] = &ModelPricing{
+		InputPricePerToken:     2e-6,
+		OutputPricePerToken:    10e-6,
+		CacheReadPricePerToken: 0.1e-6,
+		SupportsCacheBreakdown: false,
+	}
+
+	// Gemini 4 Argon Cyber Permissive (Vertex AI pricing: $4 input / $20 output /
+	// $0.20 cached input per MTok). The Gemini 4 Argon promotion does not apply.
+	s.fallbackPrices["gemini-4-argon-cyber-permissive"] = &ModelPricing{
+		InputPricePerToken:     4e-6,
+		OutputPricePerToken:    20e-6,
+		CacheReadPricePerToken: 0.2e-6,
 		SupportsCacheBreakdown: false,
 	}
 
@@ -983,12 +996,10 @@ func (s *BillingService) initFallbackPricing() {
 
 // getFallbackPricing 根据模型系列获取回退价格
 func (s *BillingService) getFallbackPricing(model string) *ModelPricing {
-	modelLower := strings.ToLower(model)
-	// Match these distinct SKUs exactly, including native/Vertex resource names.
-	// Do not accidentally price image, TTS, or unknown Argon variants as text.
-	switch canonical := normalizeModelNameForPricing(modelLower); canonical {
-	case "gemini-4-argon", "gemini-3.5-flash-lite":
-		return s.fallbackPrices[canonical]
+	modelLower := normalizeAntigravityClaudeTierAlias(strings.ToLower(model))
+	// Keep the fork's Flash Lite SKU without overriding upstream Argon tier matching.
+	if normalizeModelNameForPricing(modelLower) == "gemini-3.5-flash-lite" {
+		return s.fallbackPrices["gemini-3.5-flash-lite"]
 	}
 	if modelLower == "jev-latest" {
 		return s.fallbackPrices["jev-latest"]
@@ -1060,6 +1071,13 @@ func (s *BillingService) getFallbackPricing(model string) *ModelPricing {
 	}
 	if strings.Contains(modelLower, "gemini-3.8-flash") || strings.Contains(modelLower, "gemini-3-8-flash") {
 		return s.fallbackPrices["gemini-3.8-flash"]
+	}
+	// Cyber 变体不享受 Gemini 4 Argon 的优惠价，必须先于 "gemini-4-argon" 判。
+	if strings.Contains(modelLower, "gemini-4-argon-cyber") {
+		return s.fallbackPrices["gemini-4-argon-cyber-permissive"]
+	}
+	if strings.Contains(modelLower, "gemini-4-argon") {
+		return s.fallbackPrices["gemini-4-argon"]
 	}
 
 	// Resolve dated snapshots before broad Flash/Pro aliases.

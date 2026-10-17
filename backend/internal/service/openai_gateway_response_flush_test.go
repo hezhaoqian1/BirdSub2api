@@ -278,7 +278,8 @@ func TestOpenAIResponseFlush_OutputWithoutTerminalFlushesResidualWithoutFailover
 }
 
 func TestOpenAIResponseFlush_ReadErrorDropsTruncatedEventBeforeResponseFailed(t *testing.T) {
-	complete := "event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"hello\"}\n\n"
+	created := "data: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_test\",\"created_at\":1700000000}}\n\n"
+	complete := created + "event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"hello\"}\n\n"
 	partial := "event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"wor"
 	recorder := newOpenAIResponseFlushRecorder()
 
@@ -299,6 +300,16 @@ func TestOpenAIResponseFlush_ReadErrorDropsTruncatedEventBeforeResponseFailed(t 
 			}
 		}
 		require.True(t, json.Valid([]byte(strings.Join(data, "\n"))), "every SSE event must carry valid JSON: %q", frame)
+		var event struct {
+			Type     string `json:"type"`
+			Response struct {
+				CreatedAt int64 `json:"created_at"`
+			} `json:"response"`
+		}
+		require.NoError(t, json.Unmarshal([]byte(strings.Join(data, "\n")), &event))
+		if event.Type == "response.failed" {
+			require.Equal(t, int64(1700000000), event.Response.CreatedAt, "local read errors must preserve upstream created_at")
+		}
 	}
 	require.Equal(t, 1, strings.Count(gotBody, "event: response.failed\n"))
 	require.NotContains(t, gotBody, "event: error\n")
@@ -419,7 +430,7 @@ func TestOpenAIResponseFlush_KeepaliveDoesNotSplitOpenEvent(t *testing.T) {
 func TestOpenAIResponseFlush_FailedAndErrorEventsFlushAtBoundaries(t *testing.T) {
 	t.Run("failed at EOF", func(t *testing.T) {
 		body := "data: {\"type\":\"response.output_text.delta\",\"delta\":\"a\"}\n\n" +
-			"data: {\"type\":\"response.failed\",\"response\":{\"error\":{\"code\":\"safety_error\",\"message\":\"blocked\"},\"usage\":{\"input_tokens\":3,\"output_tokens\":1}}}\n"
+			"data: {\"type\":\"response.failed\",\"response\":{\"created_at\":1700000000,\"error\":{\"code\":\"safety_error\",\"message\":\"blocked\"},\"usage\":{\"input_tokens\":3,\"output_tokens\":1}}}\n"
 		recorder := newOpenAIResponseFlushRecorder()
 
 		result, err := runOpenAIResponseFlushTest(recorder, io.NopCloser(strings.NewReader(body)), config.GatewayConfig{})
@@ -429,7 +440,7 @@ func TestOpenAIResponseFlush_FailedAndErrorEventsFlushAtBoundaries(t *testing.T)
 		require.Equal(t, 3, result.usage.InputTokens)
 		gotBody, flushes := recorder.snapshot()
 		expectedBody := "data: {\"type\":\"response.output_text.delta\",\"delta\":\"a\"}\n\n" +
-			"data: {\"type\":\"response.failed\",\"response\":{\"error\":{\"code\":\"safety_error\",\"message\":\"blocked\"}}}\n"
+			"data: {\"type\":\"response.failed\",\"response\":{\"created_at\":1700000000,\"error\":{\"code\":\"safety_error\",\"message\":\"blocked\"}}}\n"
 		require.Equal(t, expectedBody, gotBody)
 		require.Len(t, flushes, 2)
 		require.Contains(t, flushes[1], "response.failed")
@@ -717,7 +728,7 @@ func (r *hangingOpenAISSEAfterTerminal) Close() error {
 }
 
 func TestOpenAIResponseFlush_TerminalEventEndsStreamWithoutEOF(t *testing.T) {
-	body := "data: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\",\"output\":[],\"usage\":{\"input_tokens\":7,\"output_tokens\":5}}}\n\n"
+	body := "data: {\"type\":\"response.completed\",\"response\":{\"created_at\":1700000000,\"status\":\"completed\",\"output\":[],\"usage\":{\"input_tokens\":7,\"output_tokens\":5}}}\n\n"
 	reader := &hangingOpenAISSEAfterTerminal{payload: []byte(body), release: make(chan struct{})}
 	recorder := newOpenAIResponseFlushRecorder()
 	resultCh, errCh := runOpenAIResponseFlushTestAsync(recorder, reader, config.GatewayConfig{StreamKeepaliveInterval: 1, StreamDataIntervalTimeout: 30})
