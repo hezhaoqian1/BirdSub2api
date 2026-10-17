@@ -260,7 +260,7 @@ func TestAssembleAnthropicStreamToMessage_ContentLimit(t *testing.T) {
 
 func TestAssembleAnthropicStreamToMessage_IdleTimeout(t *testing.T) {
 	pr, pw := io.Pipe()
-	defer pw.Close()
+	defer func() { _ = pw.Close() }()
 	go func() {
 		_, _ = io.WriteString(pw, buildSSE([][2]string{{"message_start", testMessageStart}}))
 		// 之后保持连接不关闭、也不再发送数据：模拟上游卡死。

@@ -300,7 +300,7 @@ func normalizeGPT6SolLunaChatToolCalling(body []byte, model string) ([]byte, err
 	}
 	tools := gjson.GetBytes(body, "tools")
 	functions := gjson.GetBytes(body, "functions")
-	if !(tools.IsArray() && len(tools.Array()) > 0) && !(functions.IsArray() && len(functions.Array()) > 0) {
+	if (!tools.IsArray() || len(tools.Array()) == 0) && (!functions.IsArray() || len(functions.Array()) == 0) {
 		return body, nil
 	}
 	if strings.EqualFold(strings.TrimSpace(gjson.GetBytes(body, "reasoning_effort").String()), "none") {

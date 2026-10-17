@@ -109,7 +109,7 @@ func (s *HybridMonitorService) Save(ctx context.Context, cfg HybridMonitorConfig
 	if err != nil {
 		return cfg, err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 	var previousRaw []byte
 	var storedVersion int
 	if err = tx.QueryRowContext(ctx, "SELECT version,config FROM channel_monitor_hybrid_config WHERE id=1 FOR UPDATE").Scan(&storedVersion, &previousRaw); err != nil {
@@ -371,7 +371,7 @@ func (s *HybridMonitorService) tick(parent context.Context) {
 			}
 		}
 	}
-	rows.Close()
+	_ = rows.Close()
 	var wait sync.WaitGroup
 	slots := make(chan struct{}, 8)
 	for _, pending := range tasks {
@@ -499,7 +499,7 @@ func (s *HybridMonitorService) passive(ctx context.Context, rule HybridMonitorRu
 	if err != nil {
 		return point, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	timings := []int64{}
 	for rows.Next() {
 		var success bool
@@ -539,7 +539,7 @@ func (s *HybridMonitorService) persist(ctx context.Context, cfg HybridMonitorCon
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 	var version int
 	if err = tx.QueryRowContext(ctx, "SELECT version FROM channel_monitor_hybrid_config WHERE id=1 FOR SHARE").Scan(&version); err != nil {
 		return err
@@ -610,7 +610,7 @@ func (s *HybridMonitorService) scheduleProbes(parent context.Context, cfg Hybrid
 		return
 	}
 	inFlight := int64(0)
-	lastActivity := time.Time{}
+	var lastActivity time.Time
 	var sharedInFlight int64
 	var sharedLast sql.NullTime
 	currentMinute := now.Truncate(time.Minute)
@@ -633,7 +633,7 @@ func (s *HybridMonitorService) scheduleProbes(parent context.Context, cfg Hybrid
 			candidates = append(candidates, id)
 		}
 	}
-	rows.Close()
+	_ = rows.Close()
 	for _, id := range candidates {
 		rule, exists := rules[id]
 		if !exists {
@@ -735,11 +735,11 @@ func (s *HybridMonitorService) Snapshot(ctx context.Context, admin bool, allowed
 			var raw []byte
 			var point HybridMonitorMinute
 			if err = rows.Scan(&ruleID, &raw); err != nil {
-				rows.Close()
+				_ = rows.Close()
 				return cfg, items, err
 			}
 			if err = json.Unmarshal(raw, &point); err != nil {
-				rows.Close()
+				_ = rows.Close()
 				return cfg, items, err
 			}
 			if !admin {
@@ -754,7 +754,7 @@ func (s *HybridMonitorService) Snapshot(ctx context.Context, admin bool, allowed
 			minutes[ruleID] = append(minutes[ruleID], point)
 		}
 		err = rows.Err()
-		rows.Close()
+		_ = rows.Close()
 		if err != nil {
 			return cfg, items, err
 		}

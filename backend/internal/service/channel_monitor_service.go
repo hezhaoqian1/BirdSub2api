@@ -70,7 +70,7 @@ type channelMonitorRuntimeReader interface {
 
 // ChannelMonitorService 渠道监控管理服务。
 type ChannelMonitorService struct {
-	Hybrid *HybridMonitorService
+	Hybrid    *HybridMonitorService
 	repo      ChannelMonitorRepository
 	encryptor SecretEncryptor
 	// settings is optional; when nil, RunCheck fails closed for active probes

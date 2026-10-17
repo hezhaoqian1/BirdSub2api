@@ -553,7 +553,6 @@ func (s *GatewayService) handleStreamingResponseAnthropicAPIKeyPassthrough(
 						} else {
 							logger.LegacyPrintf("service.gateway", "[Anthropic passthrough] Dropping incomplete SSE event at upstream EOF: account=%d bytes=%d", account.ID, len(pendingEvent))
 						}
-						pendingEvent = pendingEvent[:0]
 					}
 					flusher.Flush()
 				}
@@ -581,7 +580,6 @@ func (s *GatewayService) handleStreamingResponseAnthropicAPIKeyPassthrough(
 					} else {
 						logger.LegacyPrintf("service.gateway", "[Anthropic passthrough] Dropping incomplete SSE event after upstream read error: account=%d bytes=%d", account.ID, len(pendingEvent))
 					}
-					pendingEvent = pendingEvent[:0]
 				}
 				if sawTerminalEvent {
 					return &streamingResult{usage: usage, firstTokenMs: firstTokenMs, clientDisconnect: clientDisconnected}, nil

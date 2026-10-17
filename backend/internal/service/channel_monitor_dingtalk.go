@@ -85,7 +85,7 @@ func (n *dingTalkChannelMonitorNotifier) notifyFailureWithConfig(ctx context.Con
 		}
 		return false, fmt.Errorf("send dingtalk alert: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	respBody, err := io.ReadAll(io.LimitReader(resp.Body, channelMonitorAlertMaxBody))
 	if err != nil {
 		return false, fmt.Errorf("read dingtalk alert response: %w", err)

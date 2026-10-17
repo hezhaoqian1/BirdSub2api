@@ -437,7 +437,6 @@ func (s *OpenAIGatewayService) handleNativeAnthropicStreamingResponse(
 						} else {
 							logger.LegacyPrintf("service.gateway", "[CN Anthropic 直通] Dropping incomplete SSE event at upstream EOF: account=%d bytes=%d", account.ID, len(pendingEvent))
 						}
-						pendingEvent = pendingEvent[:0]
 					}
 					flusher.Flush()
 				}

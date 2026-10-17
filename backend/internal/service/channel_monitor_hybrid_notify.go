@@ -47,7 +47,7 @@ func (s *HybridMonitorService) send(ctx context.Context, message string) error {
 	}
 	plain, err := s.encryptor.Decrypt(webhook)
 	if err != nil {
-		return errors.New("Webhook 解密失败")
+		return errors.New("webhook 解密失败")
 	}
 	if secret != "" {
 		secret, err = s.encryptor.Decrypt(secret)
@@ -73,7 +73,7 @@ func (s *HybridMonitorService) send(ctx context.Context, message string) error {
 	if err != nil {
 		return errors.New("钉钉请求失败或超时")
 	}
-	defer response.Body.Close()
+	defer func() { _ = response.Body.Close() }()
 	if response.StatusCode != 200 {
 		return fmt.Errorf("钉钉 HTTP %d", response.StatusCode)
 	}
@@ -153,7 +153,7 @@ func (s *HybridMonitorService) syncRuntimeAlert(ctx context.Context) {
 	if err != nil {
 		return
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 	var heartbeat time.Time
 	var alerted bool
 	if err = tx.QueryRowContext(ctx, "SELECT heartbeat_at,blind_alerted FROM channel_monitor_hybrid_runtime WHERE id=1 FOR UPDATE").Scan(&heartbeat, &alerted); err != nil {
@@ -189,7 +189,7 @@ func (s *HybridMonitorService) deliver(ctx context.Context, cfg HybridMonitorCon
 	if err != nil {
 		return
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 	rows, err := tx.QueryContext(ctx, `SELECT n.id,n.rule_id,n.minute,n.kind,n.generation,n.message
  FROM channel_monitor_hybrid_notifications n
  WHERE n.sent_at IS NULL AND n.cancelled_at IS NULL AND n.attempts<8 AND n.next_attempt_at<=NOW()
@@ -215,7 +215,7 @@ func (s *HybridMonitorService) deliver(ctx context.Context, cfg HybridMonitorCon
 			list = append(list, entry)
 		}
 	}
-	rows.Close()
+	_ = rows.Close()
 	for _, entry := range list {
 		_, _ = tx.ExecContext(ctx, "UPDATE channel_monitor_hybrid_notifications SET locked_at=NOW(),locked_by=$2 WHERE id=$1", entry.id, workerID)
 	}
@@ -269,7 +269,7 @@ func (s *HybridMonitorService) Notifications(ctx context.Context) ([]map[string]
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	entries := []map[string]any{}
 	for rows.Next() {
 		var id int64

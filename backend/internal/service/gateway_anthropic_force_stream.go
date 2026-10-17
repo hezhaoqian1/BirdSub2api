@@ -122,11 +122,11 @@ func newAssembledBlock(fields map[string]any) *assembledBlock {
 	b := &assembledBlock{fields: fields}
 	// content_block_start 里的初始值（通常为空串）作为累积的前缀。
 	if s, ok := fields["text"].(string); ok {
-		b.text.WriteString(s)
+		_, _ = b.text.WriteString(s)
 		b.hasText = true
 	}
 	if s, ok := fields["thinking"].(string); ok {
-		b.thinking.WriteString(s)
+		_, _ = b.thinking.WriteString(s)
 		b.hasThink = true
 	}
 	if s, ok := fields["signature"].(string); ok {
@@ -261,12 +261,12 @@ func (a *anthropicStreamAssembler) ingestData(data string) {
 		switch delta.Get("type").String() {
 		case "text_delta":
 			s := delta.Get("text").String()
-			b.text.WriteString(s)
+			_, _ = b.text.WriteString(s)
 			b.hasText = true
 			a.contentBytes += int64(len(s))
 		case "thinking_delta":
 			s := delta.Get("thinking").String()
-			b.thinking.WriteString(s)
+			_, _ = b.thinking.WriteString(s)
 			b.hasThink = true
 			a.contentBytes += int64(len(s))
 		case "signature_delta":

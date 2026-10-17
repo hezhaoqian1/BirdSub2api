@@ -33,3 +33,5 @@ New API 通过不带认证的 `/api/status` 读取 `quota_per_unit`。只有明�
 - 本地回归覆盖了：模型流式响应保持打开时余额请求能完成、余额缓存淘汰不影响网关连接、单数据库连接在上游等待期间可执行其他查询、多个批次的数据库读取并发不超过 4、旧租约结果不能覆盖新配置。未对生产环境做负载测试。
 
 查询接口和字段映射参考并改写自 [CC Switch 的 UsageScriptModal.tsx](https://github.com/farion1231/cc-switch/blob/main/src/components/UsageScriptModal.tsx)，在 Go 中实现固定适配器，没有引入任意 JavaScript 执行。上游 MIT 许可及版权声明保存在 [cc-switch.txt](licenses/cc-switch.txt)。
+
+本地 PostgreSQL 集成验证：设置 `TEST_POSTGRES_DSN` 后运行 `go test -tags=integration ./internal/service -run TestUpstreamBalancePostgresLeaseAndSharedWallet`。测试创建并清理独立 schema，覆盖单连接池下的租约释放、共享钱包冷却和配置失效；未配置 DSN 时跳过。

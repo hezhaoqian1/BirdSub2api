@@ -101,7 +101,7 @@ func parseNewAPIBalance(body, status []byte, panel bool) (*UpstreamBalanceData, 
 	}
 	r := gjson.ParseBytes(body)
 	if !r.Get("success").Bool() {
-		return nil, errors.New("New API 认证失败，请检查访问令牌及用户 ID")
+		return nil, errors.New("上游 New API 认证失败，请检查访问令牌及用户 ID")
 	}
 	var remaining, used *float64
 	d := &UpstreamBalanceData{Scope: "account", Source: "new_api", Unit: "QUOTA"}
@@ -115,7 +115,7 @@ func parseNewAPIBalance(body, status []byte, panel bool) (*UpstreamBalanceData, 
 		remaining, used = balanceNumber(r.Get("data.total_available")), balanceNumber(r.Get("data.total_used"))
 	}
 	if remaining == nil && !d.Unlimited {
-		return nil, errors.New("New API 未返回有效余额字段")
+		return nil, errors.New("上游 New API 未返回有效余额字段")
 	}
 	// Read the site's conversion metadata; CC Switch's fixed 500000 would be
 	// incorrect on customized installations. Unknown units stay raw quota.
