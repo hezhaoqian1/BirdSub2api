@@ -459,7 +459,6 @@ func (s *OpenAIGatewayService) handleNativeAnthropicStreamingResponse(
 					} else {
 						logger.LegacyPrintf("service.gateway", "[CN Anthropic 直通] Dropping incomplete SSE event after upstream read error: account=%d bytes=%d", account.ID, len(pendingEvent))
 					}
-					pendingEvent = pendingEvent[:0]
 				}
 				if sawTerminalEvent {
 					return s.nativeAnthropicStreamResult(c, resp, usage, firstTokenMs, clientDisconnected, originalModel, billingModel, upstreamModel, reasoningEffort, startTime), nil

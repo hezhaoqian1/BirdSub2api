@@ -16,9 +16,9 @@ func buildSSE(events [][2]string) string {
 	var b strings.Builder
 	for _, ev := range events {
 		if ev[0] != "" {
-			b.WriteString("event: " + ev[0] + "\n")
+			_, _ = b.WriteString("event: " + ev[0] + "\n")
 		}
-		b.WriteString("data: " + ev[1] + "\n\n")
+		_, _ = b.WriteString("data: " + ev[1] + "\n\n")
 	}
 	return b.String()
 }

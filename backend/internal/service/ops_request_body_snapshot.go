@@ -272,13 +272,13 @@ func redactOpsRequestSnapshotText(text string) string {
 		if !isSensitiveKey(key) || m[5] == m[4] {
 			continue
 		}
-		b.WriteString(text[last:m[4]])
-		b.WriteString("[REDACTED]")
+		_, _ = b.WriteString(text[last:m[4]])
+		_, _ = b.WriteString("[REDACTED]")
 		last = m[5]
 	}
 	if last == 0 {
 		return text
 	}
-	b.WriteString(text[last:])
+	_, _ = b.WriteString(text[last:])
 	return b.String()
 }

@@ -130,7 +130,7 @@ func newAssembledBlock(fields map[string]any) *assembledBlock {
 		b.hasThink = true
 	}
 	if s, ok := fields["signature"].(string); ok {
-		b.signature.WriteString(s)
+		_, _ = b.signature.WriteString(s)
 		b.hasSig = true
 	}
 	return b
@@ -271,12 +271,12 @@ func (a *anthropicStreamAssembler) ingestData(data string) {
 			a.contentBytes += int64(len(s))
 		case "signature_delta":
 			s := delta.Get("signature").String()
-			b.signature.WriteString(s)
+			_, _ = b.signature.WriteString(s)
 			b.hasSig = true
 			a.contentBytes += int64(len(s))
 		case "input_json_delta":
 			s := delta.Get("partial_json").String()
-			b.inputJSON.WriteString(s)
+			_, _ = b.inputJSON.WriteString(s)
 			b.hasInput = true
 			a.contentBytes += int64(len(s))
 		case "citations_delta":
