@@ -27,16 +27,21 @@ beforeEach(() => vi.resetAllMocks())
 describe('upstream balance presentation', () => {
   it('labels an unlimited token without implying an unlimited wallet', () => {
     const wrapper = render()
-    expect(wrapper.text()).toContain('令牌额度 不限额')
-    expect(wrapper.text()).toContain('账户余额未知')
+    expect(wrapper.text()).toContain('令牌额度')
+    expect(wrapper.text()).toContain('不限额')
+    expect(wrapper.get('[title*="账户余额未知"]').exists()).toBe(true)
     expect(wrapper.text()).not.toContain('账户余额 不限额')
   })
-  it('retains a stale wallet value alongside the failure and timestamp', () => {
+  it('keeps stale details accessible without expanding every table row', async () => {
     const value = state()
     value.snapshot.data = { scope: 'account', remaining: 0, unit: 'USD', source: 'sub2api' }
     value.snapshot.error = '认证失败'
     const wrapper = render(value)
-    expect(wrapper.text()).toContain('账户余额 0 USD')
+    expect(wrapper.text()).toContain('0 USD')
+    expect(wrapper.text()).not.toContain('认证失败')
+    expect(wrapper.text()).not.toContain('更新于')
+    await wrapper.get('[aria-label="配置余额查询"]').trigger('click')
+    expect(wrapper.text()).toContain('余额 0 USD')
     expect(wrapper.text()).toContain('上次余额 · 认证失败')
     expect(wrapper.text()).toContain('更新于')
   })
@@ -55,6 +60,6 @@ describe('upstream balance presentation', () => {
   it('emits the shared source without adding balances together', () => {
     const value = state(); value.owner_account_id = 3; value.mode = 'shared'
     const wrapper = render(value)
-    expect(wrapper.text()).toContain('共享钱包 #3')
+    expect(wrapper.get('[title*="共享钱包 #3"]').exists()).toBe(true)
   })
 })

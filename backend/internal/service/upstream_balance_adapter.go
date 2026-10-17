@@ -100,7 +100,13 @@ func parseNewAPIBalance(body, status []byte, panel bool) (*UpstreamBalanceData, 
 		return nil, errors.New("上游未返回 JSON")
 	}
 	r := gjson.ParseBytes(body)
-	if !r.Get("success").Bool() {
+	// Some New API deployments (including ZZONE) use a boolean code rather
+	// than success. An explicit failure must never be overridden by another field.
+	success := r.Get("success")
+	if !success.Exists() {
+		success = r.Get("code")
+	}
+	if success.Type != gjson.True {
 		return nil, errors.New("上游 New API 认证失败，请检查访问令牌及用户 ID")
 	}
 	var remaining, used *float64
@@ -222,7 +228,7 @@ func (s *UpstreamBalanceService) query(ctx context.Context, a *Account, cfg bala
 	}
 	body, err := s.fetchBalanceJSON(ctx, a, root, "/api/usage/token/", key, "")
 	if err != nil {
-		return nil, errors.New("未能自动查询；New API 可配置访问令牌后重试")
+		return nil, fmt.Errorf("未能查询令牌额度：%w；New API 可配置访问令牌后重试", err)
 	}
 	status, _ := s.fetchBalanceJSON(ctx, a, root, "/api/status", "", "")
 	return parseNewAPIBalance(body, status, false)
