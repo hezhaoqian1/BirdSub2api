@@ -82,6 +82,15 @@ class WireTests(unittest.TestCase):
         self.assertIn('cache_accounting_mismatch',{f['code'] for f in r['flags']})
     def test_json_not_ttft(self):
         r=self.call('json');self.assertTrue(r['complete']);self.assertIsNone(r['first_content_s']);self.assertIn('stream_ignored',[f['code'] for f in r['flags']])
+    def test_long_stream_keeps_bounded_redacted_tail(self):
+        r=self.call('manyframes')
+        self.assertTrue(r['complete']);self.assertEqual(r['content'],'42')
+        self.assertEqual(r['event_count'],4106);self.assertEqual(len(r['events']),4000)
+        self.assertTrue(r['events_truncated']);self.assertEqual(len(r['tail_events']),64)
+        tail=r['tail_events']
+        self.assertTrue(any(c.get('finish_reason')=='stop' for e in tail for c in e['data'].get('choices',[])))
+        self.assertTrue(any(e['data'].get('usage',{}).get('prompt_tokens')==100 for e in tail))
+        self.assertNotIn('secret-test-key',json.dumps(r));self.assertIn('[API_KEY_REDACTED]',json.dumps(tail))
     def test_truncation_and_copy(self):
         r=self.call('length');self.assertFalse(r['complete']);self.assertFalse(r['delivered_correct'])
         r=self.call('copy');self.assertIn('reasoning_copied_to_content',[f['code'] for f in r['flags']]);self.assertFalse(r['delivered_correct'])

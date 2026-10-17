@@ -1,5 +1,6 @@
 """Bounded OpenAI-compatible collector. No retries or redirect credential forwarding."""
 import hashlib
+from collections import deque
 import json
 import multiprocessing as mp
 import math
@@ -145,6 +146,7 @@ def collect(url, key, payload=None, stop=None, idle=90, deadline=240, method='PO
     ctx = mp.get_context('spawn'); output = ctx.Queue(maxsize=256)
     process = ctx.Process(target=_wire, args=(output, method, url, key, raw, idle), daemon=True)
     start = time.perf_counter(); process.start(); finished = False
+    tail_events=deque(maxlen=64);event_count=0
     try:
         while not finished:
             elapsed = time.perf_counter() - start
@@ -163,8 +165,11 @@ def collect(url, key, payload=None, stop=None, idle=90, deadline=240, method='PO
             elif kind in ('malformed', 'non_json'):
                 result['malformed_frames'] += 1; result['error_sample'] = data
             elif kind == 'data':
+                event_count+=1
                 if len(result['events']) < 4000: result['events'].append({'t': t, 'data': data})
-                else: result['events_truncated'] = True
+                else:
+                    result['events_truncated'] = True
+                    tail_events.append({'t':t,'data':data})
                 if not isinstance(data, dict): result['malformed_frames'] += 1; continue
                 if method == 'GET': result['document'] = data; continue
                 if data.get('error'): result['response_error'] = data['error']
@@ -198,6 +203,8 @@ def collect(url, key, payload=None, stop=None, idle=90, deadline=240, method='PO
             if process.is_alive(): process.terminate(); process.join(timeout=2)
         output.close()
     result['wall_s'] = time.perf_counter() - start
+    result['event_count']=event_count
+    result['tail_events']=list(tail_events)
     if not finished: result['total_s'] = result['wall_s']
     result['usage'] = result['usage_frames'][-1] if result['usage_frames'] else None
     result['metrics'] = usage_summary(result['usage'])
