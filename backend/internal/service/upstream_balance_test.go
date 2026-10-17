@@ -380,3 +380,32 @@ func TestUpstreamBalanceSaveSharedWalletDoesNotRequireSecondDatabaseConnection(t
 	require.Equal(t, 10.0, *state.Snapshot.Data.Remaining)
 	require.NoError(t, mock.ExpectationsWereMet())
 }
+
+func TestUpstreamBalanceTokenEndpointPreservesTrailingSlash(t *testing.T) {
+	for _, allowlist := range []bool{false, true} {
+		cfg := &config.Config{}
+		cfg.Security.URLAllowlist.Enabled = allowlist
+		cfg.Security.URLAllowlist.UpstreamHosts = []string{"example.com"}
+		httpStub := &balanceHTTPTestStub{bodies: map[string]string{
+			"/api/usage/token/": `{"code":true,"data":{"unlimited_quota":true,"total_available":-10}}`,
+			"/api/status":       `{"data":{"quota_per_unit":500000,"quota_display_type":"USD"}}`,
+		}}
+		s := NewUpstreamBalanceService(nil, nil, nil, httpStub, nil, cfg)
+		a := &Account{ID: 7, Type: "apikey", Credentials: map[string]any{"base_url": "https://example.com/v1/", "api_key": "test-key"}}
+		data, err := s.query(t.Context(), a, balanceStoredConfig{Mode: "token"})
+		require.NoError(t, err, "allowlist enabled: %t", allowlist)
+		require.Equal(t, "token", data.Scope)
+		require.True(t, data.Unlimited)
+		require.Nil(t, data.Remaining)
+		require.Len(t, httpStub.requests, 2)
+		require.Equal(t, "https://example.com/api/usage/token/", httpStub.requests[0].URL.String())
+		require.Equal(t, "Bearer test-key", httpStub.requests[0].Header.Get("Authorization"))
+		require.True(t, HTTPUpstreamRedirectsDisabled(httpStub.requests[0].Context()))
+		require.Empty(t, httpStub.requests[1].Header.Get("Authorization"))
+		cfg.Security.URLAllowlist.Enabled = true
+		cfg.Security.URLAllowlist.UpstreamHosts = []string{"other.example.com"}
+		_, err = s.query(t.Context(), a, balanceStoredConfig{Mode: "token"})
+		require.Error(t, err)
+		require.Len(t, httpStub.requests, 2, "rejected target must not send credentials")
+	}
+}

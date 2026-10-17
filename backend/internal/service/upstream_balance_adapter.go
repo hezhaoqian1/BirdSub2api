@@ -151,6 +151,12 @@ func (s *UpstreamBalanceService) fetchBalanceJSON(ctx context.Context, a *Accoun
 	if err != nil {
 		return nil, errors.New("上游地址被出站安全策略拒绝")
 	}
+	// Base-URL validation trims trailing slashes, but New API's token route
+	// requires one. Restore the fixed endpoint's slash after policy validation;
+	// keep redirect following disabled so credentials cannot leave this origin.
+	if strings.HasSuffix(path, "/") {
+		target = strings.TrimRight(target, "/") + "/"
+	}
 	ctx = WithHTTPUpstreamRedirectsDisabled(ctx)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, target, nil)
 	if err != nil {
