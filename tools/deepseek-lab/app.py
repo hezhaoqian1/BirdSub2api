@@ -63,7 +63,11 @@ class Handler(BaseHTTPRequestHandler):
                 page=page.replace('__MODE__','登录保护 · 历史保存至持久卷' if security.HOSTED else '仅在本机运行')
                 page=page.replace('__LOGOUT__','<button id="logoutBtn" class="ghost">退出登录</button>' if security.HOSTED else '')
                 self.send(200,page,'text/html; charset=utf-8')
-            elif path in ('/style.css','/app.js','/report.js'):
+            elif path=='/app.js':
+                # One response and scope: UI startup cannot outlive/miss its renderer dependency.
+                bundle=(ROOT/'static/report.js').read_bytes()+b'\n;\n'+(ROOT/'static/app.js').read_bytes()
+                self.send(200,bundle,'text/javascript; charset=utf-8')
+            elif path in ('/style.css','/report.js'):
                 p=ROOT/'static'/path[1:];self.send(200,p.read_bytes(),'text/css; charset=utf-8' if p.suffix=='.css' else 'text/javascript; charset=utf-8')
             elif path=='/api/meta':self.send(200,dict(version=VERSION,suites=SUITES))
             elif path=='/api/history':self.send(200,engine.history())
