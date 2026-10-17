@@ -48,6 +48,8 @@ class MockHandler(BaseHTTPRequestHandler):
             self.wfile.write(('data: '+json.dumps(d,ensure_ascii=False)+'\n\n').encode());self.wfile.flush()
         try:
             self.wfile.write(b': heartbeat\n\n');self.wfile.flush()
+            if model=='manyframes':
+                for i in range(4100):send({'choices':[{'delta':{'reasoning_content':'x'}}],'sequence':i})
             send({'model':model,'choices':[{'index':0,'delta':{'reasoning_content':reason}}]})
             send({'model':model,'choices':[{'index':0,'delta':{'content':content[:2]}}]})
             time.sleep(.015)
@@ -57,6 +59,7 @@ class MockHandler(BaseHTTPRequestHandler):
             if model=='multiline':self.wfile.write(b'data: {"choices": [],\ndata: "usage": {"prompt_tokens": 1}}\n\n')
             send({'choices':[{'index':0,'delta':{},'finish_reason':finish}],'usage':usage})
             send({'choices':[],'usage':{}})
+            if model=='manyframes':send({'choices':[],'debug':self.headers.get('Authorization','')})
             if model!='nodone':self.wfile.write(b'data: [DONE]\n\n');self.wfile.flush()
         except (OSError,ConnectionError):pass
 
