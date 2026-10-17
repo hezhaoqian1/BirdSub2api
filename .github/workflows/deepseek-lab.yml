@@ -1,0 +1,30 @@
+name: DeepSeek Lab
+on:
+  push:
+    paths: ['tools/deepseek-lab/**', '.github/workflows/deepseek-lab.yml']
+  pull_request:
+    paths: ['tools/deepseek-lab/**', '.github/workflows/deepseek-lab.yml']
+permissions:
+  contents: read
+jobs:
+  lab:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        working-directory: tools/deepseek-lab
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '20'
+      - run: python -m pip install -r requirements.txt
+      - run: python -m unittest discover -s tests -v
+      - run: node --check static/app.js
+      - run: node --check static/report.js
+      - run: node --check static/login.js
