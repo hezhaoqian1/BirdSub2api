@@ -55,9 +55,9 @@ func TestGeminiLatestModelsPricing(t *testing.T) {
 		}
 	}
 	billing := NewBillingService(&config.Config{}, nil)
-	for _, model := range []string{"gemini-4-argon-unknown", "gemini-3.5-flash-lite-image"} {
-		require.Nil(t, billing.getFallbackPricing(model))
-	}
+	// Upstream v0.2.17 uses Argon family fallback for tier/variant aliases.
+	require.Same(t, billing.fallbackPrices["gemini-4-argon"], billing.getFallbackPricing("gemini-4-argon-unknown"))
+	require.Nil(t, billing.getFallbackPricing("gemini-3.5-flash-lite-image"))
 }
 
 func TestGeminiArgonNativeForwarding(t *testing.T) {
