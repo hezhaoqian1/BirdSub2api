@@ -1,8 +1,9 @@
 export default {
+  details: 'Balance details', pendingShort: '—', failedShort: 'Unavailable', disabledShort: 'Disabled',
   configureShort: 'Configure',
   sub2apiTokenHint: 'This Sub2API key has a quota. Its remaining quota is separate from the wallet. Use a key that exposes the upstream wallet balance to query the actual account balance.',
   title: 'Upstream balance', configure: 'Configure balance query', refresh: 'Refresh', refreshing: 'Checking…', refreshPage: 'Refresh page balances',
-  account: 'Account balance', token: 'Token quota', subscription: 'Subscription quota', unlimited: 'Unlimited', pending: 'Balance not checked',
+  account: 'Balance', token: 'Token quota', subscription: 'Subscription quota', unlimited: 'Unlimited', pending: 'Balance not checked',
   disabled: 'Balance query disabled', unknownWallet: 'Account balance unknown', stale: 'Last balance', shared: 'Shared wallet #{id}',
   updated: 'Updated {time}', failed: 'Query failed', requestFailed: 'Balance request failed. Please retry.',
   mode: 'Query method', auto: 'Detect automatically (existing API key)', sub2api: 'Sub2API wallet / subscription',

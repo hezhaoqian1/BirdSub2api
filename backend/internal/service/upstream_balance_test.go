@@ -83,6 +83,20 @@ func TestUpstreamBalanceNewAPINeverConfusesUnlimitedTokenWithWallet(t *testing.T
 	require.Error(t, err)
 }
 
+func TestUpstreamBalanceNewAPIBooleanCodeEnvelope(t *testing.T) {
+	// Sanitized shape captured from ZZONE's token usage endpoint.
+	body := []byte(`{"code":true,"message":"","data":{"object":"token_usage","total_available":-123,"total_used":123,"unlimited_quota":true}}`)
+	d, err := parseNewAPIBalance(body, nil, false)
+	require.NoError(t, err)
+	require.Equal(t, "token", d.Scope)
+	require.True(t, d.Unlimited)
+	require.Nil(t, d.Remaining)
+	for _, envelope := range []string{`"code":false`, `"code":0`, `"code":"true"`, `"success":false,"code":true`} {
+		_, err := parseNewAPIBalance([]byte(`{`+envelope+`,"data":{"unlimited_quota":true}}`), nil, false)
+		require.Error(t, err, envelope)
+	}
+}
+
 type balanceHTTPTestStub struct {
 	HTTPUpstream
 	requests []*http.Request

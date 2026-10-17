@@ -1,22 +1,41 @@
 <template>
-  <div class="mt-1 max-w-[240px] space-y-0.5 text-xs" data-testid="upstream-balance">
-    <div class="flex flex-wrap items-center gap-x-2 gap-y-0.5">
-      <span v-if="data" :class="data.remaining != null && data.remaining <= 0 ? 'text-red-600 dark:text-red-400' : 'text-gray-600 dark:text-gray-300'">
-        {{ t(`upstreamBalance.${data.scope}`) }}
-        <strong class="font-medium tabular-nums">{{ amount }}</strong>
-      </span>
-      <span v-else class="text-gray-400">{{ t(state?.mode === 'disabled' ? 'upstreamBalance.disabled' : state?.snapshot.error ? 'upstreamBalance.failed' : 'upstreamBalance.pending') }}</span>
-      <button v-if="state?.mode !== 'disabled'" type="button" class="text-primary-600 hover:underline disabled:opacity-50 dark:text-primary-400" :disabled="busy || saving" @click.stop="emit('refresh')">{{ t(busy ? 'upstreamBalance.refreshing' : 'upstreamBalance.refresh') }}</button>
-      <button type="button" class="text-gray-500 hover:underline dark:text-gray-400" :aria-label="t('upstreamBalance.configure')" @click.stop="open">{{ t('upstreamBalance.configureShort') }}</button>
-    </div>
-    <div v-if="state && state.owner_account_id !== state.account_id" class="text-primary-600 dark:text-primary-400">{{ t('upstreamBalance.shared', { id: state.owner_account_id }) }}</div>
-    <div v-if="data?.scope === 'token'" class="text-amber-600 dark:text-amber-400" :title="tokenHint">{{ t('upstreamBalance.unknownWallet') }}</div>
-    <div v-if="state?.snapshot.error" class="truncate text-amber-600 dark:text-amber-400" :title="state.snapshot.error">
-      {{ data ? t('upstreamBalance.stale') + ' · ' : '' }}{{ state.snapshot.error }}
-    </div>
-    <div v-if="state?.snapshot.fetched_at" class="text-[10px] text-gray-400">{{ t('upstreamBalance.updated', { time: new Date(state.snapshot.fetched_at * 1000).toLocaleString() }) }}</div>
+  <div class="inline-flex items-center gap-1 whitespace-nowrap text-xs" data-testid="upstream-balance">
+    <button
+      type="button"
+      class="inline-flex items-center gap-1.5 rounded px-1 py-1 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500"
+      :class="state?.snapshot.error ? 'text-amber-600 dark:text-amber-400' : data?.remaining != null && data.remaining <= 0 ? 'text-red-600 dark:text-red-400' : 'text-gray-600 dark:text-gray-300'"
+      :title="details"
+      :aria-label="`${t('upstreamBalance.details')}: ${details}`"
+      @click.stop="open"
+    >
+      <template v-if="data">
+        <span v-if="data.scope !== 'account'" class="text-gray-400 dark:text-dark-400">{{ t(`upstreamBalance.${data.scope}`) }}</span>
+        <span class="tabular-nums">{{ amount }}</span>
+        <Icon v-if="state?.snapshot.error" name="clock" size="xs" aria-hidden="true" />
+        <Icon v-else-if="state && state.owner_account_id !== state.account_id" name="link" size="xs" aria-hidden="true" />
+      </template>
+      <span v-else>{{ t(state?.mode === 'disabled' ? 'upstreamBalance.disabledShort' : state?.snapshot.error ? 'upstreamBalance.failedShort' : 'upstreamBalance.pendingShort') }}</span>
+    </button>
+    <button
+      v-if="state?.mode !== 'disabled'" type="button"
+      class="rounded p-1 text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 disabled:opacity-40 dark:text-dark-400 dark:hover:bg-dark-700 dark:hover:text-gray-300"
+      :disabled="busy || saving" :title="t('upstreamBalance.refresh')" :aria-label="t(busy ? 'upstreamBalance.refreshing' : 'upstreamBalance.refresh')"
+      @click.stop="emit('refresh')"
+    ><Icon name="refresh" size="xs" :class="{ 'animate-spin motion-reduce:animate-none': busy }" aria-hidden="true" /></button>
+    <button
+      type="button"
+      class="rounded p-1 text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 dark:text-dark-400 dark:hover:bg-dark-700 dark:hover:text-gray-300"
+      :title="t('upstreamBalance.configure')" :aria-label="t('upstreamBalance.configure')" @click.stop="open"
+    ><Icon name="cog" size="xs" aria-hidden="true" /></button>
     <BaseDialog :show="show" :title="`${t('upstreamBalance.configure')} · ${name}`" :close-on-escape="!saving" :show-close-button="!saving" @close="close">
       <form :id="`upstream-balance-form-${accountId}`" class="space-y-4" @submit.prevent="save">
+        <div class="space-y-1 rounded-lg bg-gray-50 p-3 text-sm dark:bg-dark-800">
+          <p v-if="data" class="text-gray-900 dark:text-gray-100">{{ t(`upstreamBalance.${data.scope}`) }} <span class="tabular-nums">{{ amount }}</span></p>
+          <p v-if="state && state.owner_account_id !== state.account_id" class="text-gray-500 dark:text-dark-400">{{ t('upstreamBalance.shared', { id: state.owner_account_id }) }}</p>
+          <p v-if="state?.snapshot.error" class="text-amber-600 dark:text-amber-400">{{ data ? t('upstreamBalance.stale') + ' · ' : '' }}{{ state.snapshot.error }}</p>
+          <p v-if="state?.snapshot.fetched_at" class="text-xs text-gray-500 dark:text-dark-400">{{ updatedAt }}</p>
+          <p v-if="data?.scope === 'token'" class="text-xs text-gray-500 dark:text-dark-400">{{ t('upstreamBalance.unknownWallet') }}</p>
+        </div>
         <p class="text-sm text-gray-500 dark:text-gray-400">{{ t('upstreamBalance.autoHint') }}</p>
         <label class="block text-sm">
           <span class="mb-1 block">{{ t('upstreamBalance.mode') }}</span>
@@ -61,6 +80,7 @@
 import { computed, reactive, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import BaseDialog from '@/components/common/BaseDialog.vue'
+import Icon from '@/components/icons/Icon.vue'
 import { saveUpstreamBalanceConfig, type BalanceMode, type UpstreamBalanceConfig, type UpstreamBalanceState } from '@/api/admin/upstreamBalances'
 
 const props = defineProps<{ accountId: number; name: string; state?: UpstreamBalanceState; busy?: boolean }>()
@@ -83,6 +103,20 @@ const amount = computed(() => {
   if (data.value?.remaining == null) return '—'
   const unit = data.value.unit === 'QUOTA' ? t('upstreamBalance.rawQuota') : data.value.unit
   return `${data.value.remaining.toLocaleString(undefined, { maximumFractionDigits: 4 })} ${unit}`
+})
+const updatedAt = computed(() => stateTime(props.state?.snapshot.fetched_at))
+function stateTime(timestamp?: number) {
+  return timestamp ? t('upstreamBalance.updated', { time: new Date(timestamp * 1000).toLocaleString() }) : ''
+}
+const details = computed(() => {
+  const lines: string[] = []
+  if (data.value) lines.push(`${t(`upstreamBalance.${data.value.scope}`)} ${amount.value}`)
+  else lines.push(t(props.state?.mode === 'disabled' ? 'upstreamBalance.disabled' : props.state?.snapshot.error ? 'upstreamBalance.failed' : 'upstreamBalance.pending'))
+  if (data.value?.scope === 'token') lines.push(t('upstreamBalance.unknownWallet'))
+  if (props.state && props.state.owner_account_id !== props.state.account_id) lines.push(t('upstreamBalance.shared', { id: props.state.owner_account_id }))
+  if (props.state?.snapshot.error) lines.push(`${data.value ? t('upstreamBalance.stale') + ' · ' : ''}${props.state.snapshot.error}`)
+  if (updatedAt.value) lines.push(updatedAt.value)
+  return lines.join('\n')
 })
 function open() {
   Object.assign(form, { mode: props.state?.mode || 'auto', access_token: '', user_id: props.state?.user_id || '', owner_account_id: props.state?.mode === 'shared' ? props.state.owner_account_id : undefined })

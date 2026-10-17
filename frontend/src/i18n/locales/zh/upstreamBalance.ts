@@ -1,8 +1,9 @@
 export default {
+  details: '余额详情', pendingShort: '—', failedShort: '未查到', disabledShort: '已关闭',
   configureShort: '配置',
   sub2apiTokenHint: '此 Sub2API 密钥设置了额度，返回的是密钥剩余额度。查询真实钱包余额需要使用上游支持返回钱包余额的密钥。',
   title: '上游余额', configure: '配置余额查询', refresh: '刷新', refreshing: '查询中…', refreshPage: '刷新本页余额',
-  account: '账户余额', token: '令牌额度', subscription: '订阅额度', unlimited: '不限额', pending: '余额待查询',
+  account: '余额', token: '令牌额度', subscription: '订阅额度', unlimited: '不限额', pending: '余额待查询',
   disabled: '余额查询已关闭', unknownWallet: '账户余额未知', stale: '上次余额', shared: '共享钱包 #{id}',
   updated: '更新于 {time}', failed: '查询失败', requestFailed: '余额查询请求失败，请重试',
   mode: '查询方式', auto: '自动识别（使用现有 API Key）', sub2api: 'Sub2API 钱包 / 订阅',
