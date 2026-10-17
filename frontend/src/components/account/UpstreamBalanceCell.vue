@@ -1,30 +1,34 @@
 <template>
-  <div class="inline-flex items-center gap-1 whitespace-nowrap text-xs" data-testid="upstream-balance">
-    <button
-      type="button"
-      class="inline-flex items-center gap-1.5 rounded px-1 py-1 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500"
-      :class="state?.snapshot.error ? 'text-amber-600 dark:text-amber-400' : data?.remaining != null && data.remaining <= 0 ? 'text-red-600 dark:text-red-400' : 'text-gray-600 dark:text-gray-300'"
-      :title="details"
-      :aria-label="`${t('upstreamBalance.details')}: ${details}`"
-      @click.stop="open"
-    >
-      <template v-if="data">
-        <span v-if="data.scope !== 'account'" class="text-gray-400 dark:text-dark-400">{{ t(`upstreamBalance.${data.scope}`) }}</span>
-        <span class="tabular-nums">{{ amount }}</span>
-        <Icon v-if="state?.snapshot.error" name="clock" size="xs" aria-hidden="true" />
-        <Icon v-else-if="state && state.owner_account_id !== state.account_id" name="link" size="xs" aria-hidden="true" />
+  <div class="flex h-6 min-w-[7rem] items-center gap-1" data-testid="upstream-balance">
+    <HelpTooltip class="-ml-1" width-class="w-max max-w-[calc(100vw-2rem)]">
+      <template #trigger>
+        <button
+          type="button"
+          class="inline-flex items-center gap-1.5 whitespace-nowrap border-b border-dotted border-gray-300 text-sm font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 dark:border-dark-600"
+          :class="state?.snapshot.error ? (data ? 'font-mono text-amber-600 dark:text-amber-400' : 'text-red-600 dark:text-red-400') : data ? (data.remaining != null && data.remaining <= 0 ? 'font-mono text-red-600 dark:text-red-400' : 'font-mono text-gray-800 dark:text-gray-200') : 'text-gray-400 dark:text-gray-500'"
+          :title="details"
+          :aria-label="`${t('upstreamBalance.details')}: ${details}`"
+          @click.stop="open"
+        >
+          <template v-if="data">
+            <span v-if="data.scope !== 'account'" class="font-sans text-[10px] text-gray-500 dark:text-gray-400">{{ t(`upstreamBalance.${data.scope}`) }}</span>
+            <span class="tabular-nums">{{ amount }}</span>
+            <Icon v-if="state?.snapshot.error" name="clock" size="xs" aria-hidden="true" />
+            <Icon v-else-if="state && state.owner_account_id !== state.account_id" name="link" size="xs" aria-hidden="true" />
+          </template>
+          <span v-else>{{ t(state?.mode === 'disabled' ? 'upstreamBalance.disabledShort' : state?.snapshot.error ? 'upstreamBalance.failedShort' : 'upstreamBalance.pendingShort') }}</span>
+        </button>
       </template>
-      <span v-else>{{ t(state?.mode === 'disabled' ? 'upstreamBalance.disabledShort' : state?.snapshot.error ? 'upstreamBalance.failedShort' : 'upstreamBalance.pendingShort') }}</span>
-    </button>
-    <button
-      v-if="state?.mode !== 'disabled'" type="button"
-      class="rounded p-1 text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 disabled:opacity-40 dark:text-dark-400 dark:hover:bg-dark-700 dark:hover:text-gray-300"
-      :disabled="busy || saving" :title="t('upstreamBalance.refresh')" :aria-label="t(busy ? 'upstreamBalance.refreshing' : 'upstreamBalance.refresh')"
+      <div class="space-y-1"><p v-for="(line, index) in details.split('\n')" :key="index">{{ line }}</p></div>
+    </HelpTooltip>
+    <UpstreamRefreshButton
+      v-if="state?.mode !== 'disabled'"
+      :busy="busy" :disabled="saving" :label="t(busy ? 'upstreamBalance.refreshing' : 'upstreamBalance.refresh')"
       @click.stop="emit('refresh')"
-    ><Icon name="refresh" size="xs" :class="{ 'animate-spin motion-reduce:animate-none': busy }" aria-hidden="true" /></button>
+    />
     <button
       type="button"
-      class="rounded p-1 text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 dark:text-dark-400 dark:hover:bg-dark-700 dark:hover:text-gray-300"
+      class="inline-flex h-6 w-6 flex-shrink-0 items-center justify-center rounded text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 dark:text-gray-500 dark:hover:bg-dark-700 dark:hover:text-gray-300"
       :title="t('upstreamBalance.configure')" :aria-label="t('upstreamBalance.configure')" @click.stop="open"
     ><Icon name="cog" size="xs" aria-hidden="true" /></button>
     <BaseDialog :show="show" :title="`${t('upstreamBalance.configure')} · ${name}`" :close-on-escape="!saving" :show-close-button="!saving" @close="close">
@@ -81,6 +85,8 @@ import { computed, reactive, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import Icon from '@/components/icons/Icon.vue'
+import HelpTooltip from '@/components/common/HelpTooltip.vue'
+import UpstreamRefreshButton from './UpstreamRefreshButton.vue'
 import { saveUpstreamBalanceConfig, type BalanceMode, type UpstreamBalanceConfig, type UpstreamBalanceState } from '@/api/admin/upstreamBalances'
 
 const props = defineProps<{ accountId: number; name: string; state?: UpstreamBalanceState; busy?: boolean }>()
