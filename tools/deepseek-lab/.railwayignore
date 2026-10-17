@@ -1,0 +1,9 @@
+results/
+.runtime/
+__pycache__/
+.venv/
+tests/
+*.log
+*.zip
+.env*
+live_compare.py

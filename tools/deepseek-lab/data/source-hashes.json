@@ -1,0 +1,38 @@
+[
+  {
+    "file": "bbeh_boolean_expressions.json",
+    "sha256": "49e763f10dbea048be56036c8cbf2a6d0bb735235e3806b50809a1addb57eee2"
+  },
+  {
+    "file": "bbeh_multistep_arithmetic.json",
+    "sha256": "47207086cd2afe74df9968172d24134c82af8c666144092f04e4c1ebad8cf3d2"
+  },
+  {
+    "file": "bbeh_shuffled_objects.json",
+    "sha256": "43cda28220c66e8d63e667d3091cd18b0b17aa55c005bb24bbb63144afdba9c1"
+  },
+  {
+    "file": "bbeh_time_arithmetic.json",
+    "sha256": "2510515a6f12024a742743e29a389f07beacb3bf4c71e0b59be12f3e364cf31b"
+  },
+  {
+    "file": "date_understanding.json",
+    "sha256": "0148d4ac5fca05b2f82373e5fef7208e15363b9c6079493034d77b3dab496bf5"
+  },
+  {
+    "file": "logical_deduction_seven_objects.json",
+    "sha256": "2896c7e3482eea318dd37bcc370d24ec3cc91e8374c1784287b5dbd38a529e33"
+  },
+  {
+    "file": "math_500_test.csv",
+    "sha256": "830003254c2894832217e1da6ed7fd9304546d2161640c1ce05ab9cccf532e2f"
+  },
+  {
+    "file": "multistep_arithmetic_two.json",
+    "sha256": "c9d5a6433c9b78256422a15c78463949c8bec8d85607aa28b52d7234ad4a8595"
+  },
+  {
+    "file": "tracking_shuffled_objects_seven_objects.json",
+    "sha256": "b59fd05b850c37cf57cb514ae1e6975c00b1638ade2291722056b2af3c54084d"
+  }
+]

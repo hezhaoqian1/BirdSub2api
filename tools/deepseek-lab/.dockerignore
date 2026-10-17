@@ -1,0 +1,14 @@
+*
+!Dockerfile
+!requirements.txt
+!app.py
+!engine.py
+!transport.py
+!egress.py
+!security.py
+!suites.py
+!README.md
+!static/
+!static/**
+!data/
+!data/**
