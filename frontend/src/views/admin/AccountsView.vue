@@ -18,6 +18,7 @@
             @create="showCreate = true"
           >
             <template #after>
+              <button type="button" class="btn btn-secondary px-2 text-xs" :disabled="Object.values(balanceBusy).some(Boolean)" :title="t('upstreamBalance.autoHint')" @click="refreshBalances()">{{ t('upstreamBalance.refreshPage') }}</button>
               <!-- Auto Refresh Dropdown -->
               <div class="relative" ref="autoRefreshDropdownRef">
                 <button
@@ -162,6 +163,7 @@
             </template>
           </AccountTableActions>
         </div>
+        <p v-if="balanceError" role="alert" class="mt-2 text-sm text-amber-600">{{ t(balanceError) }}</p>
         <div
           v-if="hasPendingListSync"
           class="mt-2 flex items-center justify-between rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:border-amber-700/40 dark:bg-amber-900/20 dark:text-amber-200"
@@ -243,6 +245,7 @@
                 </template>
               </HelpTooltip>
               <span v-else class="font-medium text-gray-900 dark:text-white">{{ value }}</span>
+              <UpstreamBalanceCell v-if="row.type === 'apikey' && row.credentials?.base_url" :account-id="row.id" :name="row.name" :state="balanceStates[row.id]" :busy="balanceBusy[row.id]" @refresh="refreshBalances([row.id])" @configured="balanceConfigured" />
               <span
                 v-if="accountDisplayEmail(row)"
                 class="text-xs text-gray-500 dark:text-gray-400 truncate max-w-[200px]"
@@ -521,6 +524,8 @@ import ScheduledTestsPanel from '@/components/admin/account/ScheduledTestsPanel.
 import type { SelectOption } from '@/components/common/Select.vue'
 import AccountStatusIndicator from '@/components/account/AccountStatusIndicator.vue'
 import AccountUsageCell from '@/components/account/AccountUsageCell.vue'
+import UpstreamBalanceCell from '@/components/account/UpstreamBalanceCell.vue'
+import { useUpstreamBalances } from '@/composables/useUpstreamBalances'
 import AccountTodayStatsCell from '@/components/account/AccountTodayStatsCell.vue'
 import AccountGroupsCell from '@/components/account/AccountGroupsCell.vue'
 import AccountCapacityCell from '@/components/account/AccountCapacityCell.vue'
@@ -1097,6 +1102,8 @@ const {
     sort_order: sortState.sort_order
   }
 })
+
+const { balanceStates, balanceBusy, balanceError, refreshBalances, balanceConfigured } = useUpstreamBalances(accounts)
 
 const {
   selectedSet,

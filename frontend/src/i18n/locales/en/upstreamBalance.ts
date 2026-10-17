@@ -1,0 +1,21 @@
+export default {
+  configureShort: 'Configure',
+  sub2apiTokenHint: 'This Sub2API key has a quota. Its remaining quota is separate from the wallet. Use a key that exposes the upstream wallet balance to query the actual account balance.',
+  title: 'Upstream balance', configure: 'Configure balance query', refresh: 'Refresh', refreshing: 'Checking…', refreshPage: 'Refresh page balances',
+  account: 'Account balance', token: 'Token quota', subscription: 'Subscription quota', unlimited: 'Unlimited', pending: 'Balance not checked',
+  disabled: 'Balance query disabled', unknownWallet: 'Account balance unknown', stale: 'Last balance', shared: 'Shared wallet #{id}',
+  updated: 'Updated {time}', failed: 'Query failed', requestFailed: 'Balance request failed. Please retry.',
+  mode: 'Query method', auto: 'Detect automatically (existing API key)', sub2api: 'Sub2API wallet / subscription',
+  new_api: 'New API account balance (access token)', tokenMode: 'New API token quota (API key)',
+  sharedMode: 'Use another account’s wallet', disabledMode: 'Disable queries',
+  accessToken: 'Access token', accessTokenHint: 'Upstream console → Security & Access → Access tokens. Create a token with permission to read your account. Older versions may use personal settings. This is separate from the inference API key.',
+  tokenSaved: 'Saved; leave blank to keep the existing token', tokenPlaceholder: 'Paste upstream panel access token',
+  userId: 'Upstream user ID', userIdHint: 'The numeric user ID from your upstream profile.',
+  encryptionMissing: 'Set a persistent TOTP_ENCRYPTION_KEY on the server before saving access tokens.',
+  owner: 'Wallet source account ID', ownerHint: 'First query the source account’s wallet successfully, then enter its local account ID. Only link the same actual wallet at the same upstream. Token quotas cannot be shared.',
+  sharedConfirm: 'I confirm these accounts use the same upstream wallet',
+  save: 'Save and query', saving: 'Saving…', cancel: 'Cancel', saveFailed: 'Save failed. Please retry.',
+  autoHint: 'New and imported API key accounts use automatic detection. Balances update every 5 minutes while this page is open; manual queries have a 30-second cooldown. Failures retain the last result and do not affect scheduling.',
+  tokenHint: 'Only token quota is available. Configure an access token or enable user-quota queries upstream to retrieve the actual wallet balance.',
+  quotaHint: 'The upstream did not provide a confirmed currency conversion. Values remain in raw quota units.', rawQuota: 'raw quota', low: 'Balance depleted'
+}
