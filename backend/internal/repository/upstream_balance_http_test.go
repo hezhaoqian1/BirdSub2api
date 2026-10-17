@@ -18,7 +18,9 @@ func TestUpstreamBalanceHTTPDoesNotCompeteWithActiveInferenceConnection(t *testi
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/stream" {
 			_, _ = io.WriteString(w, "data: first\n\n")
-			w.(http.Flusher).Flush()
+			flusher, ok := w.(http.Flusher)
+			require.True(t, ok)
+			flusher.Flush()
 			select {
 			case <-release:
 			case <-r.Context().Done():
@@ -32,8 +34,10 @@ func TestUpstreamBalanceHTTPDoesNotCompeteWithActiveInferenceConnection(t *testi
 	cfg := &config.Config{}
 	cfg.Gateway.ConnectionPoolIsolation = config.ConnectionPoolIsolationAccount
 	cfg.Gateway.MaxUpstreamClients = 1
-	gateway := NewHTTPUpstream(cfg).(*httpUpstreamService)
-	balance := NewUpstreamBalanceHTTP(cfg).HTTPUpstream.(*httpUpstreamService)
+	gateway, ok := NewHTTPUpstream(cfg).(*httpUpstreamService)
+	require.True(t, ok)
+	balance, ok := NewUpstreamBalanceHTTP(cfg).HTTPUpstream.(*httpUpstreamService)
+	require.True(t, ok)
 	request, err := http.NewRequestWithContext(t.Context(), http.MethodGet, server.URL+"/stream", nil)
 	require.NoError(t, err)
 	stream, err := gateway.Do(request, "", 7, 1)

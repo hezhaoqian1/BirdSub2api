@@ -127,7 +127,7 @@ func TestUpstreamBalanceRequestsUseCorrectCredentialsAndBlockRedirects(t *testin
 func TestUpstreamBalanceFailurePreservesLastGoodAndPersistsCooldown(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	require.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	a := &Account{ID: 7, Type: "apikey", Credentials: map[string]any{"base_url": "https://example.com", "api_key": "test-key"}}
 	snapshot := `{"data":{"scope":"account","remaining":10,"unit":"USD","source":"sub2api"},"fetched_at":123,"attempt_at":123}`
 	mock.ExpectBegin()
@@ -150,7 +150,7 @@ func TestUpstreamBalanceFailurePreservesLastGoodAndPersistsCooldown(t *testing.T
 func TestUpstreamBalanceChangedIdentityDoesNotExposeOldStateOrSecrets(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	require.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	a := &Account{ID: 7, Type: "apikey", Credentials: map[string]any{"base_url": "https://example.com", "api_key": "new-key"}}
 	mock.ExpectQuery("SELECT identity, owner_account_id, config, snapshot").WithArgs(int64(7)).WillReturnRows(sqlmock.NewRows([]string{"identity", "owner", "config", "snapshot"}).AddRow("old-identity", nil, `{"mode":"new_api","token":"encrypted-secret"}`, `{"data":{"scope":"account","remaining":50}}`))
 	s := NewUpstreamBalanceService(db, nil, nil, nil, nil, &config.Config{})
@@ -168,7 +168,7 @@ func TestUpstreamBalanceChangedIdentityDoesNotExposeOldStateOrSecrets(t *testing
 func TestUpstreamBalanceSaveEncryptsTokenAndReturnsOnlyConfiguredFlag(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	require.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	a := &Account{ID: 7, Type: "apikey", Credentials: map[string]any{"base_url": "https://example.com", "api_key": "inference-key"}}
 	cfg := &config.Config{}
 	cfg.Totp.EncryptionKeyConfigured = true
@@ -196,7 +196,7 @@ func TestUpstreamBalanceSaveEncryptsTokenAndReturnsOnlyConfiguredFlag(t *testing
 func TestUpstreamBalanceCooldownAvoidsNetwork(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	require.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	a := &Account{ID: 7, Type: "apikey", Credentials: map[string]any{"base_url": "https://example.com", "api_key": "key"}}
 	recent, _ := json.Marshal(UpstreamBalanceSnapshot{AttemptAt: time.Now().Unix(), Error: "previous failure"})
 	mock.ExpectBegin()
@@ -235,7 +235,7 @@ func expectBalanceClaim(mock sqlmock.Sqlmock, a *Account) {
 func TestUpstreamBalanceReleasesSingleDatabaseConnectionBeforeNetwork(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	require.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	db.SetMaxOpenConns(1)
 	a := &Account{ID: 7, Type: "apikey", Credentials: map[string]any{"base_url": "https://example.com", "api_key": "key"}}
 	expectBalanceClaim(mock, a)
@@ -262,7 +262,7 @@ func TestUpstreamBalanceReleasesSingleDatabaseConnectionBeforeNetwork(t *testing
 func TestUpstreamBalanceLateReplyCannotOverwriteChangedConfig(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	require.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	a := &Account{ID: 7, Type: "apikey", Credentials: map[string]any{"base_url": "https://example.com", "api_key": "key"}}
 	expectBalanceClaim(mock, a)
 	mock.ExpectExec("UPDATE upstream_balance_accounts b SET snapshot").WillReturnResult(sqlmock.NewResult(0, 0))
@@ -277,7 +277,7 @@ func TestUpstreamBalanceLateReplyCannotOverwriteChangedConfig(t *testing.T) {
 func TestUpstreamBalanceActiveReplicaLeaseAvoidsDuplicateNetworkCall(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	require.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	a := &Account{ID: 7, Type: "apikey", Credentials: map[string]any{"base_url": "https://example.com", "api_key": "key"}}
 	mock.ExpectBegin()
 	mock.ExpectExec("SET LOCAL lock_timeout").WillReturnResult(sqlmock.NewResult(0, 0))
@@ -344,7 +344,7 @@ func (r *balanceAccountMapTestRepo) GetByID(_ context.Context, id int64) (*Accou
 func TestUpstreamBalanceSaveSharedWalletDoesNotRequireSecondDatabaseConnection(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	require.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	db.SetMaxOpenConns(1)
 	a := &Account{ID: 7, Type: "apikey", Credentials: map[string]any{"base_url": "https://example.com/v1", "api_key": "child-key"}}
 	owner := &Account{ID: 8, Type: "apikey", Credentials: map[string]any{"base_url": "https://example.com", "api_key": "wallet-key"}}

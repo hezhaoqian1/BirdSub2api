@@ -215,7 +215,11 @@ func (s *UpstreamBalanceService) refresh(ctx context.Context, a *Account, force 
 		if result.Err != nil {
 			return UpstreamBalanceSnapshot{}, result.Err
 		}
-		return result.Val.(UpstreamBalanceSnapshot), nil
+		snapshot, ok := result.Val.(UpstreamBalanceSnapshot)
+		if !ok {
+			return UpstreamBalanceSnapshot{}, errors.New("余额结果无效")
+		}
+		return snapshot, nil
 	}
 }
 
@@ -234,7 +238,7 @@ func (s *UpstreamBalanceService) refreshOnce(ctx context.Context, a *Account, fo
 	if err != nil {
 		return UpstreamBalanceSnapshot{}, errors.New("无法开始余额查询")
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 	if _, err = tx.ExecContext(claimCtx, `SET LOCAL lock_timeout = '500ms'`); err != nil {
 		return UpstreamBalanceSnapshot{}, errors.New("无法设置余额查询锁超时")
 	}
@@ -347,7 +351,7 @@ func (s *UpstreamBalanceService) Save(ctx context.Context, id int64, input Upstr
 	if err != nil {
 		return UpstreamBalanceState{}, errors.New("无法保存余额配置")
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 	if _, err = tx.ExecContext(ctx, `SET LOCAL lock_timeout = '500ms'`); err != nil {
 		return UpstreamBalanceState{}, errors.New("余额配置忙，请稍后重试")
 	}

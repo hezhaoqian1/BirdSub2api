@@ -278,7 +278,8 @@ func TestOpenAIResponseFlush_OutputWithoutTerminalFlushesResidualWithoutFailover
 }
 
 func TestOpenAIResponseFlush_ReadErrorDropsTruncatedEventBeforeResponseFailed(t *testing.T) {
-	complete := "event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"hello\"}\n\n"
+	created := "data: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_test\",\"created_at\":1700000000}}\n\n"
+	complete := created + "event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"hello\"}\n\n"
 	partial := "event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"wor"
 	recorder := newOpenAIResponseFlushRecorder()
 
@@ -299,6 +300,16 @@ func TestOpenAIResponseFlush_ReadErrorDropsTruncatedEventBeforeResponseFailed(t 
 			}
 		}
 		require.True(t, json.Valid([]byte(strings.Join(data, "\n"))), "every SSE event must carry valid JSON: %q", frame)
+		var event struct {
+			Type     string `json:"type"`
+			Response struct {
+				CreatedAt int64 `json:"created_at"`
+			} `json:"response"`
+		}
+		require.NoError(t, json.Unmarshal([]byte(strings.Join(data, "\n")), &event))
+		if event.Type == "response.failed" {
+			require.Equal(t, int64(1700000000), event.Response.CreatedAt, "local read errors must preserve upstream created_at")
+		}
 	}
 	require.Equal(t, 1, strings.Count(gotBody, "event: response.failed\n"))
 	require.NotContains(t, gotBody, "event: error\n")

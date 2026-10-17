@@ -170,7 +170,7 @@ func (s *UpstreamBalanceService) fetchBalanceJSON(ctx context.Context, a *Accoun
 	if err != nil {
 		return nil, errors.New("余额查询连接失败或超时")
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("余额接口返回 HTTP %d", resp.StatusCode)
 	}

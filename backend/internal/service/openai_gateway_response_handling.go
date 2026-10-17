@@ -316,6 +316,7 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 		eventStartsTTFTOutput = false
 		eventShouldFlush = false
 	}
+	var createdAtStamper responsesCreatedAtStamper
 	sendErrorEvent := func(code, message string) {
 		if errorEventSent || clientDisconnected || failureDelivered {
 			return
@@ -329,7 +330,7 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 			return
 		}
 		failedSource, _ := json.Marshal(map[string]any{"error": map[string]string{"code": code, "message": message}})
-		if _, err := writePendingString(buildOpenAIResponseFailedSSE(responseID, originalModel, failedSource, message)); err != nil {
+		if _, err := writePendingString(buildOpenAIResponseFailedSSE(responseID, originalModel, createdAtStamper.Value(), failedSource, message)); err != nil {
 			clientDisconnected = true
 			return
 		}
@@ -344,7 +345,6 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 	}
 
 	needModelReplace := originalModel != mappedModel
-	var createdAtStamper responsesCreatedAtStamper
 	streamOutputAccumulator := apicompat.NewBufferedResponseAccumulator()
 	streamDoneItems := newResponsesStreamOutputItems()
 	streamImageOutputs := make([]json.RawMessage, 0, 1)

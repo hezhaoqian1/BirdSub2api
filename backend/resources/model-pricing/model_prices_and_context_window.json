@@ -2697,19 +2697,6 @@
     "supports_web_search": true,
     "web_search_billing_unit": "per_query"
   },
-  "gemini-4-argon": {
-    "input_cost_per_token": 2E-06,
-    "output_cost_per_token": 1E-05,
-    "cache_read_input_token_cost": 1E-07,
-    "litellm_provider": "gemini",
-    "max_input_tokens": 1048576,
-    "max_output_tokens": 32768,
-    "max_tokens": 32768,
-    "mode": "chat",
-    "source": "https://ai.google.dev/gemini-api/docs/pricing",
-    "supports_prompt_caching": true,
-    "supports_reasoning": true
-  },
   "gemini-3.8-flash": {
     "input_cost_per_token": 7.5E-07,
     "output_cost_per_token": 3.75E-06,
