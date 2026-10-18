@@ -108,7 +108,10 @@ const amount = computed(() => {
   if (data.value?.unlimited) return t('upstreamBalance.unlimited')
   if (data.value?.remaining == null) return '—'
   const unit = data.value.unit === 'QUOTA' ? t('upstreamBalance.rawQuota') : data.value.unit
-  return `${data.value.remaining.toLocaleString(undefined, { maximumFractionDigits: 4 })} ${unit}`
+  const precision = data.value.unit === 'QUOTA'
+    ? { maximumFractionDigits: 4 }
+    : { minimumFractionDigits: 2, maximumFractionDigits: 2 }
+  return `${data.value.remaining.toLocaleString(undefined, precision)} ${unit}`
 })
 const updatedAt = computed(() => stateTime(props.state?.snapshot.fetched_at))
 function stateTime(timestamp?: number) {

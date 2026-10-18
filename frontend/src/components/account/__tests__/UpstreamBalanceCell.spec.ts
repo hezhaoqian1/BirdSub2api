@@ -25,6 +25,18 @@ function render(value = state()) {
 beforeEach(() => vi.resetAllMocks())
 
 describe('upstream balance presentation', () => {
+  it.each([
+    ['CNY', 1540.2831516, '1,540.28 CNY'],
+    ['USD', 173.0583, '173.06 USD'],
+    ['USD', 0, '0.00 USD'],
+    ['CNY', 12.5, '12.50 CNY'],
+  ] as const)('displays a %s wallet with two decimal places (%s)', (unit, remaining, expected) => {
+    const value = state()
+    value.snapshot.data = { scope: 'account', remaining, unit, source: 'new_api' }
+    const wrapper = render(value)
+    expect(wrapper.text()).toContain(expected)
+    expect(wrapper.text()).not.toContain('原始额度')
+  })
   it('labels an unlimited token without implying an unlimited wallet', () => {
     const wrapper = render()
     expect(wrapper.text()).toContain('令牌额度')
@@ -37,11 +49,11 @@ describe('upstream balance presentation', () => {
     value.snapshot.data = { scope: 'account', remaining: 0, unit: 'USD', source: 'sub2api' }
     value.snapshot.error = '认证失败'
     const wrapper = render(value)
-    expect(wrapper.text()).toContain('0 USD')
+    expect(wrapper.text()).toContain('0.00 USD')
     expect(wrapper.text()).not.toContain('认证失败')
     expect(wrapper.text()).not.toContain('更新于')
     await wrapper.get('[aria-label="配置余额查询"]').trigger('click')
-    expect(wrapper.text()).toContain('余额 0 USD')
+    expect(wrapper.text()).toContain('余额 0.00 USD')
     expect(wrapper.text()).toContain('上次余额 · 认证失败')
     expect(wrapper.text()).toContain('更新于')
   })
