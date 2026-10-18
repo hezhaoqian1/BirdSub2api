@@ -127,13 +127,25 @@ func parseNewAPIBalance(body, status []byte, panel bool) (*UpstreamBalanceData, 
 	// incorrect on customized installations. Unknown units stay raw quota.
 	meta := gjson.ParseBytes(status).Get("data")
 	divisor := balanceNumber(meta.Get("quota_per_unit"))
-	if divisor != nil && *divisor > 0 && meta.Get("quota_display_type").String() == "USD" {
-		d.Unit = "USD"
+	multiplier := 1.0
+	if divisor != nil && *divisor > 0 {
+		switch meta.Get("quota_display_type").String() {
+		case "USD":
+			d.Unit = "USD"
+		case "CNY":
+			// New API stores quota in USD-based units and applies the site's
+			// published USD/CNY rate when displaying a CNY wallet.
+			if rate := balanceNumber(meta.Get("usd_exchange_rate")); rate != nil && *rate > 0 {
+				d.Unit, multiplier = "CNY", *rate
+			}
+		}
+	}
+	if d.Unit != "QUOTA" {
 		if remaining != nil {
-			*remaining /= *divisor
+			*remaining = *remaining / *divisor * multiplier
 		}
 		if used != nil {
-			*used /= *divisor
+			*used = *used / *divisor * multiplier
 		}
 		if remaining != nil && math.IsInf(*remaining, 0) || used != nil && math.IsInf(*used, 0) {
 			return nil, errors.New("上游额度换算参数无效")

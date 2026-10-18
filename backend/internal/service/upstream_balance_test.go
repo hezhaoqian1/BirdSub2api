@@ -409,3 +409,35 @@ func TestUpstreamBalanceTokenEndpointPreservesTrailingSlash(t *testing.T) {
 		require.Len(t, httpStub.requests, 2, "rejected target must not send credentials")
 	}
 }
+
+func TestUpstreamBalanceNewAPICurrencyMetadata(t *testing.T) {
+	body := []byte(`{"success":true,"data":{"quota":105498846,"used_quota":500000}}`)
+	for _, tt := range []struct {
+		name, metadata, unit string
+		remaining, used      float64
+		fail                 bool
+	}{
+		{"CNY wallet", `{"quota_per_unit":500000,"quota_display_type":"CNY","usd_exchange_rate":7.3}`, "CNY", 1540.2831516, 7.3, false},
+		{"custom quota units", `{"quota_per_unit":1000,"quota_display_type":"CNY","usd_exchange_rate":7.3}`, "CNY", 770141.5758, 3650, false},
+		{"USD ignores CNY rate", `{"quota_per_unit":500000,"quota_display_type":"USD","usd_exchange_rate":7.3}`, "USD", 210.997692, 1, false},
+		{"missing exchange rate", `{"quota_per_unit":500000,"quota_display_type":"CNY"}`, "QUOTA", 105498846, 500000, false},
+		{"zero exchange rate", `{"quota_per_unit":500000,"quota_display_type":"CNY","usd_exchange_rate":0}`, "QUOTA", 105498846, 500000, false},
+		{"negative exchange rate", `{"quota_per_unit":500000,"quota_display_type":"CNY","usd_exchange_rate":-7.3}`, "QUOTA", 105498846, 500000, false},
+		{"nonfinite exchange rate", `{"quota_per_unit":500000,"quota_display_type":"CNY","usd_exchange_rate":"NaN"}`, "QUOTA", 105498846, 500000, false},
+		{"missing quota units", `{"quota_display_type":"CNY","usd_exchange_rate":7.3}`, "QUOTA", 105498846, 500000, false},
+		{"unknown currency", `{"quota_per_unit":500000,"quota_display_type":"CUSTOM","usd_exchange_rate":7.3}`, "QUOTA", 105498846, 500000, false},
+		{"conversion overflow", `{"quota_per_unit":500000,"quota_display_type":"CNY","usd_exchange_rate":1e308}`, "", 0, 0, true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			data, err := parseNewAPIBalance(body, []byte(`{"data":`+tt.metadata+`}`), true)
+			if tt.fail {
+				require.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			require.Equal(t, tt.unit, data.Unit)
+			require.InDelta(t, tt.remaining, *data.Remaining, 1e-7)
+			require.InDelta(t, tt.used, *data.Used, 1e-7)
+		})
+	}
+}
