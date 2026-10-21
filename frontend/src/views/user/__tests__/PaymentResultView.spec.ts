@@ -535,4 +535,61 @@ describe('PaymentResultView', () => {
     expect(wrapper.text()).toContain('payment.methods.alipay')
     expect(wrapper.text()).not.toContain('payment.methods.alipay_direct')
   })
+
+  describe('when opened as the hosted-cashier popup', () => {
+    const setOpener = (opener: unknown) => {
+      Object.defineProperty(window, 'opener', { value: opener, configurable: true, writable: true })
+    }
+
+    afterEach(() => {
+      setOpener(null)
+      vi.restoreAllMocks()
+    })
+
+    const mountResult = async () => {
+      mount(PaymentResultView, { global: { stubs: { OrderStatusBadge: true } } })
+      await flushPromises()
+    }
+
+    it('shows the result in the same-origin opener and closes the popup', async () => {
+      const assign = vi.fn()
+      const focus = vi.fn()
+      setOpener({ closed: false, focus, location: { origin: window.location.origin, assign } })
+      const close = vi.spyOn(window, 'close').mockImplementation(() => {})
+
+      await mountResult()
+
+      expect(assign).toHaveBeenCalledWith(window.location.href)
+      expect(focus).toHaveBeenCalled()
+      expect(close).toHaveBeenCalled()
+    })
+
+    it('keeps rendering in place when there is no opener', async () => {
+      const close = vi.spyOn(window, 'close').mockImplementation(() => {})
+
+      await mountResult()
+
+      expect(close).not.toHaveBeenCalled()
+    })
+
+    it('does not touch a cross-origin opener', async () => {
+      const assign = vi.fn()
+      setOpener({
+        closed: false,
+        focus: vi.fn(),
+        location: {
+          get origin(): string {
+            throw new DOMException('Blocked a frame with origin', 'SecurityError')
+          },
+          assign,
+        },
+      })
+      const close = vi.spyOn(window, 'close').mockImplementation(() => {})
+
+      await mountResult()
+
+      expect(assign).not.toHaveBeenCalled()
+      expect(close).not.toHaveBeenCalled()
+    })
+  })
 })
