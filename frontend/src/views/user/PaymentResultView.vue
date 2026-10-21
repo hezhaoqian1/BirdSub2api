@@ -365,7 +365,25 @@ function scheduleStatusRefresh(refreshOrder: (() => Promise<ResolvedOrder | null
   }, STATUS_REFRESH_INTERVAL_MS)
 }
 
+// Hosted cashiers (e.g. EasyPay popup mode) open in a small popup window and
+// redirect it here after payment. When our own page opened that popup, show the
+// result in the opener and close the popup instead of rendering the site inside it.
+function handOffResultToOpener(): void {
+  try {
+    const opener = window.opener as Window | null
+    if (!opener || opener === window || opener.closed) return
+    // Throws for a cross-origin opener; only hand off to our own site.
+    if (opener.location.origin !== window.location.origin) return
+    opener.location.assign(window.location.href)
+    opener.focus()
+  } catch (_err: unknown) {
+    return
+  }
+  window.close()
+}
+
 onMounted(async () => {
+  handOffResultToOpener()
   const resumeToken = readRouteQueryString('resume_token')
   const routeOrderId = Number(readRouteQueryString('order_id')) || 0
   let outTradeNo = readRouteQueryString('out_trade_no')
