@@ -5,6 +5,7 @@ import (
 	"crypto/subtle"
 	"errors"
 	"strings"
+	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/service"
 
@@ -41,6 +42,7 @@ func adminAuth(
 				if !validateJWTForAdmin(c, token, authService, userService, settingService, auditService) {
 					return
 				}
+				observeAdminAccess(c, auditService)
 				c.Next()
 				return
 			}
@@ -52,6 +54,7 @@ func adminAuth(
 			if !validateAdminAPIKey(c, apiKey, settingService, userService) {
 				return
 			}
+			observeAdminAccess(c, auditService)
 			c.Next()
 			return
 		}
@@ -69,6 +72,7 @@ func adminAuth(
 				if !validateJWTForAdmin(c, token, authService, userService, settingService, auditService) {
 					return
 				}
+				observeAdminAccess(c, auditService)
 				c.Next()
 				return
 			}
@@ -77,6 +81,27 @@ func adminAuth(
 		// 无有效认证信息
 		AbortWithError(c, 401, "UNAUTHORIZED", "Authorization required")
 	}
+}
+
+// observeAdminAccess 把通过鉴权的管理员请求交给安全告警（陌生网络检测），不阻塞请求。
+func observeAdminAccess(c *gin.Context, auditService *service.AuditLogService) {
+	if auditService == nil {
+		return
+	}
+	access := service.SecurityAdminAccess{
+		ClientIP:  SecurityClientIP(c),
+		UserAgent: c.Request.UserAgent(),
+		Path:      c.Request.Method + " " + c.FullPath(),
+		At:        time.Now(),
+	}
+	if subject, ok := c.Get(string(ContextKeyUser)); ok {
+		if s, ok := subject.(AuthSubject); ok {
+			access.UserID = s.UserID
+		}
+	}
+	access.Email = c.GetString(ContextKeyAuthEmail)
+	access.AuthMethod = c.GetString("auth_method")
+	auditService.ObserveAdminAccess(access)
 }
 
 func isWebSocketUpgradeRequest(c *gin.Context) bool {

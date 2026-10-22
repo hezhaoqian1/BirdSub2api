@@ -156,6 +156,8 @@ var auditBodySensitiveSubstrings = []string{
 	"apikey", "accesskey", "privatekey",
 	"otp", "credentialvalue",
 	"sessionkey", "serviceaccount",
+	// Robot webhooks (DingTalk/WeCom) embed their access token in the URL.
+	"webhook",
 }
 
 func isAuditSensitiveBodyKey(key string) bool {

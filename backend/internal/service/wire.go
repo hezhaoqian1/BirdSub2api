@@ -982,6 +982,7 @@ var ProviderSet = wire.NewSet(
 	ProvidePaymentConfigService,
 	ProvidePaymentService,
 	ProvidePaymentOrderExpiryService,
+	ProvideSecurityAlertService,
 	ProvideBalanceNotifyService,
 	ProvideChannelMonitorService,
 	ProvideChannelMonitorRunner,
@@ -1023,6 +1024,15 @@ func ProvidePaymentService(entClient *dbent.Client, registry *payment.Registry, 
 func ProvidePaymentOrderExpiryService(paymentSvc *PaymentService, lockCache LeaderLockCache, db *sql.DB) *PaymentOrderExpiryService {
 	svc := NewPaymentOrderExpiryService(paymentSvc, 60*time.Second)
 	svc.SetLeaderLock(lockCache, db)
+	svc.Start()
+	return svc
+}
+
+// ProvideSecurityAlertService creates SecurityAlertService, registers it as the
+// audit-log observer and starts its observer/ticker goroutines.
+func ProvideSecurityAlertService(db *sql.DB, settingService *SettingService, lockCache LeaderLockCache, auditLogService *AuditLogService) *SecurityAlertService {
+	svc := NewSecurityAlertService(db, settingService, lockCache)
+	auditLogService.SetObserver(svc)
 	svc.Start()
 	return svc
 }

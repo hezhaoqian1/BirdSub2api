@@ -47,6 +47,7 @@ func ProvideAdminHandlers(
 	affiliateHandler *admin.AffiliateHandler,
 	complianceHandler *admin.ComplianceHandler,
 	auditLogHandler *admin.AuditLogHandler,
+	securityAlertHandler *admin.SecurityAlertHandler,
 	profitHandler *admin.ProfitHandler,
 	upstreamBalance *service.UpstreamBalanceService,
 	upstreamBillingProbe *service.UpstreamBillingProbeService,
@@ -96,6 +97,7 @@ func ProvideAdminHandlers(
 		Affiliate:              affiliateHandler,
 		Compliance:             complianceHandler,
 		AuditLog:               auditLogHandler,
+		SecurityAlert:          securityAlertHandler,
 		Profit:                 profitHandler,
 	}
 }
@@ -296,6 +298,7 @@ var ProviderSet = wire.NewSet(
 	admin.NewAffiliateHandler,
 	admin.NewComplianceHandler,
 	admin.NewAuditLogHandler,
+	admin.NewSecurityAlertHandler,
 
 	// AdminHandlers and Handlers constructors
 	ProvideAdminHandlers,
