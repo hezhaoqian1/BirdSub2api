@@ -25,6 +25,7 @@ const (
 type AuditLogService struct {
 	repo           AuditLogRepository
 	settingService *SettingService
+	observer       AuditRecordObserver
 
 	queue chan *AuditLog
 
@@ -45,6 +46,34 @@ func NewAuditLogService(repo AuditLogRepository, settingService *SettingService)
 		queue:          make(chan *AuditLog, auditLogQueueCapacity),
 		ctx:            ctx,
 		cancel:         cancel,
+	}
+}
+
+// AuditRecordObserver 在审计记录入队/落库时得到通知（须非阻塞），用于安全告警等实时检测。
+type AuditRecordObserver interface {
+	OnAuditRecord(entry *AuditLog)
+}
+
+// SetObserver 注册审计记录观察者；Record 不加锁读取该字段，须在装配阶段、首条审计记录产生前调用。
+func (s *AuditLogService) SetObserver(observer AuditRecordObserver) {
+	if s == nil {
+		return
+	}
+	s.observer = observer
+}
+
+// AdminAccessObserver 接收通过鉴权的管理员请求（须非阻塞）。
+type AdminAccessObserver interface {
+	ObserveAdminAccess(access SecurityAdminAccess)
+}
+
+// ObserveAdminAccess 把管理员访问转交给已注册的观察者（若其支持）。
+func (s *AuditLogService) ObserveAdminAccess(access SecurityAdminAccess) {
+	if s == nil || s.observer == nil {
+		return
+	}
+	if observer, ok := s.observer.(AdminAccessObserver); ok {
+		observer.ObserveAdminAccess(access)
 	}
 }
 
@@ -74,6 +103,9 @@ func (s *AuditLogService) Record(entry *AuditLog) {
 	}
 	if entry.CreatedAt.IsZero() {
 		entry.CreatedAt = time.Now().UTC()
+	}
+	if s.observer != nil {
+		s.observer.OnAuditRecord(entry)
 	}
 	select {
 	case <-s.ctx.Done():
@@ -119,6 +151,9 @@ func (s *AuditLogService) ClearAll(ctx context.Context, trace *AuditLog) (int64,
 			trace.Extra = map[string]any{}
 		}
 		trace.Extra["deleted_rows"] = deleted
+		if s.observer != nil {
+			s.observer.OnAuditRecord(trace)
+		}
 		if err := s.repo.Insert(ctx, trace); err != nil {
 			// 留痕失败必须显式暴露：清空已发生，但审计链断裂。
 			return deleted, fmt.Errorf("audit logs cleared (%d rows) but failed to persist clear-trace record: %w", deleted, err)

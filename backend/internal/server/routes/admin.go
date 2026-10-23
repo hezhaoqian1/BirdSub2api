@@ -131,6 +131,7 @@ func RegisterAdminRoutes(
 
 		// 操作审计日志
 		registerAuditLogRoutes(admin, h, stepUpAuth)
+		registerSecurityAlertRoutes(admin, h, stepUpAuth)
 	}
 }
 
@@ -147,6 +148,16 @@ func registerPromptAuditRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 		promptAudit.POST("/events/batch-delete", h.Admin.PromptAudit.BatchDelete)
 		promptAudit.POST("/events/delete-preview", h.Admin.PromptAudit.DeletePreview)
 		promptAudit.POST("/events/delete-by-filter", h.Admin.PromptAudit.DeleteByFilter)
+	}
+}
+
+func registerSecurityAlertRoutes(admin *gin.RouterGroup, h *handler.Handlers, stepUpAuth middleware.StepUpAuthMiddleware) {
+	alerts := admin.Group("/security-alerts")
+	{
+		alerts.GET("/config", h.Admin.SecurityAlert.GetConfig)
+		alerts.PUT("/config", gin.HandlerFunc(stepUpAuth), h.Admin.SecurityAlert.UpdateConfig)
+		alerts.POST("/test", h.Admin.SecurityAlert.SendTest)
+		alerts.GET("/events", h.Admin.SecurityAlert.ListEvents)
 	}
 }
 

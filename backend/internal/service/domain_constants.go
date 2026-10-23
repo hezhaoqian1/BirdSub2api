@@ -509,6 +509,14 @@ const (
 	// SettingKeyChannelMonitorDingTalkSecret stores the optional custom robot signing secret.
 	SettingKeyChannelMonitorDingTalkSecret = "channel_monitor_dingtalk_secret"
 
+	// SettingKeySecurityAlertConfig stores JSON config for security alerts
+	// (abnormal admin logins, sensitive admin actions, usage anomalies).
+	SettingKeySecurityAlertConfig = "security_alert_config"
+
+	// SettingKeySecurityAlertWeComWebhook stores the WeCom group robot webhook used
+	// for security alerts. It embeds the robot key and must never be returned to clients.
+	SettingKeySecurityAlertWeComWebhook = "security_alert_wecom_webhook"
+
 	// SettingKeyChannelMonitorHideThroughput hides RPM/TPM (and similar absolute
 	// throughput rates) from non-admin user-facing monitor APIs and UI, so users
 	// cannot reverse-estimate fleet volume from rates × window length.
