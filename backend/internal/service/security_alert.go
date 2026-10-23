@@ -67,6 +67,8 @@ type SecurityAlertConfig struct {
 	TrustedCIDRs []string `json:"trusted_cidrs"`
 	// BalanceAdjustThreshold 后台单次调整余额达到该金额时告警。
 	BalanceAdjustThreshold float64 `json:"balance_adjust_threshold"`
+	// AdminNewIPNotify 管理员从熟悉网段里的新 IP 登录时也发通知（陌生网段始终告警）。
+	AdminNewIPNotify bool `json:"admin_new_ip_notify"`
 	// AdminLoginFailThreshold 15 分钟内管理员账号登录失败次数阈值。
 	AdminLoginFailThreshold int `json:"admin_login_fail_threshold"`
 	// IPLoginFailThreshold 15 分钟内单个 IP 登录失败次数阈值。
@@ -89,6 +91,7 @@ func DefaultSecurityAlertConfig() SecurityAlertConfig {
 		Enabled:                 true,
 		TrustedCIDRs:            []string{},
 		BalanceAdjustThreshold:  500,
+		AdminNewIPNotify:        true,
 		AdminLoginFailThreshold: 3,
 		IPLoginFailThreshold:    20,
 		SpendSpikeFloor:         100,
@@ -211,6 +214,7 @@ type securityRuleSnapshot struct {
 	cfg           SecurityAlertConfig
 	trusted       []*net.IPNet
 	knownPrefixes map[string]struct{}
+	knownIPs      map[string]struct{}
 	adminEmails   map[string]struct{}
 	baselineReady bool
 	loc           *time.Location
@@ -231,6 +235,21 @@ func (s securityRuleSnapshot) isKnownNetwork(rawIP string) bool {
 		return true // 基线未加载时宁可漏报也不刷屏
 	}
 	_, ok := s.knownPrefixes[securityNetworkPrefix(rawIP)]
+	return ok
+}
+
+// isKnownIP 判断该 IP 本身近 90 天是否被管理员用过（比网段更细）。
+func (s securityRuleSnapshot) isKnownIP(rawIP string) bool {
+	ip := net.ParseIP(strings.TrimSpace(rawIP))
+	if ip == nil || !s.baselineReady {
+		return true
+	}
+	for _, n := range s.trusted {
+		if n.Contains(ip) {
+			return true // 信任网段（如手机流量）IP 经常变，不逐个提醒
+		}
+	}
+	_, ok := s.knownIPs[ip.String()]
 	return ok
 }
 
@@ -264,6 +283,7 @@ type SecurityAlertService struct {
 	webhook          string
 	cfgLoadedAt      time.Time
 	knownPrefixes    map[string]struct{}
+	knownIPs         map[string]struct{}
 	adminEmails      map[string]struct{}
 	baselineReady    bool
 	baselineLoadedAt time.Time
@@ -411,6 +431,7 @@ func (s *SecurityAlertService) snapshot(ctx context.Context) securityRuleSnapsho
 		cfg:           s.cfg,
 		trusted:       s.cfgNets,
 		knownPrefixes: s.knownPrefixes,
+		knownIPs:      s.knownIPs,
 		adminEmails:   s.adminEmails,
 		baselineReady: s.baselineReady,
 		loc:           s.loc,
@@ -471,6 +492,13 @@ func (s *SecurityAlertService) refreshBaseline(ctx context.Context) {
 		return
 	}
 	prefixes := map[string]struct{}{}
+	ips := map[string]struct{}{}
+	remember := func(raw string) {
+		if p := securityNetworkPrefix(raw); p != "" {
+			prefixes[p] = struct{}{}
+			ips[net.ParseIP(strings.TrimSpace(raw)).String()] = struct{}{}
+		}
+	}
 	rows, err := s.db.QueryContext(ctx, `SELECT DISTINCT client_ip FROM audit_logs
  WHERE created_at > $1 AND actor_role = 'admin' AND client_ip <> ''`, s.now().Add(-securityAlertBaselineWindow))
 	if err != nil {
@@ -480,9 +508,7 @@ func (s *SecurityAlertService) refreshBaseline(ctx context.Context) {
 	for rows.Next() {
 		var ip string
 		if rows.Scan(&ip) == nil {
-			if p := securityNetworkPrefix(ip); p != "" {
-				prefixes[p] = struct{}{}
-			}
+			remember(ip)
 		}
 	}
 	_ = rows.Close()
@@ -516,15 +542,14 @@ func (s *SecurityAlertService) refreshBaseline(ctx context.Context) {
 			continue
 		}
 		if _, ok := emails[email]; ok {
-			if p := securityNetworkPrefix(ip); p != "" {
-				prefixes[p] = struct{}{}
-			}
+			remember(ip)
 		}
 	}
 	_ = rows.Close()
 
 	s.mu.Lock()
 	s.knownPrefixes = prefixes
+	s.knownIPs = ips
 	s.adminEmails = emails
 	s.baselineReady = true
 	s.baselineLoadedAt = s.now()

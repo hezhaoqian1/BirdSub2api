@@ -23,6 +23,7 @@ func securityTestSnapshot(t *testing.T) securityRuleSnapshot {
 		cfg:           DefaultSecurityAlertConfig(),
 		trusted:       trusted,
 		knownPrefixes: map[string]struct{}{"155.254.124.0/24": {}},
+		knownIPs:      map[string]struct{}{"155.254.124.36": {}},
 		adminEmails:   map[string]struct{}{"admin@example.com": {}},
 		baselineReady: true,
 		loc:           time.FixedZone("CST", 8*3600),
@@ -63,7 +64,15 @@ func TestEvaluateAuditRecordAdminLogin(t *testing.T) {
 	require.Equal(t, "admin_net:52.54.207.0/24:2026-10", drafts[0].DedupeKey)
 	require.Contains(t, drafts[0].body(), "52.54.207.165")
 
-	require.Empty(t, evaluateAuditRecord(snap, login("155.254.124.99", "admin@example.com", 200)), "known /24")
+	require.Empty(t, evaluateAuditRecord(snap, login("155.254.124.36", "admin@example.com", 200)), "known IP")
+
+	newIP := evaluateAuditRecord(snap, login("155.254.124.99", "admin@example.com", 200))
+	require.Len(t, newIP, 1, "new IP inside a known /24")
+	require.Equal(t, SecurityAlertInfo, newIP[0].Severity)
+	require.Equal(t, "admin_ip:155.254.124.99", newIP[0].DedupeKey)
+	snap.cfg.AdminNewIPNotify = false
+	require.Empty(t, evaluateAuditRecord(snap, login("155.254.124.99", "admin@example.com", 200)), "new-IP notice disabled")
+	snap.cfg.AdminNewIPNotify = true
 	require.Empty(t, evaluateAuditRecord(snap, login("39.144.45.68", "admin@example.com", 200)), "trusted CIDR")
 	require.Empty(t, evaluateAuditRecord(snap, login("52.54.207.165", "user@example.com", 200)), "not an admin")
 	require.Empty(t, evaluateAuditRecord(snap, login("52.54.207.165", "admin@example.com", 401)), "failed login handled by periodic check")

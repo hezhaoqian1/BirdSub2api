@@ -59,7 +59,10 @@ func evaluateAuditRecord(snap securityRuleSnapshot, rec *AuditLog) []securityAle
 		if email == "" {
 			email = auditBodyString(rec.RequestBody, "email")
 		}
-		if (rec.ActorRole == RoleAdmin || snap.isAdminEmail(email)) && !snap.isKnownNetwork(rec.ClientIP) {
+		isAdmin := rec.ActorRole == RoleAdmin || snap.isAdminEmail(email)
+		switch {
+		case !isAdmin:
+		case !snap.isKnownNetwork(rec.ClientIP):
 			drafts = append(drafts, securityAlertDraft{
 				DedupeKey: adminNetworkDedupeKey(rec.ClientIP, rec.CreatedAt, snap.loc),
 				Kind:      "admin_login_new_network",
@@ -72,6 +75,20 @@ func evaluateAuditRecord(snap securityRuleSnapshot, rec *AuditLog) []securityAle
 					"时间：" + formatSecurityTime(rec.CreatedAt, snap.loc),
 					"说明：密码已校验通过。如果是你自己换了代理节点或网络，可以忽略。",
 					securityAlertAdvice,
+				},
+			})
+		case snap.cfg.AdminNewIPNotify && !snap.isKnownIP(rec.ClientIP):
+			drafts = append(drafts, securityAlertDraft{
+				DedupeKey: "admin_ip:" + strings.TrimSpace(rec.ClientIP),
+				Kind:      "admin_login_new_ip",
+				Severity:  SecurityAlertInfo,
+				Title:     "管理员账号从新 IP 登录",
+				Lines: []string{
+					"账号：" + sanitizeSecurityText(email, 80),
+					"IP：" + formatSecurityIP(rec.ClientIP) + "（所在网段 " + securityNetworkPrefix(rec.ClientIP) + " 你用过，这个 IP 是第一次）",
+					"设备：" + sanitizeSecurityText(rec.UserAgent, 80),
+					"时间：" + formatSecurityTime(rec.CreatedAt, snap.loc),
+					"多半是代理换了出口；如果这个时间你没登录，请立即改密码。",
 				},
 			})
 		}
