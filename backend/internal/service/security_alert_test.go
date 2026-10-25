@@ -150,14 +150,26 @@ func TestEvaluateSensitiveActions(t *testing.T) {
 	require.Equal(t, "audit:admin.accounts.export:req-1", export[0].DedupeKey)
 }
 
-func TestSanitizeSecurityTextStripsMarkup(t *testing.T) {
-	got := sanitizeSecurityText("<font color=\"info\">x</font>\n[link](http://evil) `code` **b**", 200)
-	require.NotContains(t, got, "<")
-	require.NotContains(t, got, "[")
-	require.NotContains(t, got, "`")
-	require.NotContains(t, got, "**")
-	require.NotContains(t, got, "\n")
+func TestSanitizeSecurityTextSingleLine(t *testing.T) {
+	got := sanitizeSecurityText("Mozilla/5.0\n🔴 严重 · 伪造的告警\r\n  x", 200)
+	require.Equal(t, "Mozilla/5.0 🔴 严重 · 伪造的告警 x", got)
+	require.Equal(t, "abc...", sanitizeSecurityText("abcdef", 3))
 	require.Equal(t, "-", sanitizeSecurityText("  ", 10))
+}
+
+func TestRenderSecurityAlertMessageIsPlainText(t *testing.T) {
+	snap := securityTestSnapshot(t)
+	d, ok := evaluateAdminAccess(snap, SecurityAdminAccess{
+		Email: "admin@example.com", ClientIP: "52.54.207.10", Path: "GET /api/v1/admin/accounts",
+		At: time.Date(2026, 10, 22, 3, 0, 0, 0, time.UTC),
+	})
+	require.True(t, ok)
+	msg := renderSecurityAlertMessage("BirdApi", []pendingSecurityAlert{{Severity: d.Severity, Title: d.Title, Body: d.body()}})
+	require.True(t, strings.HasPrefix(msg, "【BirdApi 安全告警】\n\n🔴 严重 · 陌生网络正在访问管理后台\n账号：admin@example.com\n"), msg)
+	require.Contains(t, msg, "\n查归属：https://ipinfo.io/52.54.207.10\n")
+	for _, markup := range []string{"**", "> ", "<font", "###", "]("} {
+		require.NotContains(t, msg, markup)
+	}
 }
 
 func TestWeComWebhookValidationAndMask(t *testing.T) {
@@ -183,7 +195,8 @@ func TestWeComRobotSenderSend(t *testing.T) {
 	})}}
 	webhook := "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=abc123456789"
 	require.NoError(t, sender.Send(context.Background(), webhook, "hello"))
-	require.Equal(t, "markdown", gotBody["msgtype"])
+	require.Equal(t, "text", gotBody["msgtype"])
+	require.Equal(t, map[string]any{"content": "hello"}, gotBody["text"])
 
 	rejecting := &weComRobotSender{client: &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
 		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(`{"errcode":93000,"errmsg":"invalid webhook url"}`))}, nil
@@ -200,12 +213,12 @@ func TestWeComRobotSenderSend(t *testing.T) {
 }
 
 func TestGroupSecurityAlertsRespectsSizeLimit(t *testing.T) {
-	long := strings.Repeat("长", 500) // 1500 bytes
+	long := strings.Repeat("长", 300) // 900 bytes
 	events := []pendingSecurityAlert{
-		{ID: 1, Title: "a", Body: "> " + long},
-		{ID: 2, Title: "b", Body: "> " + long},
-		{ID: 3, Title: "c", Body: "> " + long},
-		{ID: 4, Title: "d", Body: "> short"},
+		{ID: 1, Title: "a", Body: long},
+		{ID: 2, Title: "b", Body: long},
+		{ID: 3, Title: "c", Body: long},
+		{ID: 4, Title: "d", Body: "short"},
 	}
 	groups := groupSecurityAlerts("BirdApi", events)
 	require.Len(t, groups, 2)
@@ -227,8 +240,8 @@ type recordingSecuritySender struct {
 	err      error
 }
 
-func (r *recordingSecuritySender) Send(_ context.Context, _ string, markdown string) error {
-	r.messages = append(r.messages, markdown)
+func (r *recordingSecuritySender) Send(_ context.Context, _ string, content string) error {
+	r.messages = append(r.messages, content)
 	return r.err
 }
 
@@ -250,7 +263,7 @@ func TestDeliverPendingMarksSentAndRetries(t *testing.T) {
 			mock.ExpectBegin()
 			mock.ExpectQuery(regexp.QuoteMeta("FROM security_alert_events")).
 				WillReturnRows(sqlmock.NewRows([]string{"id", "kind", "severity", "title", "body", "created_at"}).
-					AddRow(int64(7), "admin_new_network", "critical", "陌生网络正在访问管理后台", "> IP：1.2.3.4", time.Now()))
+					AddRow(int64(7), "admin_new_network", "critical", "陌生网络正在访问管理后台", "IP：1.2.3.4", time.Now()))
 			mock.ExpectExec(regexp.QuoteMeta("SET locked_at = NOW()")).WithArgs(int64(7), sqlmock.AnyArg()).
 				WillReturnResult(sqlmock.NewResult(0, 1))
 			mock.ExpectCommit()

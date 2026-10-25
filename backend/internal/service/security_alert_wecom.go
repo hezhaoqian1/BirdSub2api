@@ -20,8 +20,8 @@ import (
 const (
 	weComRobotTimeout = 8 * time.Second
 	weComRobotMaxBody = 64 * 1024
-	// 企业微信 markdown 内容上限 4096 字节，留出余量。
-	weComRobotMaxContentBytes = 3800
+	// 企业微信 text 消息内容上限 2048 字节，留出截断提示的余量。
+	weComRobotMaxContentBytes = 2000
 	securityAlertDeliverBatch = 20
 )
 
@@ -76,8 +76,8 @@ func (w *weComRobotSender) Send(ctx context.Context, webhook, content string) er
 		return err
 	}
 	body, err := json.Marshal(map[string]any{
-		"msgtype":  "markdown",
-		"markdown": map[string]string{"content": truncateUTF8Bytes(content, weComRobotMaxContentBytes)},
+		"msgtype": "text",
+		"text":    map[string]string{"content": truncateUTF8Bytes(content, weComRobotMaxContentBytes)},
 	})
 	if err != nil {
 		return fmt.Errorf("marshal wecom alert: %w", err)
@@ -149,20 +149,17 @@ func securitySeverityLabel(sev SecurityAlertSeverity) string {
 }
 
 func renderSecurityAlertEvent(ev pendingSecurityAlert) string {
-	head := "**" + securitySeverityLabel(ev.Severity) + " · " + sanitizeSecurityText(ev.Title, 100) + "**"
-	if ev.Severity == SecurityAlertCritical {
-		head = `<font color="warning">` + head + `</font>`
-	}
+	head := securitySeverityLabel(ev.Severity) + " · " + sanitizeSecurityText(ev.Title, 100)
 	if strings.TrimSpace(ev.Body) == "" {
 		return head
 	}
 	return head + "\n" + ev.Body
 }
 
-// renderSecurityAlertMessage 把若干条告警拼成一条企业微信 markdown 消息。
+// renderSecurityAlertMessage 把若干条告警拼成一条企业微信纯文本消息。
 func renderSecurityAlertMessage(site string, events []pendingSecurityAlert) string {
 	parts := make([]string, 0, len(events)+1)
-	parts = append(parts, fmt.Sprintf("### %s 安全告警", site))
+	parts = append(parts, fmt.Sprintf("【%s 安全告警】", site))
 	for _, ev := range events {
 		parts = append(parts, renderSecurityAlertEvent(ev))
 	}

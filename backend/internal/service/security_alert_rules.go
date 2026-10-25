@@ -27,6 +27,7 @@ func evaluateAdminAccess(snap securityRuleSnapshot, access SecurityAdminAccess) 
 		Lines: []string{
 			"账号：" + sanitizeSecurityText(access.Email, 80),
 			"IP：" + formatSecurityIP(access.ClientIP) + "（网段 " + securityNetworkPrefix(access.ClientIP) + " 近 90 天未用过）",
+			securityIPLookupLine(access.ClientIP),
 			"认证方式：" + method,
 			"接口：" + sanitizeSecurityText(access.Path, 80),
 			"设备：" + sanitizeSecurityText(access.UserAgent, 80),
@@ -71,6 +72,7 @@ func evaluateAuditRecord(snap securityRuleSnapshot, rec *AuditLog) []securityAle
 				Lines: []string{
 					"账号：" + sanitizeSecurityText(email, 80),
 					"IP：" + formatSecurityIP(rec.ClientIP) + "（网段 " + securityNetworkPrefix(rec.ClientIP) + " 近 90 天未用过）",
+					securityIPLookupLine(rec.ClientIP),
 					"设备：" + sanitizeSecurityText(rec.UserAgent, 80),
 					"时间：" + formatSecurityTime(rec.CreatedAt, snap.loc),
 					"说明：密码已校验通过。如果是你自己换了代理节点或网络，可以忽略。",
@@ -86,6 +88,7 @@ func evaluateAuditRecord(snap securityRuleSnapshot, rec *AuditLog) []securityAle
 				Lines: []string{
 					"账号：" + sanitizeSecurityText(email, 80),
 					"IP：" + formatSecurityIP(rec.ClientIP) + "（所在网段 " + securityNetworkPrefix(rec.ClientIP) + " 你用过，这个 IP 是第一次）",
+					securityIPLookupLine(rec.ClientIP),
 					"设备：" + sanitizeSecurityText(rec.UserAgent, 80),
 					"时间：" + formatSecurityTime(rec.CreatedAt, snap.loc),
 					"多半是代理换了出口；如果这个时间你没登录，请立即改密码。",
@@ -269,10 +272,9 @@ func auditRouteParam(rec *AuditLog, name string) string {
 	return ""
 }
 
-// sanitizeSecurityText 压成单行、截断，并去掉会被企业微信 markdown 解析的字符。
+// sanitizeSecurityText 压成单行并截断，防止外部输入（如 UA）伪造出额外的告警行。
 func sanitizeSecurityText(value string, maxRunes int) string {
 	value = strings.Join(strings.Fields(strings.TrimSpace(value)), " ")
-	value = strings.NewReplacer("<", "‹", ">", "›", "[", "(", "]", ")", "`", "'", "*", "＊").Replace(value)
 	if value == "" {
 		return "-"
 	}
@@ -284,12 +286,16 @@ func sanitizeSecurityText(value string, maxRunes int) string {
 }
 
 func formatSecurityIP(ip string) string {
+	return sanitizeSecurityText(ip, 64)
+}
+
+// securityIPLookupLine 单独一行放归属查询链接，企业微信会自动识别成可点击的网址。
+func securityIPLookupLine(ip string) string {
 	ip = strings.TrimSpace(ip)
 	if ip == "" {
-		return "-"
+		return ""
 	}
-	safe := sanitizeSecurityText(ip, 64)
-	return safe + " [查归属](https://ipinfo.io/" + safe + ")"
+	return "查归属：https://ipinfo.io/" + sanitizeSecurityText(ip, 64)
 }
 
 func formatSecurityTime(t time.Time, loc *time.Location) string {
