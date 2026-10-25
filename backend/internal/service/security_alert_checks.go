@@ -135,6 +135,7 @@ func (s *SecurityAlertService) checkLoginFailures(ctx context.Context, snap secu
 				Title:     "登录接口疑似被爆破",
 				Lines: []string{
 					"IP：" + formatSecurityIP(ip),
+					securityIPLookupLine(ip),
 					fmt.Sprintf("15 分钟内登录失败 %d 次，涉及 %d 个账号", count, accounts),
 				},
 			})

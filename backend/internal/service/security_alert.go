@@ -195,7 +195,7 @@ func (d securityAlertDraft) body() string {
 		if strings.TrimSpace(line) == "" {
 			continue
 		}
-		lines = append(lines, "> "+line)
+		lines = append(lines, line)
 	}
 	return strings.Join(lines, "\n")
 }
@@ -206,7 +206,7 @@ type securityObservation struct {
 }
 
 type securityAlertSender interface {
-	Send(ctx context.Context, webhook, markdown string) error
+	Send(ctx context.Context, webhook, content string) error
 }
 
 // securityRuleSnapshot 规则判定所需的只读快照。
@@ -685,12 +685,12 @@ func (s *SecurityAlertService) UpdateConfig(ctx context.Context, in UpdateSecuri
 		if cfg.Enabled {
 			changes = append(changes, "安全告警已开启")
 		} else {
-			changes = append(changes, "**安全告警已关闭**")
+			changes = append(changes, "安全告警已关闭")
 		}
 	}
 	if webhookChanged {
 		if newWebhook == "" {
-			changes = append(changes, "**企业微信机器人已被清除**")
+			changes = append(changes, "企业微信机器人已被清除")
 		} else {
 			changes = append(changes, "企业微信机器人已更换为 "+MaskWeComRobotWebhook(newWebhook))
 		}
