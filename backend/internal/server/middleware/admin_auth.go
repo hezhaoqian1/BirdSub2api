@@ -279,6 +279,7 @@ func authenticateScopedAdminRequest(c *gin.Context, key string, settings *servic
 	c.Set(ContextKeyAuthEmail, user.Email)
 	c.Set("auth_method", service.AuditAuthMethodAdminAPIKey)
 	c.Set(auditCtxKeySkip, true)
+	observeAdminAccess(c, audit)
 	if strings.Contains(c.FullPath(), "/settings/admin-api-key") || !adminaccess.RouteAllowed(item.Policy, c.Request.Method, c.FullPath()) {
 		c.Set("admin_key_denial_reason", "permission_denied")
 		AbortWithError(c, 403, "FORBIDDEN", "管理密钥未获此操作权限")
