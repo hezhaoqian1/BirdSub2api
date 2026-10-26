@@ -629,6 +629,12 @@ func runScriptInt64Pair(ctx context.Context, rdb *redis.Client, script *redis.Sc
 // Account slot operations
 
 func (c *concurrencyCache) AcquireAccountSlot(ctx context.Context, accountID int64, maxConcurrency int, requestID string) (bool, error) {
+	return c.AcquireAccountSlotWithHolder(ctx, accountID, maxConcurrency, requestID, nil, "")
+}
+
+// AcquireAccountSlotWithHolder 占用账号槽位；成功时与活跃索引同一 pipeline 写入占用者详情（holder 为空则不写），
+// userSlotID 非空时顺带把详情回写到该用户槽位，让用户视角知道请求在哪个账号上。
+func (c *concurrencyCache) AcquireAccountSlotWithHolder(ctx context.Context, accountID int64, maxConcurrency int, requestID string, holder *service.SlotHolder, userSlotID string) (bool, error) {
 	key := accountSlotKey(accountID)
 	// 时间戳在 Lua 脚本内使用 Redis TIME 命令获取，确保多实例时钟一致
 	result, now, err := runScriptInt64Pair(ctx, c.rdb, acquireScript, []string{key, liveAccountSlotKey(accountID)}, maxConcurrency, c.slotTTLSeconds, requestID)
@@ -637,14 +643,14 @@ func (c *concurrencyCache) AcquireAccountSlot(ctx context.Context, accountID int
 	}
 	if result == 1 {
 		// 成功占槽后标记活跃账号，后台清理即可从索引定位候选账号。
-		c.touchActiveIndexAt(ctx, accountActiveIndexKey, accountID, now+int64(c.slotTTLSeconds))
+		c.markSlotAcquired(ctx, accountActiveIndexKey, accountID, now+int64(c.slotTTLSeconds), requestID, holder, userSlotID)
 	}
 	return result == 1, nil
 }
 
 func (c *concurrencyCache) ReleaseAccountSlot(ctx context.Context, accountID int64, requestID string) error {
 	key := accountSlotKey(accountID)
-	if err := c.rdb.ZRem(ctx, key, requestID).Err(); err != nil {
+	if err := c.removeSlotMember(ctx, key, requestID); err != nil {
 		return err
 	}
 	// 释放后用真实负载刷新索引；若没有槽位和等待计数，会移除索引 member。
@@ -706,6 +712,11 @@ func (c *concurrencyCache) GetAccountConcurrencyBatch(ctx context.Context, accou
 // User slot operations
 
 func (c *concurrencyCache) AcquireUserSlot(ctx context.Context, userID int64, maxConcurrency int, requestID string) (bool, error) {
+	return c.AcquireUserSlotWithHolder(ctx, userID, maxConcurrency, requestID, nil)
+}
+
+// AcquireUserSlotWithHolder 占用用户槽位；成功时与活跃索引同一 pipeline 写入占用者详情（holder 为空则不写）。
+func (c *concurrencyCache) AcquireUserSlotWithHolder(ctx context.Context, userID int64, maxConcurrency int, requestID string, holder *service.SlotHolder) (bool, error) {
 	key := userSlotKey(userID)
 	// 时间戳在 Lua 脚本内使用 Redis TIME 命令获取，确保多实例时钟一致
 	result, now, err := runScriptInt64Pair(ctx, c.rdb, acquireScript, []string{key, liveUserSlotKey(userID)}, maxConcurrency, c.slotTTLSeconds, requestID)
@@ -714,14 +725,14 @@ func (c *concurrencyCache) AcquireUserSlot(ctx context.Context, userID int64, ma
 	}
 	if result == 1 {
 		// 成功占槽后标记活跃用户，避免启动清理依赖全量 SCAN。
-		c.touchActiveIndexAt(ctx, userActiveIndexKey, userID, now+int64(c.slotTTLSeconds))
+		c.markSlotAcquired(ctx, userActiveIndexKey, userID, now+int64(c.slotTTLSeconds), requestID, holder, "")
 	}
 	return result == 1, nil
 }
 
 func (c *concurrencyCache) ReleaseUserSlot(ctx context.Context, userID int64, requestID string) error {
 	key := userSlotKey(userID)
-	if err := c.rdb.ZRem(ctx, key, requestID).Err(); err != nil {
+	if err := c.removeSlotMember(ctx, key, requestID); err != nil {
 		return err
 	}
 	// 释放后按 Redis 中剩余负载修正索引状态。
