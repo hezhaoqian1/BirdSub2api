@@ -505,6 +505,21 @@ func (s *stubAdminService) GetAccountsByIDs(ctx context.Context, ids []int64) ([
 	return out, nil
 }
 
+func (s *stubAdminService) DescribeActiveSlots(ctx context.Context, snapshot *service.ActiveSlotSnapshot) ([]service.ActiveRequestView, error) {
+	out := make([]service.ActiveRequestView, 0)
+	if snapshot == nil {
+		return out, nil
+	}
+	for _, slot := range snapshot.Slots {
+		view := service.ActiveRequestView{SlotID: slot.SlotID, Live: slot.Live, Recorded: slot.Holder != nil, AccountID: slot.AccountID}
+		if slot.Holder != nil {
+			view.UserID = slot.Holder.UserID
+		}
+		out = append(out, view)
+	}
+	return out, nil
+}
+
 func (s *stubAdminService) CreateAccount(ctx context.Context, input *service.CreateAccountInput) (*service.Account, error) {
 	s.mu.Lock()
 	s.createdAccounts = append(s.createdAccounts, input)

@@ -164,6 +164,7 @@ func apiKeyAuthWithSubscription(apiKeyService *service.APIKeyService, subscripti
 			return
 		}
 		ctx := context.WithValue(c.Request.Context(), ctxkey.UserID, apiKey.User.ID)
+		ctx = service.WithSlotHolderTrace(ctx, apiKey.User.ID, apiKey.ID)
 		c.Request = c.Request.WithContext(ctx)
 		billingInfoRequest := c.Request.URL.Path == "/v1/sub2api/billing"
 		// Async image task polling only reads data that already belongs to the
@@ -405,6 +406,19 @@ func setGroupContext(c *gin.Context, group *service.Group) {
 	}
 	ctx := context.WithValue(c.Request.Context(), ctxkey.Group, group)
 	c.Request = c.Request.WithContext(ctx)
+}
+
+// setSlotHolderTraceContext 把占用者身份（用户、Key）写入请求 context，供并发槽位记录"谁在用"。
+// 只写占用者身份，不写 ctxkey.UserID，避免改变该入口原有的用户级策略行为。
+func setSlotHolderTraceContext(c *gin.Context, apiKey *service.APIKey) {
+	if apiKey == nil {
+		return
+	}
+	var userID int64
+	if apiKey.User != nil {
+		userID = apiKey.User.ID
+	}
+	c.Request = c.Request.WithContext(service.WithSlotHolderTrace(c.Request.Context(), userID, apiKey.ID))
 }
 
 // apiKeyBalanceBelowAuthThreshold 保持鉴权层的历史语义：仅在余额耗尽（<=0）时拒绝。
