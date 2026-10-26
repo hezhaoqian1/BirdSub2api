@@ -148,6 +148,17 @@ func TestEvaluateSensitiveActions(t *testing.T) {
 	export := evaluateAuditRecord(snap, base("admin.accounts.export", ""))
 	require.Len(t, export, 1)
 	require.Equal(t, "audit:admin.accounts.export:req-1", export[0].DedupeKey)
+
+	scopedCreate := evaluateAuditRecord(snap, base("admin.settings.admin_api_keys.create", `{"name":"ops"}`))
+	require.Len(t, scopedCreate, 1)
+	require.Equal(t, "新建了受限管理密钥", scopedCreate[0].Title)
+	require.Equal(t, SecurityAlertCritical, scopedCreate[0].Severity)
+	require.Len(t, evaluateAuditRecord(snap, base("admin.settings.admin_api_keys.rotate.create", "")), 1)
+	require.Len(t, evaluateAuditRecord(snap, base("admin.settings.admin_api_keys.update", "")), 1)
+	revoke := evaluateAuditRecord(snap, base("admin.settings.admin_api_keys.delete", ""))
+	require.Len(t, revoke, 1)
+	require.Equal(t, SecurityAlertWarning, revoke[0].Severity)
+	require.Empty(t, evaluateAuditRecord(snap, base("admin.settings.admin_api_keys.read", "")))
 }
 
 func TestSanitizeSecurityTextSingleLine(t *testing.T) {

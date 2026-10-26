@@ -146,6 +146,14 @@ func evaluateSensitiveAction(snap securityRuleSnapshot, rec *AuditLog) (security
 		title, severity = "管理员 API Key 被重新生成", SecurityAlertCritical
 	case "admin.admin_api_key.delete":
 		title = "管理员 API Key 被删除"
+	case "admin.settings.admin_api_keys.create":
+		title, severity = "新建了受限管理密钥", SecurityAlertCritical
+	case "admin.settings.admin_api_keys.rotate.create":
+		title, severity = "受限管理密钥被轮换", SecurityAlertCritical
+	case "admin.settings.admin_api_keys.update":
+		title, severity = "受限管理密钥的权限被修改", SecurityAlertCritical
+	case "admin.settings.admin_api_keys.delete", "admin.settings.admin_api_keys.record.delete":
+		title = "受限管理密钥被吊销"
 	case "admin.users.balance.create":
 		amount, _ := auditBodyNumber(rec.RequestBody, "balance")
 		if snap.cfg.BalanceAdjustThreshold <= 0 || amount < snap.cfg.BalanceAdjustThreshold {
