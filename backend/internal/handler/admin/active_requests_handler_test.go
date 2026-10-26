@@ -7,26 +7,60 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
-	"github.com/Wei-Shaw/sub2api/internal/repository"
 	"github.com/Wei-Shaw/sub2api/internal/service"
-	"github.com/alicebob/miniredis/v2"
 	"github.com/gin-gonic/gin"
-	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/require"
 )
+
+// activeRequestsCacheStub 只实现弹窗接口会用到的方法；其余 ConcurrencyCache 方法未实现（调用即 panic）。
+// 与真实 Redis 缓存的端到端行为在 repository 包里测试。
+type activeRequestsCacheStub struct {
+	service.ConcurrencyCache
+	userSlots      *service.ActiveSlotSnapshot
+	accountSlots   *service.ActiveSlotSnapshot
+	allAccountHits int
+	userWaiting    int
+	accountWaiting int
+}
+
+var _ service.SlotHolderCache = (*activeRequestsCacheStub)(nil)
+
+func (s *activeRequestsCacheStub) AcquireAccountSlotWithHolder(context.Context, int64, int, string, *service.SlotHolder, string) (bool, error) {
+	return true, nil
+}
+
+func (s *activeRequestsCacheStub) AcquireUserSlotWithHolder(context.Context, int64, int, string, *service.SlotHolder) (bool, error) {
+	return true, nil
+}
+
+func (s *activeRequestsCacheStub) ListAccountSlots(context.Context, int64) (*service.ActiveSlotSnapshot, error) {
+	return s.accountSlots, nil
+}
+
+func (s *activeRequestsCacheStub) ListUserSlots(context.Context, int64) (*service.ActiveSlotSnapshot, error) {
+	return s.userSlots, nil
+}
+
+func (s *activeRequestsCacheStub) ListAllAccountSlots(context.Context) (*service.ActiveSlotSnapshot, error) {
+	s.allAccountHits++
+	return s.accountSlots, nil
+}
+
+func (s *activeRequestsCacheStub) GetAccountWaitingCount(context.Context, int64) (int, error) {
+	return s.accountWaiting, nil
+}
+
+func (s *activeRequestsCacheStub) GetUsersLoadBatch(_ context.Context, users []service.UserWithConcurrency) (map[int64]*service.UserLoadInfo, error) {
+	out := make(map[int64]*service.UserLoadInfo, len(users))
+	for _, u := range users {
+		out[u.ID] = &service.UserLoadInfo{UserID: u.ID, WaitingCount: s.userWaiting}
+	}
+	return out, nil
+}
 
 type activeRequestsEnvelope struct {
 	Code int                    `json:"code"`
 	Data ActiveRequestsResponse `json:"data"`
-}
-
-func newActiveRequestsTestService(t *testing.T) *service.ConcurrencyService {
-	t.Helper()
-	redisServer := miniredis.RunT(t)
-	client := redis.NewClient(&redis.Options{Addr: redisServer.Addr()})
-	t.Cleanup(func() { _ = client.Close() })
-	return service.NewConcurrencyService(repository.NewConcurrencyCache(client, 15, 900))
 }
 
 func getActiveRequests(t *testing.T, router *gin.Engine, path string) ActiveRequestsResponse {
@@ -39,91 +73,78 @@ func getActiveRequests(t *testing.T, router *gin.Engine, path string) ActiveRequ
 	return envelope.Data
 }
 
+func newUserActiveRequestsRouter(adminSvc *stubAdminService, cache *activeRequestsCacheStub) *gin.Engine {
+	gin.SetMode(gin.TestMode)
+	handler := NewUserHandler(adminSvc, service.NewConcurrencyService(cache), nil, nil, nil, nil, nil)
+	router := gin.New()
+	router.GET("/api/v1/admin/users/:id/active-requests", handler.GetActiveRequests)
+	return router
+}
+
 func TestAccountActiveRequestsListsSlotHolders(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	concurrency := newActiveRequestsTestService(t)
+	cache := &activeRequestsCacheStub{
+		accountWaiting: 2,
+		accountSlots: &service.ActiveSlotSnapshot{Now: 100, Slots: []service.ActiveSlot{
+			{SlotID: "a1", AccountID: 7, StartedAt: 90, Holder: &service.SlotHolder{UserID: 1, AccountID: 7}},
+			{SlotID: "a2", AccountID: 7, StartedAt: 95},
+		}},
+	}
 	adminSvc := newStubAdminService()
 	adminSvc.getAccountResult = &service.Account{ID: 7, Name: "acc", Concurrency: 5}
-	handler := &AccountHandler{adminService: adminSvc, concurrencyService: concurrency}
+	handler := &AccountHandler{adminService: adminSvc, concurrencyService: service.NewConcurrencyService(cache)}
 	router := gin.New()
 	router.GET("/api/v1/admin/accounts/:id/active-requests", handler.GetActiveRequests)
 
-	ctx := context.WithValue(context.Background(), ctxkey.RequestID, "req-1")
-	ctx = service.WithSlotHolderTrace(ctx, 1, 2)
-	slot, err := concurrency.AcquireAccountSlot(ctx, 7, 5)
-	require.NoError(t, err)
-	require.True(t, slot.Acquired)
-
 	got := getActiveRequests(t, router, "/api/v1/admin/accounts/7/active-requests")
-	require.Equal(t, 1, got.Current)
+	require.Equal(t, 2, got.Current)
 	require.Equal(t, 5, got.Max)
-	require.Len(t, got.Items, 1)
+	require.Equal(t, 2, got.Waiting)
+	require.Len(t, got.Items, 2)
 	require.True(t, got.Items[0].Recorded)
-	require.Equal(t, int64(7), got.Items[0].AccountID)
-
-	slot.ReleaseFunc()
-	got = getActiveRequests(t, router, "/api/v1/admin/accounts/7/active-requests")
-	require.Zero(t, got.Current)
-	require.Empty(t, got.Items)
+	require.Equal(t, int64(1), got.Items[0].UserID)
+	require.False(t, got.Items[1].Recorded)
 }
 
-// startTracedRequest 模拟一个经过 API Key 认证的请求：先占用户槽位，再占账号槽位。
-func startTracedRequest(t *testing.T, concurrency *service.ConcurrencyService, userID, userMax, accountID int64, requestID string) {
-	t.Helper()
-	ctx := context.WithValue(context.Background(), ctxkey.RequestID, requestID)
-	ctx = service.WithSlotHolderTrace(ctx, userID, 100+userID)
-	userSlot, err := concurrency.AcquireUserSlot(ctx, userID, int(userMax))
-	require.NoError(t, err)
-	require.True(t, userSlot.Acquired)
-	t.Cleanup(userSlot.ReleaseFunc)
-	accountSlot, err := concurrency.AcquireAccountSlot(ctx, accountID, 5)
-	require.NoError(t, err)
-	require.True(t, accountSlot.Acquired)
-	t.Cleanup(accountSlot.ReleaseFunc)
-}
-
-func TestUserActiveRequestsShowsAccountOfEachRequest(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-	concurrency := newActiveRequestsTestService(t)
+func TestLimitedUserActiveRequestsReadOnlyUserSlots(t *testing.T) {
+	cache := &activeRequestsCacheStub{
+		userWaiting: 1,
+		userSlots: &service.ActiveSlotSnapshot{Now: 100, Slots: []service.ActiveSlot{
+			{SlotID: "u1", AccountID: 41, StartedAt: 90, Holder: &service.SlotHolder{UserID: 1, AccountID: 41}},
+			{SlotID: "u2", StartedAt: 95, Holder: &service.SlotHolder{UserID: 1}},
+		}},
+		accountSlots: &service.ActiveSlotSnapshot{Now: 100},
+	}
 	adminSvc := newStubAdminService()
 	adminSvc.users[0].Concurrency = 3
-	handler := NewUserHandler(adminSvc, concurrency, nil, nil, nil, nil, nil)
-	router := gin.New()
-	router.GET("/api/v1/admin/users/:id/active-requests", handler.GetActiveRequests)
-
-	userID := adminSvc.users[0].ID
-	// 客户端可以带重复的 X-Request-ID，账号关联不能依赖它。
-	startTracedRequest(t, concurrency, userID, 3, 41, "dup")
-	startTracedRequest(t, concurrency, userID, 3, 42, "dup")
-	startTracedRequest(t, concurrency, userID+1, 3, 43, "dup")
+	router := newUserActiveRequestsRouter(adminSvc, cache)
 
 	got := getActiveRequests(t, router, "/api/v1/admin/users/1/active-requests")
 	require.Equal(t, 2, got.Current)
 	require.Equal(t, 3, got.Max)
-	require.Len(t, got.Items, 2)
-	accounts := []int64{got.Items[0].AccountID, got.Items[1].AccountID}
-	require.ElementsMatch(t, []int64{41, 42}, accounts)
+	require.Equal(t, 1, got.Waiting)
+	require.Equal(t, []int64{41, 0}, []int64{got.Items[0].AccountID, got.Items[1].AccountID})
+	require.Zero(t, cache.allAccountHits, "limited users must not trigger the all-accounts scan")
 }
 
 func TestUnlimitedUserActiveRequestsComeFromAccountSlots(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-	concurrency := newActiveRequestsTestService(t)
+	cache := &activeRequestsCacheStub{
+		userSlots: &service.ActiveSlotSnapshot{Now: 100},
+		accountSlots: &service.ActiveSlotSnapshot{Now: 100, Slots: []service.ActiveSlot{
+			{SlotID: "a1", AccountID: 41, StartedAt: 90, Holder: &service.SlotHolder{UserID: 1, AccountID: 41}},
+			{SlotID: "a2", AccountID: 42, StartedAt: 91, Holder: &service.SlotHolder{UserID: 2, AccountID: 42}},
+		}},
+	}
 	adminSvc := newStubAdminService()
 	adminSvc.users[0].Concurrency = 0
-	handler := NewUserHandler(adminSvc, concurrency, nil, nil, nil, nil, nil)
-	router := gin.New()
-	router.GET("/api/v1/admin/users/:id/active-requests", handler.GetActiveRequests)
-
-	userID := adminSvc.users[0].ID
-	startTracedRequest(t, concurrency, userID, 0, 41, "r1")
-	startTracedRequest(t, concurrency, userID+1, 0, 42, "r2")
+	router := newUserActiveRequestsRouter(adminSvc, cache)
 
 	got := getActiveRequests(t, router, "/api/v1/admin/users/1/active-requests")
 	require.Equal(t, 1, got.Current, "unlimited users report what is actually running")
 	require.Zero(t, got.Max)
 	require.Len(t, got.Items, 1)
 	require.Equal(t, int64(41), got.Items[0].AccountID)
-	require.Equal(t, userID, got.Items[0].UserID)
+	require.Equal(t, 1, cache.allAccountHits)
 }
 
 func TestActiveRequestsRejectsInvalidID(t *testing.T) {

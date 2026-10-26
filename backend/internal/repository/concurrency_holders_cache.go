@@ -105,9 +105,11 @@ func (c *concurrencyCache) ListAllAccountSlots(ctx context.Context) (*service.Ac
 		return nil, err
 	}
 	// 活跃索引的 score 是“预计仍需关注到”的时间，未到期的成员才可能还有槽位。
-	members, err := c.rdb.ZRangeByScore(ctx, accountActiveIndexKey, &redis.ZRangeBy{
-		Min: strconv.FormatInt(now, 10),
-		Max: "+inf",
+	members, err := c.rdb.ZRangeArgs(ctx, redis.ZRangeArgs{
+		Key:     accountActiveIndexKey,
+		Start:   strconv.FormatInt(now, 10),
+		Stop:    "+inf",
+		ByScore: true,
 	}).Result()
 	if err != nil && !errors.Is(err, redis.Nil) {
 		return nil, fmt.Errorf("read account active index: %w", err)
