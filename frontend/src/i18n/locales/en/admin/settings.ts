@@ -151,7 +151,7 @@ export default {
             changeUser: 'Change user',
             codeLabel: 'Custom Invite Code (optional)',
             codePlaceholder: 'e.g. VIP2026',
-            codeHint: '4-32 characters; A-Z, 0-9, underscore, dash. Leave empty to keep current. Input is upper-cased.',
+            codeHint: '4-32 characters; A-Z, 0-9, underscore, dash. Leave empty to keep current. Input is upper-cased. The old code and links keep crediting this user; if the new code was previously used by another user, it moves to this user. Users cannot change an admin-set code themselves.',
             rateLabel: 'Exclusive Rebate Rate (optional)',
             ratePlaceholder: 'e.g. 30',
             rateHint: '0-100. Leave empty (in edit mode) to clear and fall back to the global rate.',

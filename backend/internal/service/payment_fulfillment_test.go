@@ -158,6 +158,10 @@ func (r *paymentFulfillmentAffiliateRepoStub) ListInvitees(context.Context, int6
 	panic("unexpected ListInvitees call")
 }
 
+func (r *paymentFulfillmentAffiliateRepoStub) ChangeOwnAffCode(context.Context, int64, string, time.Duration) error {
+	panic("unexpected ChangeOwnAffCode call")
+}
+
 func (r *paymentFulfillmentAffiliateRepoStub) UpdateUserAffCode(context.Context, int64, string) error {
 	panic("unexpected UpdateUserAffCode call")
 }

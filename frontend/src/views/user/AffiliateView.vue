@@ -57,7 +57,23 @@
                   <Icon name="copy" size="sm" />
                   <span>{{ t('affiliate.copyCode') }}</span>
                 </button>
+                <button
+                  v-if="!detail.aff_code_custom"
+                  class="btn btn-secondary btn-sm w-full sm:w-auto sm:shrink-0"
+                  :disabled="!!nextCodeChangeAt"
+                  data-testid="affiliate-edit-code"
+                  @click="openCodeDialog"
+                >
+                  <Icon name="edit" size="sm" />
+                  <span>{{ t('affiliate.customCode.edit') }}</span>
+                </button>
               </div>
+              <p v-if="detail.aff_code_custom" class="text-xs text-gray-500 dark:text-dark-400">
+                {{ t('affiliate.customCode.managedByAdmin') }}
+              </p>
+              <p v-else-if="nextCodeChangeAt" class="text-xs text-gray-500 dark:text-dark-400">
+                {{ t('affiliate.customCode.nextChangeAt', { time: formatDateTime(nextCodeChangeAt) }) }}
+              </p>
             </div>
 
             <div class="space-y-2">
@@ -136,6 +152,38 @@
         </div>
       </template>
     </div>
+
+    <BaseDialog :show="codeDialogOpen" :title="t('affiliate.customCode.title')" @close="closeCodeDialog">
+      <form class="space-y-4" @submit.prevent="saveCustomCode">
+        <div>
+          <label for="affiliate_custom_code" class="input-label">{{ t('affiliate.customCode.label') }}</label>
+          <input
+            id="affiliate_custom_code"
+            v-model="codeInput"
+            type="text"
+            class="input font-mono uppercase"
+            :maxlength="SELF_CODE_MAX_LENGTH"
+            autocomplete="off"
+            :placeholder="t('affiliate.customCode.placeholder')"
+            data-testid="affiliate-custom-code-input"
+          />
+          <p v-if="codeError" class="mt-1.5 text-sm text-red-600 dark:text-red-400">{{ codeError }}</p>
+        </div>
+        <ul class="space-y-1 text-sm text-gray-500 dark:text-dark-400">
+          <li>{{ t('affiliate.customCode.rules') }}</li>
+          <li>{{ t('affiliate.customCode.cooldownRule') }}</li>
+          <li>{{ t('affiliate.customCode.keepOldRule') }}</li>
+        </ul>
+      </form>
+      <template #footer>
+        <button class="btn btn-secondary" :disabled="savingCode" @click="closeCodeDialog">
+          {{ t('common.cancel') }}
+        </button>
+        <button class="btn btn-primary" :disabled="savingCode" data-testid="affiliate-custom-code-save" @click="saveCustomCode">
+          {{ savingCode ? t('affiliate.customCode.saving') : t('affiliate.customCode.save') }}
+        </button>
+      </template>
+    </BaseDialog>
   </AppLayout>
 </template>
 
@@ -143,6 +191,7 @@
 import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import AppLayout from '@/components/layout/AppLayout.vue'
+import BaseDialog from '@/components/common/BaseDialog.vue'
 import Icon from '@/components/icons/Icon.vue'
 import userAPI from '@/api/user'
 import type { UserAffiliateDetail } from '@/types'
@@ -150,7 +199,7 @@ import { useAppStore } from '@/stores/app'
 import { useAuthStore } from '@/stores/auth'
 import { useClipboard } from '@/composables/useClipboard'
 import { formatCurrency, formatDateTime } from '@/utils/format'
-import { extractApiErrorMessage } from '@/utils/apiError'
+import { extractApiErrorCode, extractApiErrorMessage } from '@/utils/apiError'
 
 const { t } = useI18n()
 const appStore = useAppStore()
@@ -161,10 +210,35 @@ const loading = ref(true)
 const transferring = ref(false)
 const detail = ref<UserAffiliateDetail | null>(null)
 
+// 短邀请链接：/r/:code 记下邀请码后跳到注册页，地址栏里不再带邀请码。
 const inviteLink = computed(() => {
   if (!detail.value) return ''
-  if (typeof window === 'undefined') return `/register?aff=${encodeURIComponent(detail.value.aff_code)}`
-  return `${window.location.origin}/register?aff=${encodeURIComponent(detail.value.aff_code)}`
+  const path = `/r/${encodeURIComponent(detail.value.aff_code)}`
+  if (typeof window === 'undefined') return path
+  return `${window.location.origin}${path}`
+})
+
+// 与后端 validateSelfServiceAffCode 保持一致。
+const SELF_CODE_MAX_LENGTH = 16
+const SELF_CODE_PATTERN = /^[A-Z0-9]{4,16}$/
+const CODE_ERROR_REASONS = new Set([
+  'AFFILIATE_CODE_TAKEN',
+  'AFFILIATE_CODE_RESERVED',
+  'AFFILIATE_CODE_INVALID',
+  'AFFILIATE_CODE_COOLDOWN',
+  'AFFILIATE_CODE_LOCKED',
+  'AFFILIATE_DISABLED'
+])
+
+const codeDialogOpen = ref(false)
+const codeInput = ref('')
+const codeError = ref('')
+const savingCode = ref(false)
+
+const nextCodeChangeAt = computed(() => {
+  const value = detail.value?.aff_code_change_available_at
+  if (!value) return null
+  return new Date(value).getTime() > Date.now() ? value : null
 })
 
 // Rebate rate is a percentage in the range [0, 100]; backend already clamps it.
@@ -202,6 +276,44 @@ async function copyCode(): Promise<void> {
 async function copyInviteLink(): Promise<void> {
   if (!inviteLink.value) return
   await copyToClipboard(inviteLink.value, t('affiliate.linkCopied'))
+}
+
+function openCodeDialog(): void {
+  codeInput.value = detail.value?.aff_code ?? ''
+  codeError.value = ''
+  codeDialogOpen.value = true
+}
+
+function closeCodeDialog(): void {
+  if (savingCode.value) return
+  codeDialogOpen.value = false
+}
+
+async function saveCustomCode(): Promise<void> {
+  if (savingCode.value || !detail.value) return
+  const code = codeInput.value.trim().toUpperCase()
+  if (!SELF_CODE_PATTERN.test(code)) {
+    codeError.value = t('affiliate.customCode.errors.AFFILIATE_CODE_INVALID')
+    return
+  }
+  if (code === detail.value.aff_code) {
+    codeDialogOpen.value = false
+    return
+  }
+  savingCode.value = true
+  codeError.value = ''
+  try {
+    detail.value = await userAPI.updateAffiliateCode(code)
+    codeDialogOpen.value = false
+    appStore.showSuccess(t('affiliate.customCode.success', { code: detail.value.aff_code }))
+  } catch (error) {
+    const reason = extractApiErrorCode(error)
+    codeError.value = reason && CODE_ERROR_REASONS.has(reason)
+      ? t(`affiliate.customCode.errors.${reason}`)
+      : extractApiErrorMessage(error, t('common.error'))
+  } finally {
+    savingCode.value = false
+  }
 }
 
 async function transferQuota(): Promise<void> {

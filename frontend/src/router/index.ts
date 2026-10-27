@@ -13,6 +13,7 @@ import { useRoutePrefetch } from '@/composables/useRoutePrefetch'
 import { getSetupStatus } from '@/api/setup'
 import { resolveCompletedSetupRedirectPath } from './setupRedirect'
 import { resolveRouteDocumentTitle } from './title'
+import { captureAffiliateInviteLink } from '@/utils/oauthAffiliate'
 
 /**
  * Route definitions with lazy loading
@@ -57,6 +58,15 @@ const routes: RouteRecordRaw[] = [
       requiresAuth: false,
       title: 'Register',
       titleKey: 'auth.createAccount'
+    }
+  },
+  {
+    // 短邀请链接：记下邀请码（本次浏览器会话内锁定）后跳到注册页，地址栏不再带邀请码。
+    path: '/r/:code',
+    name: 'AffiliateInvite',
+    redirect: (to) => {
+      captureAffiliateInviteLink(to.params.code)
+      return { path: '/register' }
     }
   },
   {

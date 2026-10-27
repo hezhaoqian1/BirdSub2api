@@ -1,6 +1,7 @@
 import { flushPromises, mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import RegisterView from '@/views/auth/RegisterView.vue'
+import { captureAffiliateInviteLink, storeAffiliateReferralCode } from '@/utils/oauthAffiliate'
 
 const {
   getPublicSettingsMock,
@@ -104,6 +105,8 @@ describe('RegisterView', () => {
     verifyActionMock.mockReset()
     appStoreMock.cachedPublicSettings = null
     sessionStorage.removeItem('register_data')
+    sessionStorage.removeItem('affiliate_referral_locked')
+    localStorage.removeItem('affiliate_referral_code')
     verifyActionMock.mockResolvedValue({ token: 'ticket', randstr: 'randstr' })
     getPublicSettingsMock.mockResolvedValue(publicSettings)
     registerMock.mockResolvedValue({})
@@ -221,6 +224,41 @@ describe('RegisterView', () => {
       invitationField.element.compareDocumentPosition(turnstile.element) &
         Node.DOCUMENT_POSITION_FOLLOWING
     ).toBeTruthy()
+  })
+
+  it('locks the affiliate code for this browser session after arriving via an invite link', async () => {
+    getPublicSettingsMock.mockResolvedValueOnce({ ...publicSettings, turnstile_enabled: false })
+    captureAffiliateInviteLink('vip2026')
+
+    const wrapper = mountRegister()
+    await flushPromises()
+
+    const input = wrapper.get('#affiliate_code')
+    expect((input.element as HTMLInputElement).value).toBe('VIP2026')
+    expect(input.attributes('readonly')).toBeDefined()
+    expect(wrapper.find('[data-testid="affiliate-code-locked-hint"]').exists()).toBe(true)
+
+    // Even if the value is forced through devtools, the locked code is submitted.
+    await input.setValue('OTHER1')
+    await wrapper.get('#email').setValue('invitee@example.com')
+    await wrapper.get('#password').setValue('secret-123')
+    await wrapper.get('#confirmPassword').setValue('secret-123')
+    await wrapper.get('form').trigger('submit.prevent')
+    await flushPromises()
+
+    expect(registerMock).toHaveBeenCalledWith(expect.objectContaining({ aff_code: 'VIP2026' }))
+  })
+
+  it('prefills but does not lock a remembered code from an earlier browser session', async () => {
+    storeAffiliateReferralCode('VIP2026')
+
+    const wrapper = mountRegister()
+    await flushPromises()
+
+    const input = wrapper.get('#affiliate_code')
+    expect((input.element as HTMLInputElement).value).toBe('VIP2026')
+    expect(input.attributes('readonly')).toBeUndefined()
+    expect(wrapper.find('[data-testid="affiliate-code-locked-hint"]').exists()).toBe(false)
   })
 
   it('uses the mandatory invitation field without duplicating the affiliate field', async () => {

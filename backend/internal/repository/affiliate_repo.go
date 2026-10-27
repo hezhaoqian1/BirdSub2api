@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -16,7 +17,7 @@ import (
 )
 
 const (
-	affiliateCodeLength      = 12
+	affiliateCodeLength      = 8
 	affiliateCodeMaxAttempts = 12
 )
 
@@ -71,9 +72,22 @@ func (r *affiliateRepository) EnsureUserAffiliate(ctx context.Context, userID in
 	return ensureUserAffiliateWithClient(ctx, client, userID)
 }
 
+// GetAffiliateByCode 先按当前邀请码查找，找不到再查历史邀请码，
+// 这样用户改码之后，之前分享出去的旧链接仍然归属该用户。
 func (r *affiliateRepository) GetAffiliateByCode(ctx context.Context, code string) (*service.AffiliateSummary, error) {
 	client := clientFromContext(ctx, r.client)
-	return queryAffiliateByCode(ctx, client, code)
+	summary, err := queryAffiliateByCode(ctx, client, code)
+	if err == nil || !errors.Is(err, service.ErrAffiliateProfileNotFound) {
+		return summary, err
+	}
+	ownerID, found, aliasErr := queryAffiliateAliasOwner(ctx, client, strings.ToUpper(strings.TrimSpace(code)))
+	if aliasErr != nil {
+		return nil, aliasErr
+	}
+	if !found {
+		return nil, service.ErrAffiliateProfileNotFound
+	}
+	return queryAffiliateByUserID(ctx, client, ownerID)
 }
 
 func (r *affiliateRepository) BindInviter(ctx context.Context, userID, inviterID int64) (bool, error) {
@@ -939,6 +953,13 @@ func ensureUserAffiliateWithClient(ctx context.Context, client affiliateQueryExe
 		if codeErr != nil {
 			return nil, codeErr
 		}
+		inUse, inUseErr := affiliateCodeInUse(ctx, client, code)
+		if inUseErr != nil {
+			return nil, inUseErr
+		}
+		if inUse {
+			continue
+		}
 		_, insertErr := client.ExecContext(ctx, `
 INSERT INTO user_affiliates (user_id, aff_code, created_at, updated_at)
 VALUES ($1, $2, NOW(), NOW())
@@ -960,6 +981,7 @@ func queryAffiliateByUserID(ctx context.Context, client affiliateQueryExecer, us
 SELECT user_id,
        aff_code,
        aff_code_custom,
+       aff_code_changed_at,
        aff_rebate_rate_percent,
        inviter_id,
        aff_count,
@@ -984,10 +1006,12 @@ WHERE user_id = $1`, userID)
 	var out service.AffiliateSummary
 	var inviterID sql.NullInt64
 	var rebateRate sql.NullFloat64
+	var codeChangedAt sql.NullTime
 	if err := rows.Scan(
 		&out.UserID,
 		&out.AffCode,
 		&out.AffCodeCustom,
+		&codeChangedAt,
 		&rebateRate,
 		&inviterID,
 		&out.AffCount,
@@ -1006,6 +1030,10 @@ WHERE user_id = $1`, userID)
 		v := rebateRate.Float64
 		out.AffRebateRatePercent = &v
 	}
+	if codeChangedAt.Valid {
+		t := codeChangedAt.Time
+		out.AffCodeChangedAt = &t
+	}
 	return &out, nil
 }
 
@@ -1014,6 +1042,7 @@ func queryAffiliateByCode(ctx context.Context, client affiliateQueryExecer, code
 SELECT user_id,
        aff_code,
        aff_code_custom,
+       aff_code_changed_at,
        aff_rebate_rate_percent,
        inviter_id,
        aff_count,
@@ -1040,10 +1069,12 @@ LIMIT 1`, strings.ToUpper(strings.TrimSpace(code)))
 	var out service.AffiliateSummary
 	var inviterID sql.NullInt64
 	var rebateRate sql.NullFloat64
+	var codeChangedAt sql.NullTime
 	if err := rows.Scan(
 		&out.UserID,
 		&out.AffCode,
 		&out.AffCodeCustom,
+		&codeChangedAt,
 		&rebateRate,
 		&inviterID,
 		&out.AffCount,
@@ -1061,6 +1092,10 @@ LIMIT 1`, strings.ToUpper(strings.TrimSpace(code)))
 	if rebateRate.Valid {
 		v := rebateRate.Float64
 		out.AffRebateRatePercent = &v
+	}
+	if codeChangedAt.Valid {
+		t := codeChangedAt.Time
+		out.AffCodeChangedAt = &t
 	}
 	return &out, nil
 }
@@ -1161,8 +1196,9 @@ func isAffiliateUniqueViolation(err error) bool {
 	return false
 }
 
-// UpdateUserAffCode 改写用户的邀请码（自定义专属邀请码）。
-// 唯一性冲突返回 ErrAffiliateCodeTaken。
+// UpdateUserAffCode 管理员改写用户的邀请码（专属邀请码）。旧码转为该用户的
+// 历史码，已分享出去的旧链接继续有效；新码如果是其他用户的历史码，则由管理员
+// 收回给当前用户。新码正被其他用户使用时返回 ErrAffiliateCodeTaken。
 func (r *affiliateRepository) UpdateUserAffCode(ctx context.Context, userID int64, newCode string) error {
 	if userID <= 0 {
 		return service.ErrUserNotFound
@@ -1173,37 +1209,69 @@ func (r *affiliateRepository) UpdateUserAffCode(ctx context.Context, userID int6
 	}
 
 	return r.withTx(ctx, func(txCtx context.Context, txClient *dbent.Client) error {
-		if _, err := ensureUserAffiliateWithClient(txCtx, txClient, userID); err != nil {
+		state, err := lockAffiliateCodeState(txCtx, txClient, userID)
+		if err != nil {
 			return err
 		}
-		res, err := txClient.ExecContext(txCtx, `
+		if err := prepareAffCodeChange(txCtx, txClient, userID, state.code, code, true); err != nil {
+			return err
+		}
+		return execAffCodeUpdate(txCtx, txClient, `
 UPDATE user_affiliates
 SET aff_code = $1,
     aff_code_custom = true,
     updated_at = NOW()
 WHERE user_id = $2`, code, userID)
+	})
+}
+
+// ChangeOwnAffCode 用户自助改码。管理员指定的专属码不可改；距离上次自助改码
+// 不足 cooldown 时返回 ErrAffiliateCodeCooldown；改成当前码视为成功且不消耗冷却期。
+func (r *affiliateRepository) ChangeOwnAffCode(ctx context.Context, userID int64, newCode string, cooldown time.Duration) error {
+	if userID <= 0 {
+		return service.ErrUserNotFound
+	}
+	code := strings.ToUpper(strings.TrimSpace(newCode))
+	if code == "" {
+		return service.ErrAffiliateCodeInvalid
+	}
+
+	return r.withTx(ctx, func(txCtx context.Context, txClient *dbent.Client) error {
+		state, err := lockAffiliateCodeState(txCtx, txClient, userID)
 		if err != nil {
-			if isAffiliateUniqueViolation(err) {
-				return service.ErrAffiliateCodeTaken
-			}
-			return fmt.Errorf("update aff_code: %w", err)
+			return err
 		}
-		affected, _ := res.RowsAffected()
-		if affected == 0 {
-			return service.ErrUserNotFound
+		if state.custom {
+			return service.ErrAffiliateCodeLocked
 		}
-		return nil
+		if state.code == code {
+			return nil
+		}
+		if state.changedAt.Valid && time.Since(state.changedAt.Time) < cooldown {
+			return service.ErrAffiliateCodeCooldown
+		}
+		if err := prepareAffCodeChange(txCtx, txClient, userID, state.code, code, false); err != nil {
+			return err
+		}
+		return execAffCodeUpdate(txCtx, txClient, `
+UPDATE user_affiliates
+SET aff_code = $1,
+    aff_code_changed_at = NOW(),
+    updated_at = NOW()
+WHERE user_id = $2`, code, userID)
 	})
 }
 
 // ResetUserAffCode 把 aff_code 还原为系统随机码，并清除 aff_code_custom 标记。
+// 原来的码转为该用户的历史码。
 func (r *affiliateRepository) ResetUserAffCode(ctx context.Context, userID int64) (string, error) {
 	if userID <= 0 {
 		return "", service.ErrUserNotFound
 	}
 	var newCode string
 	err := r.withTx(ctx, func(txCtx context.Context, txClient *dbent.Client) error {
-		if _, err := ensureUserAffiliateWithClient(txCtx, txClient, userID); err != nil {
+		state, err := lockAffiliateCodeState(txCtx, txClient, userID)
+		if err != nil {
 			return err
 		}
 		for i := 0; i < affiliateCodeMaxAttempts; i++ {
@@ -1211,21 +1279,19 @@ func (r *affiliateRepository) ResetUserAffCode(ctx context.Context, userID int64
 			if codeErr != nil {
 				return codeErr
 			}
-			res, err := txClient.ExecContext(txCtx, `
+			if err := prepareAffCodeChange(txCtx, txClient, userID, state.code, candidate, false); err != nil {
+				if errors.Is(err, service.ErrAffiliateCodeTaken) {
+					continue
+				}
+				return err
+			}
+			if err := execAffCodeUpdate(txCtx, txClient, `
 UPDATE user_affiliates
 SET aff_code = $1,
     aff_code_custom = false,
     updated_at = NOW()
-WHERE user_id = $2`, candidate, userID)
-			if err != nil {
-				if isAffiliateUniqueViolation(err) {
-					continue
-				}
-				return fmt.Errorf("reset aff_code: %w", err)
-			}
-			affected, _ := res.RowsAffected()
-			if affected == 0 {
-				return service.ErrUserNotFound
+WHERE user_id = $2`, candidate, userID); err != nil {
+				return err
 			}
 			newCode = candidate
 			return nil
@@ -1236,6 +1302,167 @@ WHERE user_id = $2`, candidate, userID)
 		return "", err
 	}
 	return newCode, nil
+}
+
+type affiliateCodeState struct {
+	code      string
+	custom    bool
+	changedAt sql.NullTime
+}
+
+// lockAffiliateCodeState 确保用户有邀请返利档案，并锁住该行读取当前邀请码状态，
+// 防止同一用户的并发改码互相覆盖历史码。
+func lockAffiliateCodeState(ctx context.Context, client affiliateQueryExecer, userID int64) (*affiliateCodeState, error) {
+	if _, err := ensureUserAffiliateWithClient(ctx, client, userID); err != nil {
+		return nil, err
+	}
+	rows, err := client.QueryContext(ctx, `
+SELECT aff_code, aff_code_custom, aff_code_changed_at
+FROM user_affiliates
+WHERE user_id = $1
+FOR UPDATE`, userID)
+	if err != nil {
+		return nil, fmt.Errorf("lock affiliate code state: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	if !rows.Next() {
+		if err := rows.Err(); err != nil {
+			return nil, err
+		}
+		return nil, service.ErrUserNotFound
+	}
+	var state affiliateCodeState
+	if err := rows.Scan(&state.code, &state.custom, &state.changedAt); err != nil {
+		return nil, err
+	}
+	return &state, rows.Err()
+}
+
+// prepareAffCodeChange 在把 userID 的邀请码从 oldCode 换成 newCode 之前做占用检查，
+// 并把 oldCode 转入历史码表：
+//   - newCode 正被其他用户使用：ErrAffiliateCodeTaken
+//   - newCode 是其他用户的历史码：reclaimAlias（管理员）时收回，否则 ErrAffiliateCodeTaken
+//   - newCode 是该用户自己的历史码：直接取回
+//
+// 先查再写，避免唯一约束冲突让外层 Postgres 事务进入 aborted 状态。
+func prepareAffCodeChange(ctx context.Context, client affiliateQueryExecer, userID int64, oldCode, newCode string, reclaimAlias bool) error {
+	if err := lockAffiliateCodes(ctx, client, oldCode, newCode); err != nil {
+		return err
+	}
+	if oldCode == newCode {
+		return nil
+	}
+
+	primaryTaken, err := scanAffiliateBool(ctx, client,
+		`SELECT EXISTS (SELECT 1 FROM user_affiliates WHERE aff_code = $1 AND user_id <> $2)`, newCode, userID)
+	if err != nil {
+		return fmt.Errorf("check aff_code usage: %w", err)
+	}
+	if primaryTaken {
+		return service.ErrAffiliateCodeTaken
+	}
+
+	ownerID, found, err := queryAffiliateAliasOwner(ctx, client, newCode)
+	if err != nil {
+		return err
+	}
+	if found {
+		if ownerID != userID && !reclaimAlias {
+			return service.ErrAffiliateCodeTaken
+		}
+		if _, err := client.ExecContext(ctx, `DELETE FROM user_affiliate_code_aliases WHERE code = $1`, newCode); err != nil {
+			return fmt.Errorf("release aff_code alias: %w", err)
+		}
+	}
+
+	if oldCode != "" {
+		if _, err := client.ExecContext(ctx, `
+INSERT INTO user_affiliate_code_aliases (code, user_id, created_at)
+VALUES ($1, $2, NOW())
+ON CONFLICT (code) DO NOTHING`, oldCode, userID); err != nil {
+			return fmt.Errorf("keep old aff_code as alias: %w", err)
+		}
+	}
+	return nil
+}
+
+// lockAffiliateCodes 对涉及的邀请码加事务级 advisory lock（按字典序，避免死锁），
+// 串行化"把某个码设为当前码 / 转成历史码"的并发操作。
+func lockAffiliateCodes(ctx context.Context, client affiliateQueryExecer, codes ...string) error {
+	sorted := make([]string, 0, len(codes))
+	for _, code := range codes {
+		if code != "" {
+			sorted = append(sorted, code)
+		}
+	}
+	slices.Sort(sorted)
+	sorted = slices.Compact(sorted)
+	for _, code := range sorted {
+		if _, err := client.ExecContext(ctx,
+			`SELECT pg_advisory_xact_lock(hashtextextended('affiliate_code:' || $1::text, 0))`, code); err != nil {
+			return fmt.Errorf("lock affiliate code: %w", err)
+		}
+	}
+	return nil
+}
+
+// execAffCodeUpdate 执行改码 UPDATE，统一处理唯一冲突与用户不存在。
+func execAffCodeUpdate(ctx context.Context, client affiliateQueryExecer, query string, code string, userID int64) error {
+	res, err := client.ExecContext(ctx, query, code, userID)
+	if err != nil {
+		if isAffiliateUniqueViolation(err) {
+			return service.ErrAffiliateCodeTaken
+		}
+		return fmt.Errorf("update aff_code: %w", err)
+	}
+	affected, _ := res.RowsAffected()
+	if affected == 0 {
+		return service.ErrUserNotFound
+	}
+	return nil
+}
+
+func queryAffiliateAliasOwner(ctx context.Context, client affiliateQueryExecer, code string) (int64, bool, error) {
+	rows, err := client.QueryContext(ctx, `SELECT user_id FROM user_affiliate_code_aliases WHERE code = $1`, code)
+	if err != nil {
+		return 0, false, fmt.Errorf("query aff_code alias: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	if !rows.Next() {
+		return 0, false, rows.Err()
+	}
+	var ownerID int64
+	if err := rows.Scan(&ownerID); err != nil {
+		return 0, false, err
+	}
+	return ownerID, true, rows.Err()
+}
+
+// affiliateCodeInUse 判断邀请码是否已被占用（任一用户的当前码或历史码）。
+func affiliateCodeInUse(ctx context.Context, client affiliateQueryExecer, code string) (bool, error) {
+	inUse, err := scanAffiliateBool(ctx, client, `
+SELECT EXISTS (SELECT 1 FROM user_affiliates WHERE aff_code = $1)
+    OR EXISTS (SELECT 1 FROM user_affiliate_code_aliases WHERE code = $1)`, code)
+	if err != nil {
+		return false, fmt.Errorf("check aff_code usage: %w", err)
+	}
+	return inUse, nil
+}
+
+func scanAffiliateBool(ctx context.Context, client affiliateQueryExecer, query string, args ...any) (bool, error) {
+	rows, err := client.QueryContext(ctx, query, args...)
+	if err != nil {
+		return false, err
+	}
+	defer func() { _ = rows.Close() }()
+	if !rows.Next() {
+		return false, rows.Err()
+	}
+	var v bool
+	if err := rows.Scan(&v); err != nil {
+		return false, err
+	}
+	return v, rows.Err()
 }
 
 // SetUserRebateRate 设置或清除用户专属返利比例。ratePercent==nil 表示清除（沿用全局）。

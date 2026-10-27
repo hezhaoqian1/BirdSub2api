@@ -726,6 +726,28 @@ export default {
     linkCopied: '邀请链接已复制',
     loadFailed: '加载邀请返利数据失败',
     transferFailed: '转入余额失败',
+    customCode: {
+      edit: '自定义',
+      title: '自定义邀请码',
+      label: '新邀请码',
+      placeholder: '例如 VIP2026',
+      rules: '4-16 位字母或数字，不区分大小写。',
+      cooldownRule: '每 30 天可以修改一次。',
+      keepOldRule: '修改后，旧邀请码和已经分享出去的旧链接仍然有效，返利照常算你的。',
+      save: '保存',
+      saving: '保存中...',
+      success: '邀请码已改为 {code}',
+      nextChangeAt: '{time} 后可再次修改',
+      managedByAdmin: '这是管理员为你设置的专属邀请码，如需修改请联系客服',
+      errors: {
+        AFFILIATE_CODE_TAKEN: '这个邀请码已被占用，换一个试试',
+        AFFILIATE_CODE_RESERVED: '邀请码不能包含 admin、official、kefu 等保留词，请换一个',
+        AFFILIATE_CODE_INVALID: '邀请码需为 4-16 位字母或数字',
+        AFFILIATE_CODE_COOLDOWN: '30 天内只能修改一次邀请码',
+        AFFILIATE_CODE_LOCKED: '专属邀请码由管理员设置，不能自行修改',
+        AFFILIATE_DISABLED: '邀请返利功能未开启'
+      }
+    },
     stats: {
       rebateRate: '我的返利比例',
       rebateRateHint: '被邀请用户每次充值后你可获得的返利比例',
