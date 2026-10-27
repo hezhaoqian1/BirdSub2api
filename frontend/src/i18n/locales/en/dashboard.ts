@@ -722,6 +722,28 @@ export default {
     linkCopied: 'Invite link copied',
     loadFailed: 'Failed to load affiliate data',
     transferFailed: 'Failed to transfer affiliate quota',
+    customCode: {
+      edit: 'Customize',
+      title: 'Customize invite code',
+      label: 'New invite code',
+      placeholder: 'e.g. VIP2026',
+      rules: '4-16 letters or digits, case-insensitive.',
+      cooldownRule: 'You can change it once every 30 days.',
+      keepOldRule: 'Your old code and any links you already shared keep working and still credit you.',
+      save: 'Save',
+      saving: 'Saving...',
+      success: 'Invite code changed to {code}',
+      nextChangeAt: 'You can change it again after {time}',
+      managedByAdmin: 'This exclusive code was set by an admin. Contact support to change it.',
+      errors: {
+        AFFILIATE_CODE_TAKEN: 'That code is already taken. Try another one.',
+        AFFILIATE_CODE_RESERVED: 'Codes cannot contain reserved words such as admin, official or kefu.',
+        AFFILIATE_CODE_INVALID: 'Invite codes must be 4-16 letters or digits.',
+        AFFILIATE_CODE_COOLDOWN: 'You can only change your invite code once every 30 days.',
+        AFFILIATE_CODE_LOCKED: 'This exclusive code was set by an admin and cannot be changed.',
+        AFFILIATE_DISABLED: 'The affiliate program is not enabled.'
+      }
+    },
     stats: {
       rebateRate: 'My Rebate Rate',
       rebateRateHint: 'What you earn each time an invitee recharges',

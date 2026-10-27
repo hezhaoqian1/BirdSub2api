@@ -156,6 +156,10 @@ export interface AffiliateInvitee {
 export interface UserAffiliateDetail {
   user_id: number
   aff_code: string
+  /** 邀请码由管理员指定，用户不能自行修改。 */
+  aff_code_custom?: boolean
+  /** 下次可以自助修改邀请码的时间；为空表示现在就可以改。 */
+  aff_code_change_available_at?: string | null
   inviter_id?: number | null
   aff_count: number
   aff_quota: number

@@ -1,6 +1,8 @@
 const OAUTH_AFFILIATE_CODE_KEY = 'oauth_aff_code'
 const AFFILIATE_REFERRAL_CODE_KEY = 'affiliate_referral_code'
+const AFFILIATE_REFERRAL_LOCK_KEY = 'affiliate_referral_locked'
 const AFFILIATE_REFERRAL_TTL_MS = 30 * 24 * 60 * 60 * 1000
+const AFFILIATE_CODE_PATTERN = /^[A-Za-z0-9_-]{4,32}$/
 
 interface StoredAffiliateReferralCode {
   code: string
@@ -70,6 +72,50 @@ export function clearAffiliateReferralCode(): void {
   }
   try {
     window.localStorage.removeItem(AFFILIATE_REFERRAL_CODE_KEY)
+  } catch {
+    // 忽略浏览器存储异常。
+  }
+  clearLockedAffiliateReferralCode()
+}
+
+/**
+ * 记录用户是通过邀请链接（/r/:code 或 ?aff=）进来的：邀请码存 30 天，
+ * 同时在 sessionStorage 里锁定，注册页的邀请码在关闭浏览器前不能修改或清空。
+ * 格式不合法的码直接忽略，返回规范化（大写）后的码或空串。
+ */
+export function captureAffiliateInviteLink(value?: unknown, now = Date.now()): string {
+  const code = normalizeOAuthAffiliateCode(value).toUpperCase()
+  if (!AFFILIATE_CODE_PATTERN.test(code)) {
+    return ''
+  }
+  storeAffiliateReferralCode(code, now)
+  if (typeof window !== 'undefined') {
+    try {
+      window.sessionStorage.setItem(AFFILIATE_REFERRAL_LOCK_KEY, code)
+    } catch {
+      // 忽略浏览器存储异常。
+    }
+  }
+  return code
+}
+
+export function loadLockedAffiliateReferralCode(): string {
+  if (typeof window === 'undefined') {
+    return ''
+  }
+  try {
+    return normalizeOAuthAffiliateCode(window.sessionStorage.getItem(AFFILIATE_REFERRAL_LOCK_KEY))
+  } catch {
+    return ''
+  }
+}
+
+export function clearLockedAffiliateReferralCode(): void {
+  if (typeof window === 'undefined') {
+    return
+  }
+  try {
+    window.sessionStorage.removeItem(AFFILIATE_REFERRAL_LOCK_KEY)
   } catch {
     // 忽略浏览器存储异常。
   }

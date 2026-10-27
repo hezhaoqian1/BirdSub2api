@@ -7,6 +7,7 @@ import (
 	"math"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 )
@@ -244,4 +245,44 @@ func TestAdminWithdrawQuota_PropagatesRepositoryErrors(t *testing.T) {
 		_, err := svc.AdminWithdrawQuota(context.Background(), 1, 1, testAffiliateWithdrawKey)
 		require.ErrorIs(t, err, want)
 	}
+}
+
+func TestValidateSelfServiceAffCode(t *testing.T) {
+	t.Parallel()
+
+	require.NoError(t, validateSelfServiceAffCode("VIP2026"))
+	require.NoError(t, validateSelfServiceAffCode("ABCD"))
+	require.NoError(t, validateSelfServiceAffCode(strings.Repeat("A", AffiliateSelfCodeMaxLength)))
+
+	for _, code := range []string{"", "ABC", strings.Repeat("A", AffiliateSelfCodeMaxLength+1), "VIP-2026", "VIP_2026", "vip2026", "VIP 26"} {
+		require.ErrorIs(t, validateSelfServiceAffCode(code), ErrAffiliateCodeInvalid, code)
+	}
+	for _, code := range []string{"ADMIN", "MYADMIN1", "BIRDAPI88", "KEFU01", "OFFICIAL"} {
+		require.ErrorIs(t, validateSelfServiceAffCode(code), ErrAffiliateCodeReserved, code)
+	}
+}
+
+func TestAffCodeChangeAvailableAt(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, 10, 27, 12, 0, 0, 0, time.UTC)
+
+	require.Nil(t, affCodeChangeAvailableAt(nil, now))
+	require.Nil(t, affCodeChangeAvailableAt(&AffiliateSummary{}, now))
+
+	recent := now.Add(-24 * time.Hour)
+	next := affCodeChangeAvailableAt(&AffiliateSummary{AffCodeChangedAt: &recent}, now)
+	require.NotNil(t, next)
+	require.Equal(t, recent.Add(AffiliateSelfCodeChangeCooldown), *next)
+
+	old := now.Add(-AffiliateSelfCodeChangeCooldown)
+	require.Nil(t, affCodeChangeAvailableAt(&AffiliateSummary{AffCodeChangedAt: &old}, now))
+}
+
+func TestChangeOwnAffCode_RejectsBeforeRepo(t *testing.T) {
+	t.Parallel()
+	svc := &AffiliateService{repo: &paymentFulfillmentAffiliateRepoStub{}}
+
+	// SettingService is nil, so the feature counts as disabled (default off)
+	// and the repo stub, which panics on ChangeOwnAffCode, is never reached.
+	require.ErrorIs(t, svc.ChangeOwnAffCode(context.Background(), 1, "VIP2026"), ErrAffiliateDisabled)
 }

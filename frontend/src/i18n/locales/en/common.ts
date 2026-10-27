@@ -305,6 +305,7 @@ export default {
     promoCodeInvalidCannotRegister: 'Invalid promo code. Please check and try again or clear the promo code field',
     invitationCodeLabel: 'Invitation Code',
     invitationCodePlaceholder: 'Enter invitation code',
+    affiliateCodeLockedHint: 'Filled in from your invite link',
     invitationCodeRequired: 'Invitation code is required',
     invitationCodeValid: 'Invitation code is valid',
     invitationCodeInvalid: 'Invalid or used invitation code',

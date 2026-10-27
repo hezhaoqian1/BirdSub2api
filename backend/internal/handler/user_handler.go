@@ -211,6 +211,39 @@ func (h *UserHandler) GetAffiliate(c *gin.Context) {
 	response.Success(c, detail)
 }
 
+// UpdateAffiliateCodeRequest 用户自助修改邀请码的请求体。
+type UpdateAffiliateCodeRequest struct {
+	AffCode string `json:"aff_code" binding:"required"`
+}
+
+// UpdateAffiliateCode lets the current user pick their own invite code.
+// The previous code keeps working for links already shared.
+// PUT /api/v1/user/aff/code
+func (h *UserHandler) UpdateAffiliateCode(c *gin.Context) {
+	subject, ok := middleware2.GetAuthSubjectFromContext(c)
+	if !ok {
+		response.Unauthorized(c, "User not authenticated")
+		return
+	}
+
+	var req UpdateAffiliateCodeRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "Invalid request: "+err.Error())
+		return
+	}
+
+	if err := h.affiliateService.ChangeOwnAffCode(c.Request.Context(), subject.UserID, req.AffCode); err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	detail, err := h.affiliateService.GetAffiliateDetail(c.Request.Context(), subject.UserID)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, detail)
+}
+
 // TransferAffiliateQuota transfers all available affiliate quota into current balance.
 // POST /api/v1/user/aff/transfer
 func (h *UserHandler) TransferAffiliateQuota(c *gin.Context) {

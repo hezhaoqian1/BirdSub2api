@@ -22,15 +22,32 @@ var (
 
 	ErrAffiliateQuotaInsufficient     = infraerrors.BadRequest("AFFILIATE_QUOTA_INSUFFICIENT", "insufficient available affiliate quota")
 	ErrAffiliateWithdrawAmountInvalid = infraerrors.BadRequest("AFFILIATE_WITHDRAW_AMOUNT_INVALID", "invalid offline withdrawal amount")
+
+	ErrAffiliateDisabled     = infraerrors.Forbidden("AFFILIATE_DISABLED", "affiliate feature is disabled")
+	ErrAffiliateCodeReserved = infraerrors.BadRequest("AFFILIATE_CODE_RESERVED", "affiliate code contains a reserved word")
+	ErrAffiliateCodeLocked   = infraerrors.Forbidden("AFFILIATE_CODE_LOCKED", "affiliate code is managed by admin")
+	ErrAffiliateCodeCooldown = infraerrors.TooManyRequests("AFFILIATE_CODE_COOLDOWN", "affiliate code was changed recently")
 )
 
 const (
 	affiliateInviteesLimit = 100
 	// AffiliateCodeMinLength / AffiliateCodeMaxLength bound both system-generated
-	// 12-char codes and admin-customized codes (e.g. "VIP2026").
+	// codes and admin-customized codes (e.g. "VIP2026"). Older system codes are
+	// 12 chars, newer ones 8.
 	AffiliateCodeMinLength = 4
 	AffiliateCodeMaxLength = 32
+
+	// 用户自助修改邀请码：只允许字母和数字，长度更短，且有冷却期。
+	AffiliateSelfCodeMinLength      = 4
+	AffiliateSelfCodeMaxLength      = 16
+	AffiliateSelfCodeChangeCooldown = 30 * 24 * time.Hour
 )
+
+// affiliateReservedCodeFragments 是用户自助改码时禁止出现的片段，防止冒充官方。
+// 管理员改码不受限制。
+var affiliateReservedCodeFragments = []string{
+	"ADMIN", "OFFICIAL", "GUANFANG", "KEFU", "SUPPORT", "SYSTEM", "BIRDAPI", "SUB2API",
+}
 
 // affiliateCodeValidChar accepts uppercase letters, digits, underscore and dash.
 // All input passes through strings.ToUpper before validation, so lowercase from
@@ -62,18 +79,39 @@ func isValidAffiliateCodeFormat(code string) bool {
 	return true
 }
 
+// validateSelfServiceAffCode 校验用户自助设置的邀请码：4-16 位字母或数字，
+// 且不含保留词。调用方需先转大写。
+func validateSelfServiceAffCode(code string) error {
+	if len(code) < AffiliateSelfCodeMinLength || len(code) > AffiliateSelfCodeMaxLength {
+		return ErrAffiliateCodeInvalid
+	}
+	for i := 0; i < len(code); i++ {
+		c := code[i]
+		if (c < 'A' || c > 'Z') && (c < '0' || c > '9') {
+			return ErrAffiliateCodeInvalid
+		}
+	}
+	for _, fragment := range affiliateReservedCodeFragments {
+		if strings.Contains(code, fragment) {
+			return ErrAffiliateCodeReserved
+		}
+	}
+	return nil
+}
+
 type AffiliateSummary struct {
-	UserID               int64     `json:"user_id"`
-	AffCode              string    `json:"aff_code"`
-	AffCodeCustom        bool      `json:"aff_code_custom"`
-	AffRebateRatePercent *float64  `json:"aff_rebate_rate_percent,omitempty"`
-	InviterID            *int64    `json:"inviter_id,omitempty"`
-	AffCount             int       `json:"aff_count"`
-	AffQuota             float64   `json:"aff_quota"`
-	AffFrozenQuota       float64   `json:"aff_frozen_quota"`
-	AffHistoryQuota      float64   `json:"aff_history_quota"`
-	CreatedAt            time.Time `json:"created_at"`
-	UpdatedAt            time.Time `json:"updated_at"`
+	UserID               int64      `json:"user_id"`
+	AffCode              string     `json:"aff_code"`
+	AffCodeCustom        bool       `json:"aff_code_custom"`
+	AffCodeChangedAt     *time.Time `json:"aff_code_changed_at,omitempty"`
+	AffRebateRatePercent *float64   `json:"aff_rebate_rate_percent,omitempty"`
+	InviterID            *int64     `json:"inviter_id,omitempty"`
+	AffCount             int        `json:"aff_count"`
+	AffQuota             float64    `json:"aff_quota"`
+	AffFrozenQuota       float64    `json:"aff_frozen_quota"`
+	AffHistoryQuota      float64    `json:"aff_history_quota"`
+	CreatedAt            time.Time  `json:"created_at"`
+	UpdatedAt            time.Time  `json:"updated_at"`
 }
 
 type AffiliateInvitee struct {
@@ -85,13 +123,17 @@ type AffiliateInvitee struct {
 }
 
 type AffiliateDetail struct {
-	UserID          int64   `json:"user_id"`
-	AffCode         string  `json:"aff_code"`
-	InviterID       *int64  `json:"inviter_id,omitempty"`
-	AffCount        int     `json:"aff_count"`
-	AffQuota        float64 `json:"aff_quota"`
-	AffFrozenQuota  float64 `json:"aff_frozen_quota"`
-	AffHistoryQuota float64 `json:"aff_history_quota"`
+	UserID  int64  `json:"user_id"`
+	AffCode string `json:"aff_code"`
+	// AffCodeCustom 表示邀请码由管理员指定，用户不能自行修改。
+	AffCodeCustom bool `json:"aff_code_custom"`
+	// AffCodeChangeAvailableAt 是用户下次可以自助改码的时间；为空表示现在就可以改。
+	AffCodeChangeAvailableAt *time.Time `json:"aff_code_change_available_at,omitempty"`
+	InviterID                *int64     `json:"inviter_id,omitempty"`
+	AffCount                 int        `json:"aff_count"`
+	AffQuota                 float64    `json:"aff_quota"`
+	AffFrozenQuota           float64    `json:"aff_frozen_quota"`
+	AffHistoryQuota          float64    `json:"aff_history_quota"`
 	// EffectiveRebateRatePercent 是当前用户作为邀请人时实际生效的返利比例：
 	// 优先用户自己的专属比例（aff_rebate_rate_percent），否则回退到全局比例。
 	// 用于在用户的 /affiliate 页面直观展示「分享后能拿到多少」。
@@ -109,6 +151,10 @@ type AffiliateRepository interface {
 	TransferQuotaToBalance(ctx context.Context, userID int64) (float64, float64, error)
 	WithdrawQuota(ctx context.Context, userID int64, amount float64, operationID string) (*AffiliateWithdrawResult, error)
 	ListInvitees(ctx context.Context, inviterID int64, limit int) ([]AffiliateInvitee, error)
+
+	// ChangeOwnAffCode 用户自助改码：管理员指定的码不可改，距上次自助改码不足
+	// cooldown 时拒绝；旧码转入历史码表，继续归属该用户。
+	ChangeOwnAffCode(ctx context.Context, userID int64, newCode string, cooldown time.Duration) error
 
 	// 管理端：用户级专属配置
 	UpdateUserAffCode(ctx context.Context, userID int64, newCode string) error
@@ -280,6 +326,8 @@ func (s *AffiliateService) GetAffiliateDetail(ctx context.Context, userID int64)
 	return &AffiliateDetail{
 		UserID:                     summary.UserID,
 		AffCode:                    summary.AffCode,
+		AffCodeCustom:              summary.AffCodeCustom,
+		AffCodeChangeAvailableAt:   affCodeChangeAvailableAt(summary, time.Now()),
 		InviterID:                  summary.InviterID,
 		AffCount:                   summary.AffCount,
 		AffQuota:                   summary.AffQuota,
@@ -288,6 +336,37 @@ func (s *AffiliateService) GetAffiliateDetail(ctx context.Context, userID int64)
 		EffectiveRebateRatePercent: s.resolveRebateRatePercent(ctx, summary),
 		Invitees:                   invitees,
 	}, nil
+}
+
+// affCodeChangeAvailableAt 返回用户下次可自助改码的时间；冷却期已过或从未改过时返回 nil。
+func affCodeChangeAvailableAt(summary *AffiliateSummary, now time.Time) *time.Time {
+	if summary == nil || summary.AffCodeChangedAt == nil {
+		return nil
+	}
+	next := summary.AffCodeChangedAt.Add(AffiliateSelfCodeChangeCooldown)
+	if !next.After(now) {
+		return nil
+	}
+	return &next
+}
+
+// ChangeOwnAffCode 用户自助修改自己的邀请码。旧码仍然有效（转为历史码），
+// 所以已经分享出去的链接不会失效。
+func (s *AffiliateService) ChangeOwnAffCode(ctx context.Context, userID int64, rawCode string) error {
+	if userID <= 0 {
+		return infraerrors.BadRequest("INVALID_USER", "invalid user")
+	}
+	if s == nil || s.repo == nil {
+		return infraerrors.ServiceUnavailable("SERVICE_UNAVAILABLE", "affiliate service unavailable")
+	}
+	if !s.IsEnabled(ctx) {
+		return ErrAffiliateDisabled
+	}
+	code := strings.ToUpper(strings.TrimSpace(rawCode))
+	if err := validateSelfServiceAffCode(code); err != nil {
+		return err
+	}
+	return s.repo.ChangeOwnAffCode(ctx, userID, code, AffiliateSelfCodeChangeCooldown)
 }
 
 func (s *AffiliateService) BindInviterByCode(ctx context.Context, userID int64, rawCode string) error {

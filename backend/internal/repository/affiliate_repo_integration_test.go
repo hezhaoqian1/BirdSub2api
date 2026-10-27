@@ -209,7 +209,7 @@ VALUES ($1, $2, 0, 0, NOW(), NOW())`, u.ID, affCode)
 // TestAffiliateRepository_AdminCustomCode covers the success path of admin
 // invite-code rewrite + reset within a shared test transaction:
 // - UpdateUserAffCode replaces aff_code, sets aff_code_custom=true, lookup works
-// - the old code can no longer be found
+// - the old code is kept as an alias and still resolves to the same user
 // - ResetUserAffCode reverts aff_code_custom and assigns a new system-format code
 //
 // The conflict path (duplicate code → ErrAffiliateCodeTaken) lives in its own
@@ -249,9 +249,11 @@ func TestAffiliateRepository_AdminCustomCode(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, u.ID, byCode.UserID)
 
-	// Old system code should no longer match
-	_, err = repo.GetAffiliateByCode(txCtx, originalCode)
-	require.ErrorIs(t, err, service.ErrAffiliateProfileNotFound)
+	// Old system code is kept as an alias, so links already shared still work
+	byOldCode, err := repo.GetAffiliateByCode(txCtx, originalCode)
+	require.NoError(t, err)
+	require.Equal(t, u.ID, byOldCode.UserID)
+	require.Equal(t, customCode, byOldCode.AffCode)
 
 	// Reset back to a fresh system code, clears custom flag
 	newSysCode, err := repo.ResetUserAffCode(txCtx, u.ID)
@@ -261,11 +263,114 @@ func TestAffiliateRepository_AdminCustomCode(t *testing.T) {
 	reset, err := repo.EnsureUserAffiliate(txCtx, u.ID)
 	require.NoError(t, err)
 	require.Equal(t, newSysCode, reset.AffCode)
+	require.Len(t, newSysCode, affiliateCodeLength)
 	require.False(t, reset.AffCodeCustom)
 
-	// The old custom code is now free again
-	_, err = repo.GetAffiliateByCode(txCtx, customCode)
-	require.ErrorIs(t, err, service.ErrAffiliateProfileNotFound)
+	// The previous custom code also stays with the user
+	byCustomCode, err := repo.GetAffiliateByCode(txCtx, customCode)
+	require.NoError(t, err)
+	require.Equal(t, u.ID, byCustomCode.UserID)
+}
+
+// TestAffiliateRepository_ChangeOwnAffCode covers user self-service code
+// changes: old code kept as alias, cooldown, taking back an own alias, and
+// refusing another user's alias.
+func TestAffiliateRepository_ChangeOwnAffCode(t *testing.T) {
+	ctx := context.Background()
+	tx := testEntTx(t)
+	txCtx := dbent.NewTxContext(ctx, tx)
+	client := tx.Client()
+
+	repo := NewAffiliateRepository(client, integrationDB)
+
+	owner := mustCreateUser(t, client, &service.User{
+		Email:        fmt.Sprintf("affiliate-self-%d@example.com", time.Now().UnixNano()),
+		PasswordHash: "hash",
+		Role:         service.RoleUser, Status: service.StatusActive,
+	})
+	other := mustCreateUser(t, client, &service.User{
+		Email:        fmt.Sprintf("affiliate-self-other-%d@example.com", time.Now().UnixNano()),
+		PasswordHash: "hash",
+		Role:         service.RoleUser, Status: service.StatusActive,
+	})
+
+	original, err := repo.EnsureUserAffiliate(txCtx, owner.ID)
+	require.NoError(t, err)
+	require.Nil(t, original.AffCodeChangedAt)
+
+	suffix := time.Now().UnixNano() % 1_000_000_000
+	first := fmt.Sprintf("ME%09d", suffix)
+	require.NoError(t, repo.ChangeOwnAffCode(txCtx, owner.ID, first, time.Hour))
+
+	changed, err := repo.EnsureUserAffiliate(txCtx, owner.ID)
+	require.NoError(t, err)
+	require.Equal(t, first, changed.AffCode)
+	require.False(t, changed.AffCodeCustom, "self-service codes are not admin-managed")
+	require.NotNil(t, changed.AffCodeChangedAt)
+
+	byOld, err := repo.GetAffiliateByCode(txCtx, original.AffCode)
+	require.NoError(t, err)
+	require.Equal(t, owner.ID, byOld.UserID)
+
+	// Same code again is a no-op, a different one is blocked by the cooldown.
+	require.NoError(t, repo.ChangeOwnAffCode(txCtx, owner.ID, first, time.Hour))
+	err = repo.ChangeOwnAffCode(txCtx, owner.ID, fmt.Sprintf("MX%09d", suffix), time.Hour)
+	require.ErrorIs(t, err, service.ErrAffiliateCodeCooldown)
+
+	// Without a cooldown the user can take back their own old code.
+	require.NoError(t, repo.ChangeOwnAffCode(txCtx, owner.ID, original.AffCode, 0))
+	back, err := repo.EnsureUserAffiliate(txCtx, owner.ID)
+	require.NoError(t, err)
+	require.Equal(t, original.AffCode, back.AffCode)
+
+	// Another user cannot claim the owner's alias (first is now an alias).
+	err = repo.ChangeOwnAffCode(txCtx, other.ID, first, 0)
+	require.ErrorIs(t, err, service.ErrAffiliateCodeTaken)
+	// ...nor the owner's current code.
+	err = repo.ChangeOwnAffCode(txCtx, other.ID, original.AffCode, 0)
+	require.ErrorIs(t, err, service.ErrAffiliateCodeTaken)
+
+	// Admin-assigned codes are locked for self-service.
+	require.NoError(t, repo.UpdateUserAffCode(txCtx, other.ID, fmt.Sprintf("VIP%09d", suffix)))
+	err = repo.ChangeOwnAffCode(txCtx, other.ID, fmt.Sprintf("OT%09d", suffix), 0)
+	require.ErrorIs(t, err, service.ErrAffiliateCodeLocked)
+}
+
+// TestAffiliateRepository_AdminReclaimsAlias verifies an admin can hand
+// another user's old (alias) code to a different user.
+func TestAffiliateRepository_AdminReclaimsAlias(t *testing.T) {
+	ctx := context.Background()
+	tx := testEntTx(t)
+	txCtx := dbent.NewTxContext(ctx, tx)
+	client := tx.Client()
+
+	repo := NewAffiliateRepository(client, integrationDB)
+
+	previous := mustCreateUser(t, client, &service.User{
+		Email:        fmt.Sprintf("affiliate-reclaim-prev-%d@example.com", time.Now().UnixNano()),
+		PasswordHash: "hash",
+		Role:         service.RoleUser, Status: service.StatusActive,
+	})
+	next := mustCreateUser(t, client, &service.User{
+		Email:        fmt.Sprintf("affiliate-reclaim-next-%d@example.com", time.Now().UnixNano()),
+		PasswordHash: "hash",
+		Role:         service.RoleUser, Status: service.StatusActive,
+	})
+
+	suffix := time.Now().UnixNano() % 1_000_000_000
+	vip := fmt.Sprintf("VIP%09d", suffix)
+	require.NoError(t, repo.UpdateUserAffCode(txCtx, previous.ID, vip))
+	_, err := repo.ResetUserAffCode(txCtx, previous.ID)
+	require.NoError(t, err)
+
+	byVIP, err := repo.GetAffiliateByCode(txCtx, vip)
+	require.NoError(t, err)
+	require.Equal(t, previous.ID, byVIP.UserID, "alias still belongs to the previous user")
+
+	require.NoError(t, repo.UpdateUserAffCode(txCtx, next.ID, vip))
+	byVIP, err = repo.GetAffiliateByCode(txCtx, vip)
+	require.NoError(t, err)
+	require.Equal(t, next.ID, byVIP.UserID)
 }
 
 // TestAffiliateRepository_AdminCustomCode_Conflict isolates the unique-violation
