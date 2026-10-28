@@ -3,6 +3,7 @@
 FRONTEND_CRITICAL_VITEST := \
 	src/composables/__tests__/useUpstreamBalances.spec.ts \
 	src/components/account/__tests__/UpstreamBalanceCell.spec.ts \
+	src/components/admin/settings/__tests__/SecurityAlertSettings.spec.ts \
 	src/i18n/__tests__/localeKeyCompleteness.spec.ts \
 	src/api/__tests__/client.spec.ts \
 	src/api/__tests__/tokenRefresh.spec.ts \

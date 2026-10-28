@@ -49,12 +49,16 @@ func (s *SecurityAlertService) runTick() {
 		if now.Sub(s.lastLoginCheck) >= securityAlertLoginCheckEvery {
 			s.lastLoginCheck = now
 			s.checkLoginFailures(ctx, snap)
+			s.checkChannelQuotaErrors(ctx, snap)
+			s.checkUserBalanceWatches(ctx, snap)
 		}
 		if now.Sub(s.lastUsageCheck) >= securityAlertUsageCheckEvery {
 			s.lastUsageCheck = now
 			s.checkUsageAnomalies(ctx, snap)
+			s.checkChannelSpend(ctx, snap)
 			s.checkSignupBurst(ctx, snap)
 		}
+		s.maybeStartBalanceSweep(snap)
 		s.maybeDailyDigest(ctx, snap)
 	}
 	s.deliverPending(ctx)
@@ -62,6 +66,9 @@ func (s *SecurityAlertService) runTick() {
 		s.lastCleanup = now
 		if _, err := s.db.ExecContext(ctx, `DELETE FROM security_alert_events WHERE created_at < $1`, now.Add(-securityAlertRetention)); err != nil {
 			slog.Warn("[SecurityAlert] cleanup failed", "error", err)
+		}
+		if _, err := s.db.ExecContext(ctx, `DELETE FROM security_alert_balance_samples WHERE observed_at < $1`, now.Add(-securityAlertBalanceSampleTTL)); err != nil {
+			slog.Warn("[SecurityAlert] balance sample cleanup failed", "error", err)
 		}
 	}
 }
@@ -147,17 +154,10 @@ func (s *SecurityAlertService) checkLoginFailures(ctx context.Context, snap secu
 func (s *SecurityAlertService) checkUsageAnomalies(ctx context.Context, snap securityRuleSnapshot) {
 	spendOn := snap.cfg.SpendSpikeFloor > 0 && snap.cfg.SpendSpikeMultiplier > 0
 	keyOn := snap.cfg.KeyIPSpreadThreshold > 0
-	if !spendOn && !keyOn {
+	if !spendOn && !keyOn || !s.ensureUsageBaseline(ctx) {
 		return
 	}
 	now := s.now()
-	if s.usageBaselineAt.IsZero() || now.Sub(s.usageBaselineAt) >= securityAlertUsageBaselineTTL {
-		if err := s.loadUsageBaseline(ctx); err != nil {
-			slog.Warn("[SecurityAlert] usage baseline query failed", "error", err)
-			return
-		}
-		s.usageBaselineAt = now
-	}
 	since := now.Add(-time.Hour)
 
 	if spendOn {
@@ -240,6 +240,20 @@ func (s *SecurityAlertService) checkUsageAnomalies(ctx context.Context, snap sec
 	}
 }
 
+// ensureUsageBaseline 每小时刷新一次用户、API Key、渠道的 7 天用量基线。
+func (s *SecurityAlertService) ensureUsageBaseline(ctx context.Context) bool {
+	now := s.now()
+	if !s.usageBaselineAt.IsZero() && now.Sub(s.usageBaselineAt) < securityAlertUsageBaselineTTL {
+		return true
+	}
+	if err := s.loadUsageBaseline(ctx); err != nil {
+		slog.Warn("[SecurityAlert] usage baseline query failed", "error", err)
+		return false
+	}
+	s.usageBaselineAt = now
+	return true
+}
+
 func (s *SecurityAlertService) loadUsageBaseline(ctx context.Context) error {
 	now := s.now()
 	from, to := now.Add(-7*24*time.Hour), now.Add(-time.Hour)
@@ -277,8 +291,27 @@ func (s *SecurityAlertService) loadUsageBaseline(ctx context.Context) error {
 	}
 	_ = rows.Close()
 
+	// 渠道成本用 P95 而不是最大值：大渠道偶尔一小时冲高很常见，用最大值会把真正的异常也盖住。
+	channelSpend := map[int64]float64{}
+	rows, err = s.db.QueryContext(ctx, `SELECT account_id, percentile_cont(0.95) WITHIN GROUP (ORDER BY c) FROM (
+ SELECT u.account_id, date_trunc('hour', u.created_at) h, SUM(`+securityAccountCostExpr+`) c
+ FROM usage_logs u WHERE u.created_at > $1 AND u.created_at <= $2 GROUP BY 1, 2) t
+ GROUP BY 1`, from, to)
+	if err != nil {
+		return err
+	}
+	for rows.Next() {
+		var accountID int64
+		var c sql.NullFloat64
+		if rows.Scan(&accountID, &c) == nil && c.Valid {
+			channelSpend[accountID] = c.Float64
+		}
+	}
+	_ = rows.Close()
+
 	s.userSpendBaseline = spend
 	s.keyIPBaseline = keyIPs
+	s.channelSpendBaseline = channelSpend
 	return nil
 }
 
@@ -430,14 +463,15 @@ func (s *SecurityAlertService) buildDailyDigest(ctx context.Context, snap securi
 		return nil, err
 	}
 
-	return []string{
+	lines := []string{
 		fmt.Sprintf("告警：严重 %d 条，注意 %d 条", critical, warning),
 		fmt.Sprintf("管理员登录成功 %d 次，失败 %d 次；全站登录失败 %d 次", adminLogins, adminLoginFails, totalLoginFails),
 		fmt.Sprintf("后台操作 %d 次，来自网段：%s", adminOps, prefixText),
 		fmt.Sprintf("后台余额调整 %d 次；新注册 %d 人", balanceOps, signups),
 		fmt.Sprintf("全站消费 $%.2f（%d 次请求）", spend, requests),
-		"这条日报每天都会发，哪天没收到说明告警通道出了问题。",
-	}, nil
+	}
+	lines = append(lines, s.buildBalanceDigestLines(ctx, snap.cfg, start, end)...)
+	return append(lines, "这条日报每天都会发，哪天没收到说明告警通道出了问题。"), nil
 }
 
 func (s *SecurityAlertService) emitLogged(ctx context.Context, d securityAlertDraft) {

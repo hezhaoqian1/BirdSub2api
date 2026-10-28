@@ -1032,8 +1032,9 @@ func ProvidePaymentOrderExpiryService(paymentSvc *PaymentService, lockCache Lead
 
 // ProvideSecurityAlertService creates SecurityAlertService, registers it as the
 // audit-log observer and starts its observer/ticker goroutines.
-func ProvideSecurityAlertService(db *sql.DB, settingService *SettingService, lockCache LeaderLockCache, auditLogService *AuditLogService) *SecurityAlertService {
+func ProvideSecurityAlertService(db *sql.DB, settingService *SettingService, lockCache LeaderLockCache, auditLogService *AuditLogService, upstreamBalanceService *UpstreamBalanceService) *SecurityAlertService {
 	svc := NewSecurityAlertService(db, settingService, lockCache)
+	svc.SetUpstreamBalanceService(upstreamBalanceService)
 	auditLogService.SetObserver(svc)
 	svc.Start()
 	return svc

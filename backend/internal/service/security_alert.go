@@ -10,6 +10,7 @@ import (
 	"net"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
@@ -83,22 +84,68 @@ type SecurityAlertConfig struct {
 	SignupBurstThreshold int `json:"signup_burst_threshold"`
 	// DailyDigestHour 每日日报发送的北京时间小时（0-23），-1 关闭。
 	DailyDigestHour int `json:"daily_digest_hour"`
+
+	// ChannelSpendFloor 渠道（上游账号）近 1 小时成本低于该值时不判定为大额消费，0 关闭。
+	ChannelSpendFloor float64 `json:"channel_spend_floor"`
+	// ChannelSpendMultiplier 渠道近 1 小时成本超过其过去 7 天单小时 P95 的倍数。
+	ChannelSpendMultiplier float64 `json:"channel_spend_multiplier"`
+	// ChannelBalanceCheckMinutes 后台刷新上游余额的间隔（分钟），0 关闭余额告警。
+	ChannelBalanceCheckMinutes int `json:"channel_balance_check_minutes"`
+	// ChannelLowBalanceUSD / ChannelLowBalanceCNY 上游余额低于该值时告警（按余额币种），0 关闭。
+	ChannelLowBalanceUSD float64 `json:"channel_low_balance_usd"`
+	ChannelLowBalanceCNY float64 `json:"channel_low_balance_cny"`
+	// ChannelRunwayHours 按近 3 小时的扣费速度预计在该小时数内用完时告警，0 关闭。
+	ChannelRunwayHours float64 `json:"channel_runway_hours"`
+	// ChannelQuotaErrorNotify 渠道因上游额度不足被停用时告警（覆盖查不到余额的渠道）。
+	ChannelQuotaErrorNotify bool `json:"channel_quota_error_notify"`
+	// UserBalanceWatches 关注的用户及其余额提醒线。
+	UserBalanceWatches []UserBalanceWatch `json:"user_balance_watches"`
 }
+
+// UserBalanceWatch 关注的用户：余额低于提醒线时推送一次，充值回到提醒线以上后重新开始监控。
+type UserBalanceWatch struct {
+	UserID    int64   `json:"user_id"`
+	Threshold float64 `json:"threshold"`
+	Note      string  `json:"note,omitempty"`
+}
+
+const securityAlertMaxUserWatches = 200
 
 // DefaultSecurityAlertConfig 返回默认配置。
 func DefaultSecurityAlertConfig() SecurityAlertConfig {
 	return SecurityAlertConfig{
-		Enabled:                 true,
-		TrustedCIDRs:            []string{},
-		BalanceAdjustThreshold:  500,
-		AdminNewIPNotify:        true,
-		AdminLoginFailThreshold: 3,
-		IPLoginFailThreshold:    20,
-		SpendSpikeFloor:         100,
-		SpendSpikeMultiplier:    3,
-		KeyIPSpreadThreshold:    20,
-		SignupBurstThreshold:    10,
-		DailyDigestHour:         9,
+		Enabled:                    true,
+		TrustedCIDRs:               []string{},
+		BalanceAdjustThreshold:     500,
+		AdminNewIPNotify:           true,
+		AdminLoginFailThreshold:    3,
+		IPLoginFailThreshold:       20,
+		SpendSpikeFloor:            100,
+		SpendSpikeMultiplier:       3,
+		KeyIPSpreadThreshold:       20,
+		SignupBurstThreshold:       10,
+		DailyDigestHour:            9,
+		ChannelSpendFloor:          100,
+		ChannelSpendMultiplier:     3,
+		ChannelBalanceCheckMinutes: 10,
+		ChannelLowBalanceUSD:       20,
+		ChannelLowBalanceCNY:       100,
+		ChannelRunwayHours:         6,
+		ChannelQuotaErrorNotify:    true,
+		UserBalanceWatches:         []UserBalanceWatch{},
+	}
+}
+
+// normalize 补齐 nil 切片，避免返回给前端 null。
+func (c *SecurityAlertConfig) normalize() {
+	if c.TrustedCIDRs == nil {
+		c.TrustedCIDRs = []string{}
+	}
+	if c.UserBalanceWatches == nil {
+		c.UserBalanceWatches = []UserBalanceWatch{}
+	}
+	for i := range c.UserBalanceWatches {
+		c.UserBalanceWatches[i].Note = strings.TrimSpace(c.UserBalanceWatches[i].Note)
 	}
 }
 
@@ -138,8 +185,35 @@ func (c SecurityAlertConfig) Validate() error {
 	if c.DailyDigestHour < -1 || c.DailyDigestHour > 23 {
 		return errors.New("daily_digest_hour must be between -1 and 23")
 	}
-	if c.BalanceAdjustThreshold < 0 || c.SpendSpikeFloor < 0 || c.SpendSpikeMultiplier < 0 {
+	if c.BalanceAdjustThreshold < 0 || c.SpendSpikeFloor < 0 || c.SpendSpikeMultiplier < 0 ||
+		c.ChannelSpendFloor < 0 || c.ChannelSpendMultiplier < 0 || c.ChannelLowBalanceUSD < 0 ||
+		c.ChannelLowBalanceCNY < 0 || c.ChannelRunwayHours < 0 {
 		return errors.New("thresholds must not be negative")
+	}
+	if c.ChannelBalanceCheckMinutes != 0 && (c.ChannelBalanceCheckMinutes < 5 || c.ChannelBalanceCheckMinutes > 1440) {
+		return errors.New("channel_balance_check_minutes must be 0 (off) or between 5 and 1440")
+	}
+	if c.ChannelRunwayHours > 168 {
+		return errors.New("channel_runway_hours must not exceed 168")
+	}
+	if len(c.UserBalanceWatches) > securityAlertMaxUserWatches {
+		return fmt.Errorf("at most %d watched users", securityAlertMaxUserWatches)
+	}
+	seen := make(map[int64]struct{}, len(c.UserBalanceWatches))
+	for _, w := range c.UserBalanceWatches {
+		if w.UserID <= 0 {
+			return errors.New("user_balance_watches: invalid user_id")
+		}
+		if _, dup := seen[w.UserID]; dup {
+			return fmt.Errorf("user_balance_watches: user %d is listed twice", w.UserID)
+		}
+		seen[w.UserID] = struct{}{}
+		if w.Threshold <= 0 {
+			return fmt.Errorf("user_balance_watches: threshold for user %d must be positive", w.UserID)
+		}
+		if len([]rune(w.Note)) > 60 {
+			return fmt.Errorf("user_balance_watches: note for user %d is longer than 60 characters", w.UserID)
+		}
 	}
 	return nil
 }
@@ -268,6 +342,7 @@ type SecurityAlertService struct {
 	settings   *SettingService
 	lockCache  LeaderLockCache
 	sender     securityAlertSender
+	balances   channelBalanceReader
 	instanceID string
 	loc        *time.Location
 	now        func() time.Time
@@ -290,12 +365,23 @@ type SecurityAlertService struct {
 	localSeen        map[string]time.Time
 
 	// 以下字段只在定时 goroutine 内读写。
-	lastLoginCheck    time.Time
-	lastUsageCheck    time.Time
-	lastCleanup       time.Time
-	userSpendBaseline map[int64]float64
-	keyIPBaseline     map[int64]int
-	usageBaselineAt   time.Time
+	lastLoginCheck         time.Time
+	lastUsageCheck         time.Time
+	lastCleanup            time.Time
+	lastBalanceSweepCheck  time.Time
+	userSpendBaseline      map[int64]float64
+	keyIPBaseline          map[int64]int
+	channelSpendBaseline   map[int64]float64
+	usageBaselineAt        time.Time
+	balanceSweepInProgress atomic.Bool
+}
+
+// SetUpstreamBalanceService 注入上游余额查询，用于渠道余额告警；未注入时只做消费与报错告警。
+func (s *SecurityAlertService) SetUpstreamBalanceService(svc *UpstreamBalanceService) {
+	if s == nil || svc == nil {
+		return
+	}
+	s.balances = svc
 }
 
 // NewSecurityAlertService 创建安全告警服务。
@@ -477,9 +563,7 @@ func (s *SecurityAlertService) loadConfig(ctx context.Context) (SecurityAlertCon
 			return DefaultSecurityAlertConfig(), "", fmt.Errorf("decode security alert config: %w", err)
 		}
 	}
-	if cfg.TrustedCIDRs == nil {
-		cfg.TrustedCIDRs = []string{}
-	}
+	cfg.normalize()
 	return cfg, strings.TrimSpace(vals[SettingKeySecurityAlertWeComWebhook]), nil
 }
 
@@ -621,6 +705,40 @@ type SecurityAlertConfigView struct {
 	Config            SecurityAlertConfig `json:"config"`
 	WebhookConfigured bool                `json:"wecom_webhook_configured"`
 	WebhookMasked     string              `json:"wecom_webhook_masked"`
+	// UserWatchStatus 关注用户的当前余额，便于管理端核对名单。
+	UserWatchStatus []UserBalanceWatchStatus `json:"user_watch_status"`
+}
+
+// UserBalanceWatchStatus 关注用户的当前状态。
+type UserBalanceWatchStatus struct {
+	UserID   int64   `json:"user_id"`
+	Email    string  `json:"email"`
+	Username string  `json:"username"`
+	Balance  float64 `json:"balance"`
+	Found    bool    `json:"found"`
+	Below    bool    `json:"below"`
+}
+
+func (s *SecurityAlertService) configView(ctx context.Context, cfg SecurityAlertConfig, webhook string) SecurityAlertConfigView {
+	view := SecurityAlertConfigView{
+		Config:            cfg,
+		WebhookConfigured: webhook != "",
+		WebhookMasked:     MaskWeComRobotWebhook(webhook),
+		UserWatchStatus:   []UserBalanceWatchStatus{},
+	}
+	users, err := s.loadWatchedUsers(ctx, cfg.UserBalanceWatches)
+	if err != nil {
+		slog.Warn("[SecurityAlert] failed to load watched users", "error", err)
+	}
+	for _, w := range cfg.UserBalanceWatches {
+		st := UserBalanceWatchStatus{UserID: w.UserID}
+		if u, ok := users[w.UserID]; ok {
+			st.Email, st.Username, st.Balance, st.Found = u.Email, u.Username, u.Balance, true
+			st.Below = u.Balance < w.Threshold
+		}
+		view.UserWatchStatus = append(view.UserWatchStatus, st)
+	}
+	return view
 }
 
 // GetConfigView 读取当前配置。
@@ -629,11 +747,7 @@ func (s *SecurityAlertService) GetConfigView(ctx context.Context) (SecurityAlert
 	if err != nil {
 		return SecurityAlertConfigView{}, err
 	}
-	return SecurityAlertConfigView{
-		Config:            cfg,
-		WebhookConfigured: webhook != "",
-		WebhookMasked:     MaskWeComRobotWebhook(webhook),
-	}, nil
+	return s.configView(ctx, cfg, webhook), nil
 }
 
 // UpdateSecurityAlertConfigInput 更新配置的入参；nil 字段保持不变。
@@ -654,14 +768,13 @@ func (s *SecurityAlertService) UpdateConfig(ctx context.Context, in UpdateSecuri
 		return SecurityAlertConfigView{}, err
 	}
 	oldEnabled := cfg.Enabled
+	oldWatches, _ := json.Marshal(cfg.UserBalanceWatches)
 	if len(in.ConfigPatch) > 0 && string(in.ConfigPatch) != "null" {
 		if err := json.Unmarshal(in.ConfigPatch, &cfg); err != nil {
 			return SecurityAlertConfigView{}, fmt.Errorf("invalid config: %w", err)
 		}
 	}
-	if cfg.TrustedCIDRs == nil {
-		cfg.TrustedCIDRs = []string{}
-	}
+	cfg.normalize()
 	if err := cfg.Validate(); err != nil {
 		return SecurityAlertConfigView{}, err
 	}
@@ -694,6 +807,9 @@ func (s *SecurityAlertService) UpdateConfig(ctx context.Context, in UpdateSecuri
 		} else {
 			changes = append(changes, "企业微信机器人已更换为 "+MaskWeComRobotWebhook(newWebhook))
 		}
+	}
+	if newWatches, _ := json.Marshal(cfg.UserBalanceWatches); string(newWatches) != string(oldWatches) {
+		changes = append(changes, fmt.Sprintf("关注用户余额名单已更新（共 %d 人）", len(cfg.UserBalanceWatches)))
 	}
 	if len(changes) == 0 {
 		changes = append(changes, "告警阈值或信任网段已更新")
@@ -729,11 +845,7 @@ func (s *SecurityAlertService) UpdateConfig(ctx context.Context, in UpdateSecuri
 	if err := s.emit(ctx, draft); err != nil {
 		slog.Warn("[SecurityAlert] failed to record config change", "error", err)
 	}
-	return SecurityAlertConfigView{
-		Config:            cfg,
-		WebhookConfigured: newWebhook != "",
-		WebhookMasked:     MaskWeComRobotWebhook(newWebhook),
-	}, nil
+	return s.configView(ctx, cfg, newWebhook), nil
 }
 
 // SendTest 立即发送一条测试消息；webhookOverride 为空时使用已保存的机器人。
