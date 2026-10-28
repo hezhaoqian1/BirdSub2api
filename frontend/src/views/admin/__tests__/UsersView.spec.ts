@@ -13,7 +13,8 @@ const {
   getAllGroups,
   getBatchUsersUsage,
   listEnabledDefinitions,
-  getBatchUserAttributes
+  getBatchUserAttributes,
+  listUserWatches
 } = vi.hoisted(() => ({
   listUsers: vi.fn(),
   toggleStatus: vi.fn(),
@@ -23,7 +24,12 @@ const {
   getAllGroups: vi.fn(),
   getBatchUsersUsage: vi.fn(),
   listEnabledDefinitions: vi.fn(),
-  getBatchUserAttributes: vi.fn()
+  getBatchUserAttributes: vi.fn(),
+  listUserWatches: vi.fn()
+}))
+
+vi.mock('@/api/admin/securityAlerts', () => ({
+  listUserWatches
 }))
 
 vi.mock('@/api/admin', () => ({
@@ -108,6 +114,7 @@ const DataTableStub = {
       </template>
       <div v-for="row in data" :key="row.id">
         <slot name="cell-last_used_at" :value="row.last_used_at" :row="row" />
+        <div :data-test="'balance-' + row.id"><slot name="cell-balance" :value="row.balance" :row="row" /></div>
         <div :data-test="'actions-' + row.id"><slot name="cell-actions" :row="row" /></div>
       </div>
     </div>
@@ -126,6 +133,20 @@ const BulkEditUserModalStub = {
     <div v-if="show" data-test="bulk-modal">
       <span data-test="bulk-modal-ids">{{ selectedIds.join(',') }}</span>
       <button data-test="bulk-success" @click="$emit('success', selectedIds.length)">success</button>
+    </div>
+  `
+}
+
+const UserBalanceWatchModalStub = {
+  props: ['show', 'user', 'watch', 'alertsEnabled', 'webhookConfigured'],
+  emits: ['close', 'saved', 'removed'],
+  template: `
+    <div v-if="show" data-test="watch-modal">
+      <span data-test="watch-modal-user">{{ user && user.id }}</span>
+      <span data-test="watch-modal-threshold">{{ watch ? watch.threshold : 'none' }}</span>
+      <span data-test="watch-modal-channel">{{ alertsEnabled }}:{{ webhookConfigured }}</span>
+      <button data-test="watch-modal-save" @click="$emit('saved', { user_id: user.id, threshold: 50 }); $emit('close')">save</button>
+      <button data-test="watch-modal-remove" @click="$emit('removed', user.id); $emit('close')">remove</button>
     </div>
   `
 }
@@ -161,6 +182,7 @@ const mountBulkDeleteView = () => mount(UsersView, {
       UserAllowedGroupsModal: true,
       UserBalanceModal: true,
       UserBalanceHistoryModal: true,
+      UserBalanceWatchModal: UserBalanceWatchModalStub,
       GroupReplaceModal: true,
       Icon: true,
       Teleport: true
@@ -191,6 +213,7 @@ describe('admin UsersView', () => {
     getBatchUsersUsage.mockReset()
     listEnabledDefinitions.mockReset()
     getBatchUserAttributes.mockReset()
+    listUserWatches.mockReset()
 
     listUsers.mockResolvedValue({
       items: [createAdminUser()],
@@ -203,10 +226,66 @@ describe('admin UsersView', () => {
     getBatchUsersUsage.mockResolvedValue({ stats: {} })
     listEnabledDefinitions.mockResolvedValue([])
     getBatchUserAttributes.mockResolvedValue({ values: {} })
+    listUserWatches.mockResolvedValue({ enabled: true, wecom_webhook_configured: true, watches: [] })
   })
 
   afterEach(() => {
     vi.useRealTimers()
+  })
+
+  it('shows a balance watch button next to deposit and keeps it in sync with the dialog', async () => {
+    listUsers.mockResolvedValue({
+      items: [
+        createAdminUser({ id: 42, email: 'a@example.com', balance: 80 }),
+        createAdminUser({ id: 43, email: 'b@example.com', balance: 5 })
+      ],
+      total: 2,
+      page: 1,
+      page_size: 20,
+      pages: 1
+    })
+    listUserWatches.mockResolvedValue({
+      enabled: true,
+      wecom_webhook_configured: false,
+      watches: [{ user_id: 43, threshold: 10 }]
+    })
+    const wrapper = mountBulkDeleteView()
+    await flushPromises()
+
+    const unwatched = wrapper.get('[data-testid="balance-watch-42"]')
+    const below = wrapper.get('[data-testid="balance-watch-43"]')
+    expect(unwatched.text()).toBe('securityAlerts.userWatch.button')
+    expect(below.text()).toBe('$10.00')
+    expect(below.classes()).toContain('text-amber-700')
+    expect(below.attributes('title')).toBe('securityAlerts.userWatch.belowTooltip')
+
+    await unwatched.trigger('click')
+    expect(wrapper.get('[data-test="watch-modal-user"]').text()).toBe('42')
+    expect(wrapper.get('[data-test="watch-modal-threshold"]').text()).toBe('none')
+    expect(wrapper.get('[data-test="watch-modal-channel"]').text()).toBe('true:false')
+    await wrapper.get('[data-test="watch-modal-save"]').trigger('click')
+    expect(wrapper.find('[data-test="watch-modal"]').exists()).toBe(false)
+    const watched = wrapper.get('[data-testid="balance-watch-42"]')
+    expect(watched.text()).toBe('$50.00')
+    expect(watched.classes()).toContain('text-sky-700')
+
+    await wrapper.get('[data-testid="balance-watch-43"]').trigger('click')
+    expect(wrapper.get('[data-test="watch-modal-threshold"]').text()).toBe('10')
+    await wrapper.get('[data-test="watch-modal-remove"]').trigger('click')
+    expect(wrapper.get('[data-testid="balance-watch-43"]').text()).toBe('securityAlerts.userWatch.button')
+    expect(listUserWatches).toHaveBeenCalledTimes(1)
+  })
+
+  it('still lists users when the balance watch list fails to load', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    listUserWatches.mockRejectedValue(new Error('forbidden'))
+    const wrapper = mountBulkDeleteView()
+    await flushPromises()
+
+    expect(wrapper.get('[data-test="row-order"]').text()).toBe('scoped@example.com')
+    expect(wrapper.get('[data-testid="balance-watch-42"]').text()).toBe('securityAlerts.userWatch.button')
+    expect(showError).not.toHaveBeenCalled()
+    warn.mockRestore()
   })
 
   it('cancels bulk deletion without deleting or clearing selected users', async () => {

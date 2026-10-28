@@ -160,6 +160,9 @@ func registerSecurityAlertRoutes(admin *gin.RouterGroup, h *handler.Handlers, st
 		alerts.PUT("/config", gin.HandlerFunc(stepUpAuth), h.Admin.SecurityAlert.UpdateConfig)
 		alerts.POST("/test", h.Admin.SecurityAlert.SendTest)
 		alerts.GET("/events", h.Admin.SecurityAlert.ListEvents)
+		alerts.GET("/user-watches", h.Admin.SecurityAlert.ListUserWatches)
+		alerts.PUT("/user-watches/:user_id", h.Admin.SecurityAlert.SetUserWatch)
+		alerts.DELETE("/user-watches/:user_id", h.Admin.SecurityAlert.RemoveUserWatch)
 	}
 }
 
@@ -600,7 +603,6 @@ func registerSettingsRoutes(admin *gin.RouterGroup, h *handler.Handlers, stepUpA
 		adminSettings.GET("", h.Admin.Setting.GetSettings)
 		adminSettings.PUT("", h.Admin.Setting.UpdateSettings)
 		adminSettings.POST("/test-smtp", h.Admin.Setting.TestSMTPConnection)
-		adminSettings.POST("/test-channel-monitor-dingtalk", h.Admin.Setting.TestChannelMonitorDingTalk)
 		adminSettings.POST("/send-test-email", h.Admin.Setting.SendTestEmail)
 		adminSettings.GET("/email-templates", h.Admin.Setting.ListEmailTemplates)
 		adminSettings.POST("/email-template-preview", h.Admin.Setting.PreviewEmailTemplate)

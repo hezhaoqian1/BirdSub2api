@@ -33,6 +33,13 @@
             <span class="block text-xs text-gray-500 dark:text-gray-400">{{ t('securityAlerts.quotaErrorHint') }}</span>
           </span>
         </label>
+        <label class="flex items-start gap-2 text-sm">
+          <input v-model="form.channel_monitor_notify" type="checkbox" class="mt-1" data-test="channel-monitor-notify" />
+          <span>
+            <span class="font-medium text-gray-900 dark:text-white">{{ t('securityAlerts.channelMonitorNotify') }}</span>
+            <span class="block text-xs text-gray-500 dark:text-gray-400">{{ t('securityAlerts.channelMonitorHint') }}</span>
+          </span>
+        </label>
       </fieldset>
 
       <fieldset class="space-y-3 rounded-lg border border-gray-200 p-4 dark:border-dark-700">
@@ -108,7 +115,7 @@ import { isStepUpCancelled, useStepUp } from '@/composables/useStepUp'
 type NumberKey = 'channel_spend_floor' | 'channel_spend_multiplier' | 'channel_balance_check_minutes' |
   'channel_low_balance_usd' | 'channel_low_balance_cny' | 'channel_runway_hours'
 // 只提交本卡片管理的字段；其余安全规则由服务端按原值合并保留。
-type EditableConfig = Pick<SecurityAlertConfig, NumberKey | 'enabled' | 'channel_quota_error_notify' | 'user_balance_watches'>
+type EditableConfig = Pick<SecurityAlertConfig, NumberKey | 'enabled' | 'channel_quota_error_notify' | 'channel_monitor_notify' | 'user_balance_watches'>
 interface UserInfo { email: string; balance: number; found: boolean }
 
 const numberFields: { key: NumberKey; label: string; hint: string; step: number }[] = [
@@ -154,6 +161,8 @@ function apply(next: SecurityAlertConfigView) {
     channel_low_balance_cny: c.channel_low_balance_cny,
     channel_runway_hours: c.channel_runway_hours,
     channel_quota_error_notify: c.channel_quota_error_notify,
+    // 旧配置没有这个字段时按服务端默认（开启）处理。
+    channel_monitor_notify: c.channel_monitor_notify ?? true,
     user_balance_watches: (c.user_balance_watches ?? []).map(w => ({ ...w, note: w.note ?? '' })),
   }
   const info: Record<number, UserInfo> = {}

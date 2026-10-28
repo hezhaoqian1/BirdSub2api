@@ -1059,12 +1059,14 @@ func ProvideChannelMonitorService(
 // settingService 用于 runner 每次 fire 读取功能开关。
 // quotaFetcher（账号侧用量聚合）也在此注入：accountUsage/CN 服务在 wire 图中
 // 晚于 channelMonitorService 构造，走 setter 注入避免调整既有构造顺序。
+// securityAlertService 负责连续失败/恢复的企业微信推送。
 func ProvideChannelMonitorRunner(
 	svc *ChannelMonitorService,
 	settingService *SettingService,
 	quotaFetcher *ChannelMonitorQuotaFetcher,
+	securityAlertService *SecurityAlertService,
 ) *ChannelMonitorRunner {
-	r := NewChannelMonitorRunner(svc, settingService)
+	r := NewChannelMonitorRunner(svc, settingService, securityAlertService)
 	if svc != nil {
 		// Ensure runtime reader is set even if ProvideChannelMonitorService
 		// was constructed without settings (tests / alternate providers).

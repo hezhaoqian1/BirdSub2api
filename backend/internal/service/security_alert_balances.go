@@ -57,7 +57,7 @@ const (
 
 // isOpsAlertKind 渠道/用户余额类告警，投递时使用「运营告警」标题。
 func isOpsAlertKind(kind string) bool {
-	return strings.HasPrefix(kind, "channel_") || kind == securityAlertKindUserBalance
+	return strings.HasPrefix(kind, "channel_") || kind == securityAlertKindUserBalance || kind == securityAlertKindUserWatch
 }
 
 // channelBalanceReader 上游余额查询（*UpstreamBalanceService 实现，测试可替换）。
@@ -826,12 +826,8 @@ func (s *SecurityAlertService) checkUserBalanceWatches(ctx context.Context, snap
 		prev := states[subjects[i]]
 		level, value, alert := nextBalanceAlertState(prev.Level, prev.Value, userBalanceLevel(u.Balance, w.Threshold), u.Balance)
 		if alert {
-			who := fmt.Sprintf("#%d %s", w.UserID, sanitizeSecurityText(u.Email, 60))
-			if w.Note != "" {
-				who += "（" + sanitizeSecurityText(w.Note, 60) + "）"
-			}
 			lines := []string{
-				"用户：" + who,
+				"用户：" + watchedUserLabel(w.UserID, u.Email, w.Note),
 				fmt.Sprintf("当前余额 %s，提醒线 %s", formatBalanceAmount(u.Balance, "USD"), formatBalanceAmount(w.Threshold, "USD")),
 			}
 			var spend float64

@@ -500,17 +500,6 @@ const (
 	// pre-filled when creating a new channel monitor from the admin UI. Range: [15, 3600].
 	SettingKeyChannelMonitorDefaultIntervalSeconds = "channel_monitor_default_interval_seconds"
 
-	// SettingKeyChannelMonitorDingTalkEnabled controls DingTalk alerts after three
-	// consecutive primary-model failures.
-	SettingKeyChannelMonitorDingTalkEnabled = "channel_monitor_dingtalk_enabled"
-
-	// SettingKeyChannelMonitorDingTalkWebhook stores the custom robot webhook.
-	// The webhook contains an access token and must never be returned to clients.
-	SettingKeyChannelMonitorDingTalkWebhook = "channel_monitor_dingtalk_webhook"
-
-	// SettingKeyChannelMonitorDingTalkSecret stores the optional custom robot signing secret.
-	SettingKeyChannelMonitorDingTalkSecret = "channel_monitor_dingtalk_secret"
-
 	// SettingKeySecurityAlertConfig stores JSON config for security alerts
 	// (abnormal admin logins, sensitive admin actions, usage anomalies).
 	SettingKeySecurityAlertConfig = "security_alert_config"
