@@ -26,6 +26,11 @@ func TestKimiCreditPricingOverridesRemoteUSD(t *testing.T) {
 			{"k3", 20, 100, 2},
 			{"kimi-code/k3-256k", 20, 100, 2},
 			{"moonshot/kimi-k3", 20, 100, 2},
+			{"kimi-k3.1-pro", 13, 68, 1.3},
+			{"moonshot/Kimi-K3.1-Pro", 13, 68, 1.3},
+			{"kimi-k3-1-pro", 13, 68, 1.3},
+			{"kimi-k3.1-pro-highspeed", 26, 136, 1.3},
+			{"kimi-k3-1-pro-highspeed", 26, 136, 1.3},
 			{"kimi-k2.7-code", 6.5, 27, 1.3},
 			{"kimi-k2.7-code-highspeed", 13, 54, 2.6},
 			{"kimi-k2.6", 6.5, 27, 1.1},
@@ -61,19 +66,35 @@ func TestKimiCreditPricingOverridesRemoteUSD(t *testing.T) {
 
 func TestKimiK3CacheWriteTTL(t *testing.T) {
 	bs := newTestBillingService()
-	for _, tokens := range []UsageTokens{
-		{CacheCreationTokens: 1_000_000},
-		{CacheCreationTokens: 1_000_000, CacheCreation5mTokens: 1_000_000},
-		{CacheCreationTokens: 1_000_000, CacheCreation1hTokens: 1_000_000},
+	for _, tc := range []struct {
+		model            string
+		write5m, write1h float64
+	}{
+		{"kimi-k3", 20, 40},
+		{"kimi-k3.1-pro", 13, 26},
+		{"kimi-k3.1-pro-highspeed", 26, 52},
 	} {
-		want := 20.0
-		if tokens.CacheCreation1hTokens > 0 {
-			want = 40
+		for _, tokens := range []UsageTokens{
+			{CacheCreationTokens: 1_000_000},
+			{CacheCreationTokens: 1_000_000, CacheCreation5mTokens: 1_000_000},
+			{CacheCreationTokens: 1_000_000, CacheCreation1hTokens: 1_000_000},
+		} {
+			want := tc.write5m
+			if tokens.CacheCreation1hTokens > 0 {
+				want = tc.write1h
+			}
+			cost, err := bs.CalculateCost(tc.model, tokens, 1)
+			require.NoError(t, err)
+			require.InDelta(t, want, cost.CacheCreationCost, 1e-9, tc.model)
+			require.InDelta(t, want, cost.ActualCost, 1e-9, tc.model)
 		}
-		cost, err := bs.CalculateCost("kimi-k3", tokens, 1)
-		require.NoError(t, err)
-		require.InDelta(t, want, cost.CacheCreationCost, 1e-9)
-		require.InDelta(t, want, cost.ActualCost, 1e-9)
+	}
+}
+
+func TestKimiK31ProUnknownVariantsHaveNoPricing(t *testing.T) {
+	// Claude Code context syntax and unreleased names must not borrow the K3.1 Pro card.
+	for _, model := range []string{"kimi-k3.1-pro[1m]", "kimi-k3.1-pro-max", "kimi-k3.1"} {
+		require.Empty(t, kimiPricingModel(model), model)
 	}
 }
 
