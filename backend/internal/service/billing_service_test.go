@@ -187,14 +187,14 @@ func TestGetModelPricing_GLM52UsesOwnPrice(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, got)
 
-	// 官方 z.ai 口径:与 glm-5.1 同价(见 TestGetFallbackPricing_FamilyMatching)。
-	require.InDelta(t, 1.4e-6, got.InputPricePerToken, 1e-12)
-	require.InDelta(t, 4.4e-6, got.OutputPricePerToken, 1e-12)
-	require.InDelta(t, 0.26e-6, got.CacheReadPricePerToken, 1e-12)
+	// 人民币数值口径:与 glm-5.3 同价,不是 glm-5 的 ¥4/¥18(见 TestGetFallbackPricing_FamilyMatching)。
+	require.InDelta(t, 8e-6, got.InputPricePerToken, 1e-12)
+	require.InDelta(t, 28e-6, got.OutputPricePerToken, 1e-12)
+	require.InDelta(t, 2e-6, got.CacheReadPricePerToken, 1e-12)
 }
 
 // 回归:glm-5.3-prime 必须命中自己的兜底价,不能被 strings.Contains("glm-5.3") 抢成标准价。
-// 历史 bug:使用记录按 $1.40/$4.40 计费,比百炼 Prime 列表价 $2.80/$8.80 少收一半。
+// 历史 bug:使用记录按标准版价计费,比百炼 Prime 列表价(¥16/¥56)少收一半。
 func TestGetModelPricing_GLM53PrimeUsesOwnPrice(t *testing.T) {
 	svc := newTestBillingService()
 
@@ -203,9 +203,9 @@ func TestGetModelPricing_GLM53PrimeUsesOwnPrice(t *testing.T) {
 		require.NoError(t, err, model)
 		require.NotNil(t, got, model)
 
-		require.InDelta(t, 2.8e-6, got.InputPricePerToken, 1e-12, model)
-		require.InDelta(t, 8.8e-6, got.OutputPricePerToken, 1e-12, model)
-		require.InDelta(t, 0.56e-6, got.CacheReadPricePerToken, 1e-12, model)
+		require.InDelta(t, 16e-6, got.InputPricePerToken, 1e-12, model)
+		require.InDelta(t, 56e-6, got.OutputPricePerToken, 1e-12, model)
+		require.InDelta(t, 4e-6, got.CacheReadPricePerToken, 1e-12, model)
 	}
 }
 
@@ -587,76 +587,76 @@ func TestGetFallbackPricing_FamilyMatching(t *testing.T) {
 			expectedCacheRead: floatPtr(0.02e-6),
 		},
 
-		// ---- 智谱 GLM（z.ai USD 口径）----
+		// ---- 智谱 GLM（人民币数值口径，¥1=$1 额度）----
 		{
 			name:              "glm 5.3 flagship",
 			model:             "glm-5.3",
-			expectedInput:     1.4e-6,
-			expectedOutput:    floatPtr(4.4e-6),
-			expectedCacheRead: floatPtr(0.26e-6),
+			expectedInput:     8e-6,
+			expectedOutput:    floatPtr(28e-6),
+			expectedCacheRead: floatPtr(2e-6),
 		},
 		{
 			name:              "glm 5.3 flash",
 			model:             "glm-5.3-flash",
-			expectedInput:     0.15e-6,
-			expectedOutput:    floatPtr(0.5e-6),
-			expectedCacheRead: floatPtr(0.03e-6),
+			expectedInput:     0.8e-6,
+			expectedOutput:    floatPtr(2.8e-6),
+			expectedCacheRead: floatPtr(0.23e-6),
 		},
 		{
 			name:              "glm 5.3 prime",
 			model:             "glm-5.3-prime",
-			expectedInput:     2.8e-6,
-			expectedOutput:    floatPtr(8.8e-6),
-			expectedCacheRead: floatPtr(0.56e-6),
+			expectedInput:     16e-6,
+			expectedOutput:    floatPtr(56e-6),
+			expectedCacheRead: floatPtr(4e-6),
 		},
 		{
 			name:              "glm 5.2 flagship",
 			model:             "glm-5.2",
-			expectedInput:     1.4e-6,
-			expectedOutput:    floatPtr(4.4e-6),
-			expectedCacheRead: floatPtr(0.26e-6),
+			expectedInput:     8e-6,
+			expectedOutput:    floatPtr(28e-6),
+			expectedCacheRead: floatPtr(2e-6),
 		},
 		{
 			name:              "glm 5.1 flagship",
 			model:             "glm-5.1",
-			expectedInput:     1.4e-6,
-			expectedOutput:    floatPtr(4.4e-6),
-			expectedCacheRead: floatPtr(0.26e-6),
+			expectedInput:     6e-6,
+			expectedOutput:    floatPtr(24e-6),
+			expectedCacheRead: floatPtr(1.3e-6),
 		},
 		{
 			name:              "glm 5 base",
 			model:             "glm-5",
-			expectedInput:     1e-6,
-			expectedOutput:    floatPtr(3.2e-6),
-			expectedCacheRead: floatPtr(0.2e-6),
+			expectedInput:     4e-6,
+			expectedOutput:    floatPtr(18e-6),
+			expectedCacheRead: floatPtr(1e-6),
 		},
 		{
 			name:              "glm 5 turbo",
 			model:             "glm-5-turbo",
-			expectedInput:     1.2e-6,
-			expectedOutput:    floatPtr(4e-6),
-			expectedCacheRead: floatPtr(0.24e-6),
+			expectedInput:     5e-6,
+			expectedOutput:    floatPtr(22e-6),
+			expectedCacheRead: floatPtr(1.2e-6),
 		},
 		{
 			name:              "glm 4.7",
 			model:             "glm-4.7",
-			expectedInput:     0.6e-6,
-			expectedOutput:    floatPtr(2.2e-6),
-			expectedCacheRead: floatPtr(0.11e-6),
+			expectedInput:     3e-6,
+			expectedOutput:    floatPtr(14e-6),
+			expectedCacheRead: floatPtr(0.6e-6),
 		},
 		{
 			name:              "glm 4.6",
 			model:             "glm-4.6",
-			expectedInput:     0.6e-6,
-			expectedOutput:    floatPtr(2.2e-6),
-			expectedCacheRead: floatPtr(0.11e-6),
+			expectedInput:     3e-6,
+			expectedOutput:    floatPtr(14e-6),
+			expectedCacheRead: floatPtr(0.6e-6),
 		},
 		{
 			name:              "glm 4.5",
 			model:             "glm-4.5",
-			expectedInput:     0.6e-6,
-			expectedOutput:    floatPtr(2.2e-6),
-			expectedCacheRead: floatPtr(0.11e-6),
+			expectedInput:     3e-6,
+			expectedOutput:    floatPtr(14e-6),
+			expectedCacheRead: floatPtr(0.6e-6),
 		},
 		{
 			name:              "glm 4.5-x premium",
@@ -668,16 +668,16 @@ func TestGetFallbackPricing_FamilyMatching(t *testing.T) {
 		{
 			name:              "glm 4.5-air lightweight",
 			model:             "glm-4.5-air",
-			expectedInput:     0.2e-6,
-			expectedOutput:    floatPtr(1.1e-6),
-			expectedCacheRead: floatPtr(0.03e-6),
+			expectedInput:     0.8e-6,
+			expectedOutput:    floatPtr(6e-6),
+			expectedCacheRead: floatPtr(0.16e-6),
 		},
 		{
 			name:              "glm 4.7-flashx",
 			model:             "glm-4.7-flashx",
-			expectedInput:     0.07e-6,
-			expectedOutput:    floatPtr(0.4e-6),
-			expectedCacheRead: floatPtr(0.01e-6),
+			expectedInput:     0.5e-6,
+			expectedOutput:    floatPtr(3e-6),
+			expectedCacheRead: floatPtr(0.1e-6),
 		},
 		{
 			name:              "glm 4.5-flash free tier",
@@ -703,37 +703,37 @@ func TestGetFallbackPricing_FamilyMatching(t *testing.T) {
 		{
 			name:              "glm 5.3-flash vs glm 5.3 ordering (verbatim 5.3-flash)",
 			model:             "glm-5.3-flash",
-			expectedInput:     0.15e-6, // = glm-5.3-flash 价格（不是 glm-5.3 的 1.4e-6，更不是 glm-5 的 1e-6）
-			expectedOutput:    floatPtr(0.5e-6),
-			expectedCacheRead: floatPtr(0.03e-6),
+			expectedInput:     0.8e-6, // = glm-5.3-flash 价格（不是 glm-5.3 的 8e-6，更不是 glm-5 的 4e-6）
+			expectedOutput:    floatPtr(2.8e-6),
+			expectedCacheRead: floatPtr(0.23e-6),
 		},
 		{
 			name:              "glm 5.3 vs glm 5 ordering (verbatim 5.3)",
 			model:             "glm-5.3",
-			expectedInput:     1.4e-6, // = glm-5.3 价格（不是 glm-5 的 1e-6）
-			expectedOutput:    floatPtr(4.4e-6),
-			expectedCacheRead: floatPtr(0.26e-6),
+			expectedInput:     8e-6, // = glm-5.3 价格（不是 glm-5 的 4e-6）
+			expectedOutput:    floatPtr(28e-6),
+			expectedCacheRead: floatPtr(2e-6),
 		},
 		{
 			name:              "glm 5.1 vs glm 5 ordering (verbatim 5.1)",
 			model:             "glm-5.1",
-			expectedInput:     1.4e-6, // = glm-5.1 价格
-			expectedOutput:    floatPtr(4.4e-6),
-			expectedCacheRead: floatPtr(0.26e-6),
+			expectedInput:     6e-6, // = glm-5.1 价格
+			expectedOutput:    floatPtr(24e-6),
+			expectedCacheRead: floatPtr(1.3e-6),
 		},
 		{
 			name:              "glm 5.2 vs glm 5 ordering (verbatim 5.2)",
 			model:             "glm-5.2",
-			expectedInput:     1.4e-6, // = glm-5.2 价格（不是 glm-5 的 1e-6）
-			expectedOutput:    floatPtr(4.4e-6),
-			expectedCacheRead: floatPtr(0.26e-6),
+			expectedInput:     8e-6, // = glm-5.2 价格（不是 glm-5 的 4e-6）
+			expectedOutput:    floatPtr(28e-6),
+			expectedCacheRead: floatPtr(2e-6),
 		},
 		{
 			name:              "glm 4.5-air vs glm 4.5 ordering",
 			model:             "glm-4.5-air",
-			expectedInput:     0.2e-6, // = glm-4.5-air 价格（不是 glm-4.5 的 0.6e-6）
-			expectedOutput:    floatPtr(1.1e-6),
-			expectedCacheRead: floatPtr(0.03e-6),
+			expectedInput:     0.8e-6, // = glm-4.5-air 价格（不是 glm-4.5 的 3e-6）
+			expectedOutput:    floatPtr(6e-6),
+			expectedCacheRead: floatPtr(0.16e-6),
 		},
 
 		// ---- 月之暗面 Kimi ----
@@ -827,44 +827,44 @@ func TestGetFallbackPricing_FamilyMatching(t *testing.T) {
 		{
 			name:              "minimax m3",
 			model:             "minimax-m3",
-			expectedInput:     0.60e-6,
-			expectedOutput:    floatPtr(2.40e-6),
-			expectedCacheRead: floatPtr(0.12e-6),
+			expectedInput:     2.1e-6,
+			expectedOutput:    floatPtr(8.4e-6),
+			expectedCacheRead: floatPtr(0.42e-6),
 		},
 		{
 			name:              "minimax m3 long ctx boundary keep standard tier",
-			model:             "minimax-m3-long", // 仍按 standard tier (≤512K)
-			expectedInput:     0.60e-6,
-			expectedOutput:    floatPtr(2.40e-6),
-			expectedCacheRead: floatPtr(0.12e-6),
+			model:             "minimax-m3-long", // 别名仍命中 M3 基础价；>512K 由长上下文倍率处理
+			expectedInput:     2.1e-6,
+			expectedOutput:    floatPtr(8.4e-6),
+			expectedCacheRead: floatPtr(0.42e-6),
 		},
 		{
 			name:              "minimax m2.7",
 			model:             "minimax-m2.7",
-			expectedInput:     0.30e-6,
-			expectedOutput:    floatPtr(1.20e-6),
-			expectedCacheRead: floatPtr(0.06e-6),
+			expectedInput:     2.1e-6,
+			expectedOutput:    floatPtr(8.4e-6),
+			expectedCacheRead: floatPtr(0.42e-6),
 		},
 		{
 			name:              "minimax m2.7 highspeed",
 			model:             "minimax-m2.7-highspeed",
-			expectedInput:     0.60e-6,
-			expectedOutput:    floatPtr(2.40e-6),
-			expectedCacheRead: floatPtr(0.06e-6),
+			expectedInput:     4.2e-6,
+			expectedOutput:    floatPtr(16.8e-6),
+			expectedCacheRead: floatPtr(0.42e-6),
 		},
 		{
 			name:              "minimax m2.5",
 			model:             "minimax-m2.5",
-			expectedInput:     0.30e-6,
-			expectedOutput:    floatPtr(1.20e-6),
-			expectedCacheRead: floatPtr(0.03e-6),
+			expectedInput:     2.1e-6,
+			expectedOutput:    floatPtr(8.4e-6),
+			expectedCacheRead: floatPtr(0.21e-6),
 		},
 		{
 			name:              "minimax m2 legacy",
 			model:             "minimax-m2",
-			expectedInput:     0.30e-6,
-			expectedOutput:    floatPtr(1.20e-6),
-			expectedCacheRead: floatPtr(0.03e-6),
+			expectedInput:     2.1e-6,
+			expectedOutput:    floatPtr(8.4e-6),
+			expectedCacheRead: floatPtr(0.21e-6),
 		},
 
 		// ---- 火山方舟 豆包 Embedding（多模态向量化）----

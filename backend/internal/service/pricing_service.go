@@ -1224,6 +1224,23 @@ func (s *PricingService) validatePricingURL(raw string) (string, error) {
 	return normalized, nil
 }
 
+// siteCardAsLiteLLMPricing exposes a site default card to direct PricingService readers.
+func siteCardAsLiteLLMPricing(card *ModelPricing, provider string) *LiteLLMModelPricing {
+	return &LiteLLMModelPricing{
+		InputCostPerToken:               card.InputPricePerToken,
+		InputCostPerTokenPriority:       card.InputPricePerTokenPriority,
+		OutputCostPerToken:              card.OutputPricePerToken,
+		OutputCostPerTokenPriority:      card.OutputPricePerTokenPriority,
+		CacheReadInputTokenCost:         card.CacheReadPricePerToken,
+		CacheReadInputTokenCostPriority: card.CacheReadPricePerTokenPriority,
+		CacheCreationInputTokenCost:     card.CacheCreationPricePerToken,
+		LongContextInputTokenThreshold:  card.LongContextInputThreshold,
+		LongContextInputCostMultiplier:  card.LongContextInputMultiplier,
+		LongContextOutputCostMultiplier: card.LongContextOutputMultiplier,
+		LiteLLMProvider:                 provider, Mode: "chat", SupportsPromptCaching: true,
+	}
+}
+
 // GetModelPricing 获取模型价格（带模糊匹配）
 func (s *PricingService) GetModelPricing(modelName string) *LiteLLMModelPricing {
 	// DeepSeek 展示与扣费共用人民币数值的低谷价；峰谷倍率仍由计费层应用。
@@ -1247,6 +1264,13 @@ func (s *PricingService) GetModelPricing(modelName string) *LiteLLMModelPricing 
 			CacheCreationInputTokenCostAbove1hr: card.CacheCreation1hPrice,
 			LiteLLMProvider:                     "moonshot", Mode: "chat", SupportsPromptCaching: true,
 		}
+	}
+	// GLM / MiniMax 同样展示本站人民币数值价卡，与实际扣费一致。
+	if card := glmDefaultPricing(modelName); card != nil {
+		return siteCardAsLiteLLMPricing(card, "zai")
+	}
+	if card := minimaxDefaultPricing(modelName); card != nil {
+		return siteCardAsLiteLLMPricing(card, "minimax")
 	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
