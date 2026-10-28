@@ -1292,8 +1292,9 @@ func accountCodexModelSupportsImageInput(account *Account, upstreamModel string)
 				// Official GPT-6 Astra metadata briefly shipped with a stale
 				// text-only modality list. Keep explicit provider metadata
 				// authoritative for compatible hosts, but repair that stale
-				// official snapshot at the capability boundary.
-				if isOpenAIGPT6Model(upstreamModel) && isOfficialOpenAICodexAccount(account) {
+				// official snapshot at the capability boundary. Upstream keeps
+				// GPT-6.1 Terra metadata authoritative, so the repair skips it.
+				if isOpenAIGPT6Model(upstreamModel) && !openai.IsGPT61TerraModelSpelling(upstreamModel) && isOfficialOpenAICodexAccount(account) {
 					return true
 				}
 				return stringSliceContains(modalities, "image")
