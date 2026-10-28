@@ -3,10 +3,11 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import AffiliateView from '../AffiliateView.vue'
 
-const { copyToClipboard, getAffiliateDetail, updateAffiliateCode } = vi.hoisted(() => ({
+const { copyToClipboard, getAffiliateDetail, updateAffiliateCode, grantAffiliateAgentCredit } = vi.hoisted(() => ({
   copyToClipboard: vi.fn(),
   getAffiliateDetail: vi.fn(),
   updateAffiliateCode: vi.fn(),
+  grantAffiliateAgentCredit: vi.fn(),
 }))
 
 vi.mock('@/api/user', () => ({
@@ -14,6 +15,7 @@ vi.mock('@/api/user', () => ({
     getAffiliateDetail,
     updateAffiliateCode,
     transferAffiliateQuota: vi.fn(),
+    grantAffiliateAgentCredit,
   },
 }))
 
@@ -171,5 +173,112 @@ describe('AffiliateView', () => {
     await flushPromises()
     expect(cooling.get('[data-testid="affiliate-edit-code"]').attributes('disabled')).toBeDefined()
     expect(cooling.text()).toContain('affiliate.customCode.nextChangeAt')
+  })
+
+  describe('agent test credit', () => {
+    const invitee = {
+      user_id: 42,
+      email: 'a***@example.com',
+      username: 'alice',
+      created_at: '2026-10-27T08:00:00Z',
+      total_rebate: 0,
+      agent_granted: 5,
+    }
+    const agentDetail = {
+      ...baseDetail,
+      aff_count: 1,
+      invitees: [invitee],
+      agent: { credit_limit: 100, credit_used: 35, credit_remaining: 65 },
+    }
+
+    const openGrant = async () => {
+      getAffiliateDetail.mockResolvedValue({ ...agentDetail })
+      const wrapper = mountView()
+      await flushPromises()
+      await wrapper.get('[data-testid="affiliate-agent-grant-42"]').trigger('click')
+      return wrapper
+    }
+
+    it('shows nothing agent-related to regular users', async () => {
+      getAffiliateDetail.mockResolvedValue({ ...baseDetail, invitees: [{ ...invitee, agent_granted: 0 }] })
+      const wrapper = mountView()
+      await flushPromises()
+
+      expect(wrapper.find('[data-testid="affiliate-agent-card"]').exists()).toBe(false)
+      expect(wrapper.find('[data-testid="affiliate-agent-grant-42"]').exists()).toBe(false)
+      expect(wrapper.text()).not.toContain('affiliate.invitees.columns.agentGranted')
+    })
+
+    it('shows the allowance and grants credit with required notes', async () => {
+      grantAffiliateAgentCredit.mockResolvedValue({
+        grant_id: 7, invitee_user_id: 42, amount: 10, credit_limit: 100, credit_used: 45, credit_remaining: 55,
+      })
+      const wrapper = await openGrant()
+      expect(wrapper.get('[data-testid="affiliate-agent-card"]').text()).toContain('affiliate.agent.creditRemaining')
+      expect(wrapper.text()).toContain('affiliate.invitees.columns.agentGranted')
+
+      await wrapper.get('[data-testid="affiliate-agent-grant-amount"]').setValue('10')
+      await wrapper.get('[data-testid="affiliate-agent-grant-notes"]').setValue('  new customer trial  ')
+      await wrapper.get('[data-testid="affiliate-agent-grant-submit"]').trigger('click')
+      await flushPromises()
+
+      expect(grantAffiliateAgentCredit).toHaveBeenCalledTimes(1)
+      const [payload, key] = grantAffiliateAgentCredit.mock.calls[0]
+      expect(payload).toEqual({ invitee_user_id: 42, amount: 10, notes: 'new customer trial' })
+      expect(key).toMatch(/^affiliate-agent-grant-/)
+      expect(wrapper.find('[data-testid="dialog"]').exists()).toBe(false)
+      // 发放后重新拉取详情，额度和已发金额随之更新。
+      expect(getAffiliateDetail).toHaveBeenCalledTimes(2)
+    })
+
+    it('checks amount and notes locally before calling the API', async () => {
+      const wrapper = await openGrant()
+
+      await wrapper.get('[data-testid="affiliate-agent-grant-amount"]').setValue('0')
+      await wrapper.get('[data-testid="affiliate-agent-grant-notes"]').setValue('trial')
+      await wrapper.get('[data-testid="affiliate-agent-grant-submit"]').trigger('click')
+      expect(wrapper.get('[data-testid="affiliate-agent-grant-error"]').text()).toBe('affiliate.agent.errors.AMOUNT_INVALID')
+
+      await wrapper.get('[data-testid="affiliate-agent-grant-amount"]').setValue('65.5')
+      await wrapper.get('[data-testid="affiliate-agent-grant-submit"]').trigger('click')
+      expect(wrapper.get('[data-testid="affiliate-agent-grant-error"]').text()).toBe('affiliate.agent.errors.AMOUNT_EXCEEDS_REMAINING')
+
+      await wrapper.get('[data-testid="affiliate-agent-grant-amount"]').setValue('5')
+      await wrapper.get('[data-testid="affiliate-agent-grant-notes"]').setValue('   ')
+      await wrapper.get('[data-testid="affiliate-agent-grant-submit"]').trigger('click')
+      expect(wrapper.get('[data-testid="affiliate-agent-grant-error"]').text()).toBe('affiliate.agent.errors.AFFILIATE_AGENT_NOTES_REQUIRED')
+
+      expect(grantAffiliateAgentCredit).not.toHaveBeenCalled()
+    })
+
+    it('maps backend reasons and retries with the same idempotency key', async () => {
+      grantAffiliateAgentCredit.mockRejectedValueOnce({ status: 400, reason: 'AFFILIATE_AGENT_CREDIT_INSUFFICIENT', message: 'no credit' })
+      grantAffiliateAgentCredit.mockResolvedValueOnce({
+        grant_id: 8, invitee_user_id: 42, amount: 5, credit_limit: 100, credit_used: 40, credit_remaining: 60,
+      })
+      const wrapper = await openGrant()
+
+      await wrapper.get('[data-testid="affiliate-agent-grant-amount"]').setValue('5')
+      await wrapper.get('[data-testid="affiliate-agent-grant-notes"]').setValue('trial')
+      await wrapper.get('[data-testid="affiliate-agent-grant-submit"]').trigger('click')
+      await flushPromises()
+      expect(wrapper.get('[data-testid="affiliate-agent-grant-error"]').text()).toBe('affiliate.agent.errors.AFFILIATE_AGENT_CREDIT_INSUFFICIENT')
+      expect(wrapper.find('[data-testid="dialog"]').exists()).toBe(true)
+
+      await wrapper.get('[data-testid="affiliate-agent-grant-submit"]').trigger('click')
+      await flushPromises()
+      expect(grantAffiliateAgentCredit).toHaveBeenCalledTimes(2)
+      expect(grantAffiliateAgentCredit.mock.calls[1][1]).toBe(grantAffiliateAgentCredit.mock.calls[0][1])
+    })
+
+    it('disables granting once the allowance is used up', async () => {
+      getAffiliateDetail.mockResolvedValue({
+        ...agentDetail,
+        agent: { credit_limit: 35, credit_used: 35, credit_remaining: 0 },
+      })
+      const wrapper = mountView()
+      await flushPromises()
+      expect(wrapper.get('[data-testid="affiliate-agent-grant-42"]').attributes('disabled')).toBeDefined()
+    })
   })
 })

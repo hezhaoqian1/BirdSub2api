@@ -318,8 +318,11 @@
                 >
                   {{ formatHistoryValue(item) }}
                 </p>
+                <p v-if="item.type === 'agent_balance'" class="text-xs text-gray-400 dark:text-dark-500">
+                  {{ t('redeem.agentGrant') }}
+                </p>
                 <p
-                  v-if="!isAdminAdjustment(item.type)"
+                  v-else-if="!isAdminAdjustment(item.type)"
                   class="font-mono text-xs text-gray-400 dark:text-dark-500"
                 >
                   {{ item.code.slice(0, 8) }}...
@@ -425,7 +428,7 @@ const contactInfo = ref('')
 
 // Helper functions for history display
 const isBalanceType = (type: string) => {
-  return type === 'balance' || type === 'admin_balance'
+  return type === 'balance' || type === 'admin_balance' || type === 'agent_balance'
 }
 
 const isSubscriptionType = (type: string) => {
@@ -441,6 +444,8 @@ const getHistoryItemTitle = (item: RedeemHistoryItem) => {
     return t('redeem.balanceAddedRedeem')
   } else if (item.type === 'admin_balance') {
     return item.value >= 0 ? t('redeem.balanceAddedAdmin') : t('redeem.balanceDeductedAdmin')
+  } else if (item.type === 'agent_balance') {
+    return t('redeem.balanceAddedAgent')
   } else if (item.type === 'concurrency') {
     return t('redeem.concurrencyAddedRedeem')
   } else if (item.type === 'admin_concurrency') {

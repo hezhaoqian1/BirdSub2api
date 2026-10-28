@@ -151,6 +151,27 @@ export interface AffiliateInvitee {
   username: string
   created_at?: string
   total_rebate: number
+  /** 当前用户（代理）给这个用户发过的测试金合计。 */
+  agent_granted?: number
+}
+
+/** 代理的测试金额度，单位 USD。 */
+export interface AffiliateAgentCredit {
+  credit_limit: number
+  credit_used: number
+  credit_remaining: number
+}
+
+export interface AffiliateAgentGrantRequest {
+  invitee_user_id: number
+  amount: number
+  notes: string
+}
+
+export interface AffiliateAgentGrantResult extends AffiliateAgentCredit {
+  grant_id: number
+  invitee_user_id: number
+  amount: number
 }
 
 export interface UserAffiliateDetail {
@@ -168,6 +189,8 @@ export interface UserAffiliateDetail {
   /** 当前用户作为邀请人时实际生效的返利比例（专属覆盖全局）。0-100。 */
   effective_rebate_rate_percent: number
   invitees: AffiliateInvitee[]
+  /** 仅代理返回：测试金额度。 */
+  agent?: AffiliateAgentCredit | null
 }
 
 export interface AffiliateTransferResponse {

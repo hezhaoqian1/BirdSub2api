@@ -320,6 +320,7 @@ export default {
         invitation: 'Invitation',
         // Admin adjustment types (created when admin modifies user balance/concurrency)
         admin_balance: 'Balance (Admin)',
+        agent_balance: 'Balance (Agent Test Credit)',
         admin_concurrency: 'Concurrency (Admin)'
       },
       selectGroup: 'Select Group',

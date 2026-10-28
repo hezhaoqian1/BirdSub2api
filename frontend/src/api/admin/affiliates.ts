@@ -15,6 +15,10 @@ export interface AffiliateAdminEntry {
   aff_code_custom: boolean
   aff_rebate_rate_percent?: number | null
   aff_count: number
+  /** Agents can give test credit to users they invited, up to agent_credit_limit (USD). */
+  agent_enabled?: boolean
+  agent_credit_limit?: number
+  agent_credit_used?: number
 }
 
 export interface ListAffiliateUsersParams {
@@ -87,6 +91,23 @@ export interface AffiliateTransferRecord {
   created_at: string
 }
 
+/** One test credit grant made by an agent; ids are null when the account was deleted. */
+export interface AffiliateAgentGrantRecord {
+  id: number
+  agent_user_id: number | null
+  agent_email: string
+  agent_username: string
+  invitee_user_id: number | null
+  invitee_email: string
+  invitee_username: string
+  amount: number
+  notes: string
+  invitee_balance_after?: number | null
+  agent_credit_limit_after?: number | null
+  agent_credit_used_after?: number | null
+  created_at: string
+}
+
 export interface WithdrawAffiliateQuotaRequest {
   /** Amount already paid to the user outside the site (USD). */
   amount: number
@@ -124,6 +145,10 @@ export interface UpdateAffiliateUserRequest {
   aff_rebate_rate_percent?: number | null
   /** Set true to explicitly clear the per-user rate (sets it to NULL). */
   clear_rebate_rate?: boolean
+  /** Turn the agent role on or off; omit to leave unchanged. */
+  agent_enabled?: boolean
+  /** Agent's total test credit (USD); omit to leave unchanged. */
+  agent_credit_limit?: number
 }
 
 export interface BatchSetRateRequest {
@@ -236,6 +261,16 @@ export async function listTransferRecords(
   return data
 }
 
+export async function listAgentGrantRecords(
+  params: ListAffiliateRecordsParams = {},
+): Promise<PaginatedResponse<AffiliateAgentGrantRecord>> {
+  const { data } = await apiClient.get<PaginatedResponse<AffiliateAgentGrantRecord>>(
+    '/admin/affiliates/agent-grants',
+    { params: recordParams(params) },
+  )
+  return data
+}
+
 export async function getUserOverview(
   userId: number,
 ): Promise<AffiliateUserOverview> {
@@ -275,6 +310,7 @@ export const affiliatesAPI = {
   listInviteRecords,
   listRebateRecords,
   listTransferRecords,
+  listAgentGrantRecords,
   getUserOverview,
   withdrawUserQuota,
 }

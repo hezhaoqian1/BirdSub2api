@@ -3,15 +3,16 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import AdminAffiliateRecordsTable from '../AdminAffiliateRecordsTable.vue'
 
-const { listInviteRecords, listRebateRecords, listTransferRecords, getUserOverview } = vi.hoisted(() => ({
+const { listInviteRecords, listRebateRecords, listTransferRecords, listAgentGrantRecords, getUserOverview } = vi.hoisted(() => ({
   listInviteRecords: vi.fn(),
   listRebateRecords: vi.fn(),
   listTransferRecords: vi.fn(),
+  listAgentGrantRecords: vi.fn(),
   getUserOverview: vi.fn(),
 }))
 
 vi.mock('@/api/admin/affiliates', () => {
-  const affiliatesAPI = { listInviteRecords, listRebateRecords, listTransferRecords, getUserOverview }
+  const affiliatesAPI = { listInviteRecords, listRebateRecords, listTransferRecords, listAgentGrantRecords, getUserOverview }
   return { affiliatesAPI, default: affiliatesAPI }
 })
 
@@ -53,7 +54,7 @@ const WithdrawDialogStub = {
   template: '<div data-test="withdraw-dialog" :data-show="String(show)" />',
 }
 
-function mountTable(type: 'invites' | 'rebates' | 'transfers') {
+function mountTable(type: 'invites' | 'rebates' | 'transfers' | 'agent-grants') {
   return mount(AdminAffiliateRecordsTable, {
     props: { type },
     global: {
@@ -111,6 +112,59 @@ describe('AdminAffiliateRecordsTable', () => {
     expect(row.get('[data-test="cell-payment_type"]').text()).toBe('-')
     expect(row.get('[data-test="cell-order_status"]').text()).toBe('-')
     expect(row.get('[data-test="cell-rebate_amount"]').text()).toBe('$2.00')
+    expect(wrapper.find('[data-test="affiliate-withdraw-open"]').exists()).toBe(false)
+  })
+
+  it('lists agent test credit grants with notes and the allowance snapshot', async () => {
+    listAgentGrantRecords.mockResolvedValue(page([
+      {
+        id: 3,
+        agent_user_id: 7,
+        agent_email: 'agent@example.com',
+        agent_username: 'agent',
+        invitee_user_id: 8,
+        invitee_email: 'invitee@example.com',
+        invitee_username: 'invitee',
+        amount: 20,
+        notes: 'trial for team A',
+        invitee_balance_after: 21,
+        agent_credit_limit_after: 50,
+        agent_credit_used_after: 20,
+        created_at: '2026-10-28T08:00:00Z',
+      },
+      {
+        id: 2,
+        agent_user_id: null,
+        agent_email: '',
+        agent_username: '',
+        invitee_user_id: 8,
+        invitee_email: 'invitee@example.com',
+        invitee_username: 'invitee',
+        amount: 5,
+        notes: 'legacy',
+        invitee_balance_after: null,
+        agent_credit_limit_after: null,
+        agent_credit_used_after: null,
+        created_at: '2026-10-27T08:00:00Z',
+      },
+    ]))
+
+    const wrapper = mountTable('agent-grants')
+    await flushPromises()
+
+    expect(listAgentGrantRecords).toHaveBeenCalledWith(expect.objectContaining({ page: 1, sort_by: 'created_at' }))
+    const row = wrapper.get('[data-test="row-0"]')
+    expect(row.get('[data-test="cell-agent"]').text()).toContain('agent@example.com')
+    expect(row.get('[data-test="cell-grant_invitee"]').text()).toContain('invitee@example.com')
+    expect(row.get('[data-test="cell-amount"]').text()).toBe('$20.00')
+    expect(row.get('[data-test="cell-notes"]').text()).toBe('trial for team A')
+    expect(row.get('[data-test="cell-invitee_balance_after"]').text()).toBe('$21.00')
+    expect(row.get('[data-test="cell-agent_credit_after"]').text()).toBe('$20.00 / $50.00')
+
+    // 代理账号被删除、没有快照的记录显示为 -。
+    const orphan = wrapper.get('[data-test="row-1"]')
+    expect(orphan.get('[data-test="cell-agent"]').text()).toBe('-')
+    expect(orphan.get('[data-test="cell-agent_credit_after"]').text()).toBe('-')
     expect(wrapper.find('[data-test="affiliate-withdraw-open"]').exists()).toBe(false)
   })
 

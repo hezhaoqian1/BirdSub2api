@@ -6,8 +6,10 @@ import (
 	"encoding/hex"
 	"errors"
 	"math"
+	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
@@ -27,6 +29,14 @@ var (
 	ErrAffiliateCodeReserved = infraerrors.BadRequest("AFFILIATE_CODE_RESERVED", "affiliate code contains a reserved word")
 	ErrAffiliateCodeLocked   = infraerrors.Forbidden("AFFILIATE_CODE_LOCKED", "affiliate code is managed by admin")
 	ErrAffiliateCodeCooldown = infraerrors.TooManyRequests("AFFILIATE_CODE_COOLDOWN", "affiliate code was changed recently")
+
+	ErrAffiliateAgentNotEnabled         = infraerrors.Forbidden("AFFILIATE_AGENT_NOT_ENABLED", "user is not an affiliate agent")
+	ErrAffiliateAgentInviteeNotFound    = infraerrors.NotFound("AFFILIATE_AGENT_INVITEE_NOT_FOUND", "user was not invited by this agent")
+	ErrAffiliateAgentCreditInsufficient = infraerrors.BadRequest("AFFILIATE_AGENT_CREDIT_INSUFFICIENT", "insufficient agent test credit")
+	ErrAffiliateAgentAmountInvalid      = infraerrors.BadRequest("AFFILIATE_AGENT_AMOUNT_INVALID", "invalid test credit amount")
+	ErrAffiliateAgentNotesRequired      = infraerrors.BadRequest("AFFILIATE_AGENT_NOTES_REQUIRED", "notes are required")
+	ErrAffiliateAgentNotesTooLong       = infraerrors.BadRequest("AFFILIATE_AGENT_NOTES_TOO_LONG", "notes are too long")
+	ErrAffiliateAgentCreditLimitInvalid = infraerrors.BadRequest("AFFILIATE_AGENT_CREDIT_LIMIT_INVALID", "invalid agent credit limit")
 )
 
 const (
@@ -41,6 +51,11 @@ const (
 	AffiliateSelfCodeMinLength      = 4
 	AffiliateSelfCodeMaxLength      = 16
 	AffiliateSelfCodeChangeCooldown = 30 * 24 * time.Hour
+
+	// AffiliateAgentNotesMaxLength 代理发测试金时备注的最大字符数。
+	AffiliateAgentNotesMaxLength = 200
+	// AffiliateAgentCreditLimitMax 代理测试金总额度的上限，防止误填超大数字。
+	AffiliateAgentCreditLimitMax = 1_000_000
 )
 
 // affiliateReservedCodeFragments 是用户自助改码时禁止出现的片段，防止冒充官方。
@@ -110,6 +125,9 @@ type AffiliateSummary struct {
 	AffQuota             float64    `json:"aff_quota"`
 	AffFrozenQuota       float64    `json:"aff_frozen_quota"`
 	AffHistoryQuota      float64    `json:"aff_history_quota"`
+	AgentEnabled         bool       `json:"agent_enabled"`
+	AgentCreditLimit     float64    `json:"agent_credit_limit"`
+	AgentCreditUsed      float64    `json:"agent_credit_used"`
 	CreatedAt            time.Time  `json:"created_at"`
 	UpdatedAt            time.Time  `json:"updated_at"`
 }
@@ -120,6 +138,34 @@ type AffiliateInvitee struct {
 	Username    string     `json:"username"`
 	CreatedAt   *time.Time `json:"created_at,omitempty"`
 	TotalRebate float64    `json:"total_rebate"`
+	// AgentGranted 是邀请人（代理）给这个用户发过的测试金合计。
+	AgentGranted float64 `json:"agent_granted"`
+}
+
+// AffiliateAgentCredit 代理的测试金额度。剩余额度不会小于 0（管理员把总额度
+// 调到已发金额以下时剩余为 0）。
+type AffiliateAgentCredit struct {
+	CreditLimit     float64 `json:"credit_limit"`
+	CreditUsed      float64 `json:"credit_used"`
+	CreditRemaining float64 `json:"credit_remaining"`
+}
+
+func newAffiliateAgentCredit(limit, used float64) AffiliateAgentCredit {
+	return AffiliateAgentCredit{
+		CreditLimit:     roundTo(limit, 8),
+		CreditUsed:      roundTo(used, 8),
+		CreditRemaining: roundTo(math.Max(0, limit-used), 8),
+	}
+}
+
+// AffiliateAgentGrantResult 是一笔代理测试金发放的结果。不包含被邀请人的余额，
+// 代理只能看到自己的额度变化。Replayed 表示命中了同一幂等标识的已有发放。
+type AffiliateAgentGrantResult struct {
+	GrantID       int64   `json:"grant_id"`
+	InviteeUserID int64   `json:"invitee_user_id"`
+	Amount        float64 `json:"amount"`
+	AffiliateAgentCredit
+	Replayed bool `json:"-"`
 }
 
 type AffiliateDetail struct {
@@ -139,6 +185,8 @@ type AffiliateDetail struct {
 	// 用于在用户的 /affiliate 页面直观展示「分享后能拿到多少」。
 	EffectiveRebateRatePercent float64            `json:"effective_rebate_rate_percent"`
 	Invitees                   []AffiliateInvitee `json:"invitees"`
+	// Agent 仅在用户是代理时返回，前端据此显示测试金额度和「加测试金」入口。
+	Agent *AffiliateAgentCredit `json:"agent,omitempty"`
 }
 
 type AffiliateRepository interface {
@@ -156,15 +204,22 @@ type AffiliateRepository interface {
 	// cooldown 时拒绝；旧码转入历史码表，继续归属该用户。
 	ChangeOwnAffCode(ctx context.Context, userID int64, newCode string, cooldown time.Duration) error
 
+	// GrantAgentCredit 代理从自己的测试金额度里给自己邀请的用户加余额：扣额度、加余额、
+	// 写发放记录和余额调整记录在同一事务里完成。operationID 相同的重复请求返回首次结果。
+	GrantAgentCredit(ctx context.Context, agentUserID, inviteeUserID int64, amount float64, notes, operationID string) (*AffiliateAgentGrantResult, error)
+
 	// 管理端：用户级专属配置
 	UpdateUserAffCode(ctx context.Context, userID int64, newCode string) error
 	ResetUserAffCode(ctx context.Context, userID int64) (string, error)
 	SetUserRebateRate(ctx context.Context, userID int64, ratePercent *float64) error
 	BatchSetUserRebateRate(ctx context.Context, userIDs []int64, ratePercent *float64) error
+	// SetUserAgent 设置代理开关和测试金总额度；nil 表示该项不变。
+	SetUserAgent(ctx context.Context, userID int64, enabled *bool, creditLimit *float64) error
 	ListUsersWithCustomSettings(ctx context.Context, filter AffiliateAdminFilter) ([]AffiliateAdminEntry, int64, error)
 	ListAffiliateInviteRecords(ctx context.Context, filter AffiliateRecordFilter) ([]AffiliateInviteRecord, int64, error)
 	ListAffiliateRebateRecords(ctx context.Context, filter AffiliateRecordFilter) ([]AffiliateRebateRecord, int64, error)
 	ListAffiliateTransferRecords(ctx context.Context, filter AffiliateRecordFilter) ([]AffiliateTransferRecord, int64, error)
+	ListAffiliateAgentGrantRecords(ctx context.Context, filter AffiliateRecordFilter) ([]AffiliateAgentGrantRecord, int64, error)
 	GetAffiliateUserOverview(ctx context.Context, userID int64) (*AffiliateUserOverview, error)
 }
 
@@ -184,6 +239,9 @@ type AffiliateAdminEntry struct {
 	AffCodeCustom        bool     `json:"aff_code_custom"`
 	AffRebateRatePercent *float64 `json:"aff_rebate_rate_percent,omitempty"`
 	AffCount             int      `json:"aff_count"`
+	AgentEnabled         bool     `json:"agent_enabled"`
+	AgentCreditLimit     float64  `json:"agent_credit_limit"`
+	AgentCreditUsed      float64  `json:"agent_credit_used"`
 }
 
 type AffiliateRecordFilter struct {
@@ -247,6 +305,24 @@ type AffiliateTransferRecord struct {
 	FrozenQuota         float64   `json:"-"`
 	HistoryQuota        float64   `json:"-"`
 	CreatedAt           time.Time `json:"created_at"`
+}
+
+// AffiliateAgentGrantRecord 是一笔代理测试金发放记录（管理端查看）。代理或
+// 被邀请人账号被删除时对应 ID 为 nil。
+type AffiliateAgentGrantRecord struct {
+	ID                    int64     `json:"id"`
+	AgentUserID           *int64    `json:"agent_user_id"`
+	AgentEmail            string    `json:"agent_email"`
+	AgentUsername         string    `json:"agent_username"`
+	InviteeUserID         *int64    `json:"invitee_user_id"`
+	InviteeEmail          string    `json:"invitee_email"`
+	InviteeUsername       string    `json:"invitee_username"`
+	Amount                float64   `json:"amount"`
+	Notes                 string    `json:"notes"`
+	InviteeBalanceAfter   *float64  `json:"invitee_balance_after"`
+	AgentCreditLimitAfter *float64  `json:"agent_credit_limit_after"`
+	AgentCreditUsedAfter  *float64  `json:"agent_credit_used_after"`
+	CreatedAt             time.Time `json:"created_at"`
 }
 
 // AffiliateWithdrawResult 是线下提现登记完成后的流水 ID 与额度快照。
@@ -323,6 +399,11 @@ func (s *AffiliateService) GetAffiliateDetail(ctx context.Context, userID int64)
 	if err != nil {
 		return nil, err
 	}
+	var agent *AffiliateAgentCredit
+	if summary.AgentEnabled {
+		credit := newAffiliateAgentCredit(summary.AgentCreditLimit, summary.AgentCreditUsed)
+		agent = &credit
+	}
 	return &AffiliateDetail{
 		UserID:                     summary.UserID,
 		AffCode:                    summary.AffCode,
@@ -335,6 +416,7 @@ func (s *AffiliateService) GetAffiliateDetail(ctx context.Context, userID int64)
 		AffHistoryQuota:            summary.AffHistoryQuota,
 		EffectiveRebateRatePercent: s.resolveRebateRatePercent(ctx, summary),
 		Invitees:                   invitees,
+		Agent:                      agent,
 	}, nil
 }
 
@@ -367,6 +449,65 @@ func (s *AffiliateService) ChangeOwnAffCode(ctx context.Context, userID int64, r
 		return err
 	}
 	return s.repo.ChangeOwnAffCode(ctx, userID, code, AffiliateSelfCodeChangeCooldown)
+}
+
+// GrantAgentCredit 代理从自己的测试金额度里给自己邀请的用户加余额。
+//
+// 只能加、不能减；金额按 8 位小数记账，必须为正；备注必填。发放不产生邀请返利，
+// 也不计入用户的累计充值。idempotencyKey 必填：同一个键只发放一次，重复请求在
+// 被邀请人与金额一致时返回首次结果，不一致时返回 ErrIdempotencyKeyConflict。
+func (s *AffiliateService) GrantAgentCredit(ctx context.Context, agentUserID, inviteeUserID int64, amount float64, rawNotes, idempotencyKey string) (*AffiliateAgentGrantResult, error) {
+	if agentUserID <= 0 {
+		return nil, infraerrors.BadRequest("INVALID_USER", "invalid user")
+	}
+	if inviteeUserID <= 0 || inviteeUserID == agentUserID {
+		return nil, ErrAffiliateAgentInviteeNotFound
+	}
+	if s == nil || s.repo == nil {
+		return nil, infraerrors.ServiceUnavailable("SERVICE_UNAVAILABLE", "affiliate service unavailable")
+	}
+	if !s.IsEnabled(ctx) {
+		return nil, ErrAffiliateDisabled
+	}
+	key, err := NormalizeIdempotencyKey(idempotencyKey)
+	if err != nil {
+		return nil, err
+	}
+	if key == "" {
+		return nil, ErrIdempotencyKeyRequired
+	}
+	if math.IsNaN(amount) || math.IsInf(amount, 0) {
+		return nil, ErrAffiliateAgentAmountInvalid
+	}
+	amount = roundTo(amount, 8)
+	if amount <= 0 || amount > AffiliateAgentCreditLimitMax {
+		return nil, ErrAffiliateAgentAmountInvalid
+	}
+	notes := strings.TrimSpace(rawNotes)
+	if notes == "" {
+		return nil, ErrAffiliateAgentNotesRequired
+	}
+	if utf8.RuneCountInString(notes) > AffiliateAgentNotesMaxLength {
+		return nil, ErrAffiliateAgentNotesTooLong
+	}
+
+	result, err := s.repo.GrantAgentCredit(ctx, agentUserID, inviteeUserID, amount, notes, affiliateAgentGrantOperationID(agentUserID, key))
+	if err != nil {
+		return nil, err
+	}
+	if !result.Replayed {
+		s.invalidateAffiliateCaches(ctx, inviteeUserID)
+		logger.LegacyPrintf("service.affiliate", "[Affiliate] agent test credit granted: agent=%d invitee=%d amount=%.8f grant_id=%d credit_used=%.8f/%.8f",
+			agentUserID, inviteeUserID, amount, result.GrantID, result.CreditUsed, result.CreditLimit)
+	}
+	return result, nil
+}
+
+// affiliateAgentGrantOperationID 把代理发放请求的幂等键映射为发放记录的 operation_id。
+// 键按代理隔离：不同代理用同一个键不会互相命中。
+func affiliateAgentGrantOperationID(agentUserID int64, idempotencyKey string) string {
+	sum := sha256.Sum256([]byte("affiliate.agent.grant\x00" + strconv.FormatInt(agentUserID, 10) + "\x00" + idempotencyKey))
+	return hex.EncodeToString(sum[:])
 }
 
 func (s *AffiliateService) BindInviterByCode(ctx context.Context, userID int64, rawCode string) error {
@@ -662,6 +803,29 @@ func (s *AffiliateService) AdminBatchSetUserRebateRate(ctx context.Context, user
 	return s.repo.BatchSetUserRebateRate(ctx, cleaned, ratePercent)
 }
 
+// AdminSetUserAgent 设置用户的代理开关和测试金总额度；nil 表示该项不变。
+// 总额度可以调到已发金额以下，此时剩余额度为 0，已发的测试金不受影响。
+func (s *AffiliateService) AdminSetUserAgent(ctx context.Context, userID int64, enabled *bool, creditLimit *float64) error {
+	if userID <= 0 {
+		return infraerrors.BadRequest("INVALID_USER", "invalid user")
+	}
+	if s == nil || s.repo == nil {
+		return infraerrors.ServiceUnavailable("SERVICE_UNAVAILABLE", "affiliate service unavailable")
+	}
+	if enabled == nil && creditLimit == nil {
+		return nil
+	}
+	if creditLimit != nil {
+		v := *creditLimit
+		if math.IsNaN(v) || math.IsInf(v, 0) || v < 0 || v > AffiliateAgentCreditLimitMax {
+			return ErrAffiliateAgentCreditLimitInvalid
+		}
+		v = roundTo(v, 8)
+		creditLimit = &v
+	}
+	return s.repo.SetUserAgent(ctx, userID, enabled, creditLimit)
+}
+
 // AdminWithdrawQuota 登记一笔已在站外打款的线下提现：从用户可提取返利额度
 // 中扣除 amount，并写入 action=withdraw 的流水。冻结期内的额度不可扣除。
 // 金额按返利流水精度保留 8 位小数，舍入后必须为正。
@@ -726,6 +890,13 @@ func (s *AffiliateService) AdminListTransferRecords(ctx context.Context, filter 
 		return nil, 0, infraerrors.ServiceUnavailable("SERVICE_UNAVAILABLE", "affiliate service unavailable")
 	}
 	return s.repo.ListAffiliateTransferRecords(ctx, normalizeAffiliateRecordFilter(filter))
+}
+
+func (s *AffiliateService) AdminListAgentGrantRecords(ctx context.Context, filter AffiliateRecordFilter) ([]AffiliateAgentGrantRecord, int64, error) {
+	if s == nil || s.repo == nil {
+		return nil, 0, infraerrors.ServiceUnavailable("SERVICE_UNAVAILABLE", "affiliate service unavailable")
+	}
+	return s.repo.ListAffiliateAgentGrantRecords(ctx, normalizeAffiliateRecordFilter(filter))
 }
 
 func (s *AffiliateService) AdminGetUserOverview(ctx context.Context, userID int64) (*AffiliateUserOverview, error) {

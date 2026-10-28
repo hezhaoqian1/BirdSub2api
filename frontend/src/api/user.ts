@@ -16,6 +16,8 @@ import type {
   UserAuthProvider,
   UserAffiliateDetail,
   AffiliateTransferResponse,
+  AffiliateAgentGrantRequest,
+  AffiliateAgentGrantResult,
   PlatformQuotasResponse,
 } from '@/types'
 
@@ -192,6 +194,20 @@ export async function transferAffiliateQuota(): Promise<AffiliateTransferRespons
 }
 
 /**
+ * 代理给自己邀请的用户加测试金。`idempotencyKey` 标识一次发放：
+ * 用同一个键重试不会重复发放，服务端返回首次结果。
+ */
+export async function grantAffiliateAgentCredit(
+  payload: AffiliateAgentGrantRequest,
+  idempotencyKey: string
+): Promise<AffiliateAgentGrantResult> {
+  const { data } = await apiClient.post<AffiliateAgentGrantResult>('/user/aff/agent/grants', payload, {
+    headers: { 'Idempotency-Key': idempotencyKey }
+  })
+  return data
+}
+
+/**
  * 获取当前用户的平台限额 + 用量。
  */
 export async function getMyPlatformQuotas(): Promise<PlatformQuotasResponse> {
@@ -215,6 +231,7 @@ export const userAPI = {
   getAffiliateDetail,
   updateAffiliateCode,
   transferAffiliateQuota,
+  grantAffiliateAgentCredit,
   getMyPlatformQuotas,
 }
 

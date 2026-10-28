@@ -286,3 +286,165 @@ func TestChangeOwnAffCode_RejectsBeforeRepo(t *testing.T) {
 	// and the repo stub, which panics on ChangeOwnAffCode, is never reached.
 	require.ErrorIs(t, svc.ChangeOwnAffCode(context.Background(), 1, "VIP2026"), ErrAffiliateDisabled)
 }
+
+type affiliateAgentGrantCall struct {
+	agentUserID   int64
+	inviteeUserID int64
+	amount        float64
+	notes         string
+	operationID   string
+}
+
+type affiliateAgentRepoStub struct {
+	AffiliateRepository
+	grantCalls []affiliateAgentGrantCall
+	grant      *AffiliateAgentGrantResult
+	grantErr   error
+
+	agentCalls []struct {
+		userID      int64
+		enabled     *bool
+		creditLimit *float64
+	}
+}
+
+func (s *affiliateAgentRepoStub) GrantAgentCredit(_ context.Context, agentUserID, inviteeUserID int64, amount float64, notes, operationID string) (*AffiliateAgentGrantResult, error) {
+	s.grantCalls = append(s.grantCalls, affiliateAgentGrantCall{agentUserID, inviteeUserID, amount, notes, operationID})
+	if s.grantErr != nil {
+		return nil, s.grantErr
+	}
+	if s.grant != nil {
+		return s.grant, nil
+	}
+	return &AffiliateAgentGrantResult{GrantID: 1, InviteeUserID: inviteeUserID, Amount: amount}, nil
+}
+
+func (s *affiliateAgentRepoStub) SetUserAgent(_ context.Context, userID int64, enabled *bool, creditLimit *float64) error {
+	s.agentCalls = append(s.agentCalls, struct {
+		userID      int64
+		enabled     *bool
+		creditLimit *float64
+	}{userID, enabled, creditLimit})
+	return nil
+}
+
+func newEnabledAffiliateAgentService(repo AffiliateRepository) *AffiliateService {
+	settingSvc := NewSettingService(&paymentFulfillmentSettingRepoStub{values: map[string]string{
+		SettingKeyAffiliateEnabled: "true",
+	}}, nil)
+	return NewAffiliateService(repo, settingSvc, nil, nil)
+}
+
+const testAffiliateAgentGrantKey = "affiliate-agent-grant-9-5d1c"
+
+func TestNewAffiliateAgentCredit_RemainingNeverNegative(t *testing.T) {
+	t.Parallel()
+	credit := newAffiliateAgentCredit(100, 35)
+	require.InDelta(t, 65, credit.CreditRemaining, 1e-9)
+
+	// 管理员把总额度调到已发金额以下时，剩余额度为 0 而不是负数。
+	lowered := newAffiliateAgentCredit(20, 35)
+	require.Zero(t, lowered.CreditRemaining)
+	require.InDelta(t, 35, lowered.CreditUsed, 1e-9)
+}
+
+func TestGrantAgentCredit_RejectsBeforeRepo(t *testing.T) {
+	t.Parallel()
+	notes := "trial for new customer"
+
+	disabled := &affiliateAgentRepoStub{}
+	_, err := (&AffiliateService{repo: disabled}).GrantAgentCredit(context.Background(), 9, 10, 5, notes, testAffiliateAgentGrantKey)
+	require.ErrorIs(t, err, ErrAffiliateDisabled)
+	require.Empty(t, disabled.grantCalls)
+
+	cases := []struct {
+		name    string
+		invitee int64
+		amount  float64
+		notes   string
+		key     string
+		want    error
+	}{
+		{"self grant", 9, 5, notes, testAffiliateAgentGrantKey, ErrAffiliateAgentInviteeNotFound},
+		{"missing invitee", 0, 5, notes, testAffiliateAgentGrantKey, ErrAffiliateAgentInviteeNotFound},
+		{"missing key", 10, 5, notes, "", ErrIdempotencyKeyRequired},
+		{"bad key", 10, 5, notes, "has space", ErrIdempotencyKeyInvalid},
+		{"zero amount", 10, 0, notes, testAffiliateAgentGrantKey, ErrAffiliateAgentAmountInvalid},
+		{"negative amount", 10, -5, notes, testAffiliateAgentGrantKey, ErrAffiliateAgentAmountInvalid},
+		{"nan amount", 10, math.NaN(), notes, testAffiliateAgentGrantKey, ErrAffiliateAgentAmountInvalid},
+		{"tiny amount", 10, 1e-9, notes, testAffiliateAgentGrantKey, ErrAffiliateAgentAmountInvalid},
+		{"huge amount", 10, AffiliateAgentCreditLimitMax + 1, notes, testAffiliateAgentGrantKey, ErrAffiliateAgentAmountInvalid},
+		{"empty notes", 10, 5, "   ", testAffiliateAgentGrantKey, ErrAffiliateAgentNotesRequired},
+		{"long notes", 10, 5, strings.Repeat("备", AffiliateAgentNotesMaxLength+1), testAffiliateAgentGrantKey, ErrAffiliateAgentNotesTooLong},
+	}
+	for _, tc := range cases {
+		repo := &affiliateAgentRepoStub{}
+		svc := newEnabledAffiliateAgentService(repo)
+		_, err := svc.GrantAgentCredit(context.Background(), 9, tc.invitee, tc.amount, tc.notes, tc.key)
+		require.ErrorIs(t, err, tc.want, tc.name)
+		require.Empty(t, repo.grantCalls, tc.name)
+	}
+}
+
+func TestGrantAgentCredit_PassesNormalizedRequestToRepo(t *testing.T) {
+	t.Parallel()
+	repo := &affiliateAgentRepoStub{}
+	svc := newEnabledAffiliateAgentService(repo)
+
+	_, err := svc.GrantAgentCredit(context.Background(), 9, 10, 5.123456789, "  试用 "+strings.Repeat("a", AffiliateAgentNotesMaxLength-3)+"  ", testAffiliateAgentGrantKey)
+	require.NoError(t, err)
+	require.Len(t, repo.grantCalls, 1)
+	call := repo.grantCalls[0]
+	require.Equal(t, int64(9), call.agentUserID)
+	require.Equal(t, int64(10), call.inviteeUserID)
+	require.InDelta(t, 5.12345679, call.amount, 1e-12)
+	require.Equal(t, "试用 "+strings.Repeat("a", AffiliateAgentNotesMaxLength-3), call.notes)
+	require.Len(t, call.operationID, 64)
+
+	// 同一代理、同一个键得到同一个 operation_id；换代理则不同，键不会跨代理命中。
+	require.Equal(t, call.operationID, affiliateAgentGrantOperationID(9, testAffiliateAgentGrantKey))
+	require.NotEqual(t, call.operationID, affiliateAgentGrantOperationID(8, testAffiliateAgentGrantKey))
+	require.NotEqual(t, call.operationID, affiliateWithdrawOperationID(testAffiliateAgentGrantKey))
+}
+
+func TestGrantAgentCredit_PropagatesRepositoryErrors(t *testing.T) {
+	t.Parallel()
+	for _, want := range []error{
+		ErrAffiliateAgentNotEnabled,
+		ErrAffiliateAgentInviteeNotFound,
+		ErrAffiliateAgentCreditInsufficient,
+		ErrIdempotencyKeyConflict,
+	} {
+		repo := &affiliateAgentRepoStub{grantErr: want}
+		svc := newEnabledAffiliateAgentService(repo)
+		_, err := svc.GrantAgentCredit(context.Background(), 9, 10, 5, "trial", testAffiliateAgentGrantKey)
+		require.ErrorIs(t, err, want)
+	}
+}
+
+func TestAdminSetUserAgent_ValidatesCreditLimit(t *testing.T) {
+	t.Parallel()
+	for _, limit := range []float64{-1, math.NaN(), math.Inf(1), AffiliateAgentCreditLimitMax + 1} {
+		repo := &affiliateAgentRepoStub{}
+		svc := &AffiliateService{repo: repo}
+		l := limit
+		require.ErrorIs(t, svc.AdminSetUserAgent(context.Background(), 3, nil, &l), ErrAffiliateAgentCreditLimitInvalid, limit)
+		require.Empty(t, repo.agentCalls)
+	}
+
+	repo := &affiliateAgentRepoStub{}
+	svc := &AffiliateService{repo: repo}
+	// 什么都不改时不访问仓储。
+	require.NoError(t, svc.AdminSetUserAgent(context.Background(), 3, nil, nil))
+	require.Empty(t, repo.agentCalls)
+
+	enabled := true
+	limit := 100.123456789
+	require.NoError(t, svc.AdminSetUserAgent(context.Background(), 3, &enabled, &limit))
+	require.Len(t, repo.agentCalls, 1)
+	require.True(t, *repo.agentCalls[0].enabled)
+	require.InDelta(t, 100.12345679, *repo.agentCalls[0].creditLimit, 1e-12)
+
+	zero := 0.0
+	require.NoError(t, svc.AdminSetUserAgent(context.Background(), 3, nil, &zero))
+}

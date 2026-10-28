@@ -198,6 +198,18 @@ func (r *paymentFulfillmentAffiliateRepoStub) GetAffiliateUserOverview(context.C
 	panic("unexpected GetAffiliateUserOverview call")
 }
 
+func (r *paymentFulfillmentAffiliateRepoStub) GrantAgentCredit(context.Context, int64, int64, float64, string, string) (*AffiliateAgentGrantResult, error) {
+	panic("unexpected GrantAgentCredit call")
+}
+
+func (r *paymentFulfillmentAffiliateRepoStub) SetUserAgent(context.Context, int64, *bool, *float64) error {
+	panic("unexpected SetUserAgent call")
+}
+
+func (r *paymentFulfillmentAffiliateRepoStub) ListAffiliateAgentGrantRecords(context.Context, AffiliateRecordFilter) ([]AffiliateAgentGrantRecord, int64, error) {
+	panic("unexpected ListAffiliateAgentGrantRecords call")
+}
+
 type paymentFulfillmentSettingRepoStub struct {
 	values map[string]string
 }
