@@ -80,6 +80,8 @@ type AdminService interface {
 	ListOpenAISchedulableAccountsForSchedulerScore(ctx context.Context, groupID *int64) ([]Account, error)
 	GetAccount(ctx context.Context, id int64) (*Account, error)
 	GetAccountsByIDs(ctx context.Context, ids []int64) ([]*Account, error)
+	// DescribeActiveSlots 把并发槽位快照补全为带用户/Key/分组/账号名称的在途请求列表。
+	DescribeActiveSlots(ctx context.Context, snapshot *ActiveSlotSnapshot) ([]ActiveRequestView, error)
 	CreateAccount(ctx context.Context, input *CreateAccountInput) (*Account, error)
 	ValidateAccountGroupBindings(ctx context.Context, groupIDs []int64) error
 	// DuplicateAccount creates an independent account from an existing account's configuration.

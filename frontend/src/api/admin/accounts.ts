@@ -8,6 +8,7 @@ import type { OpenAIReferralRefreshResult, OpenAIReferralSendResult } from '@/ty
 import type {
   Account,
   AccountListItem,
+  ActiveRequestsResponse,
   CreateAccountRequest,
   UpdateAccountRequest,
   PaginatedResponse,
@@ -565,6 +566,14 @@ export async function bulkUpdate(
  */
 export async function getTodayStats(id: number): Promise<WindowStats> {
   const { data } = await apiClient.get<WindowStats>(`/admin/accounts/${id}/today-stats`)
+  return data
+}
+
+/**
+ * Get the requests currently holding this account's concurrency slots
+ */
+export async function getActiveRequests(id: number): Promise<ActiveRequestsResponse> {
+  const { data } = await apiClient.get<ActiveRequestsResponse>(`/admin/accounts/${id}/active-requests`)
   return data
 }
 
@@ -1153,6 +1162,7 @@ export const accountsAPI = {
   getBatchUsage,
   getTodayStats,
   getBatchTodayStats,
+  getActiveRequests,
   clearRateLimit,
   recoverState,
   resetAccountQuota,

@@ -1,10 +1,15 @@
 <template>
   <div class="flex items-center">
-    <span
+    <component
+      :is="clickable ? 'button' : 'span'"
+      :type="clickable ? 'button' : undefined"
       :class="[
         'inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-xs font-medium',
-        statusClass
+        statusClass,
+        clickable ? 'cursor-pointer transition-shadow hover:ring-1 hover:ring-current focus:outline-none focus-visible:ring-2 focus-visible:ring-current' : ''
       ]"
+      :title="clickable ? title : undefined"
+      @click="clickable && $emit('click')"
     >
       <!-- Four-square grid icon -->
       <svg class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
@@ -13,7 +18,7 @@
       <span class="font-mono">{{ current }}</span>
       <span class="text-gray-400 dark:text-gray-500">/</span>
       <span class="font-mono">{{ max }}</span>
-    </span>
+    </component>
   </div>
 </template>
 
@@ -23,7 +28,12 @@ import { computed } from 'vue'
 const props = defineProps<{
   current: number
   max: number
+  /** Render as a button that emits `click` (used to open the live requests dialog). */
+  clickable?: boolean
+  title?: string
 }>()
+
+defineEmits<{ (e: 'click'): void }>()
 
 // Status color based on usage
 const statusClass = computed(() => {

@@ -493,6 +493,9 @@ gateway:
   # Concurrency slot expiration time (minutes)
   # 并发槽位过期时间（分钟）
   concurrency_slot_ttl_minutes: 30
+  # Record who holds each concurrency slot (user/key/group/model) for the admin "who is using it" view
+  # 记录并发槽位占用者（用户/Key/分组/模型），供管理后台查看"谁在用"
+  concurrency_holder_details_enabled: true
   # Stream data interval timeout (seconds), 0=disable
   # 流数据间隔超时（秒），0=禁用
   stream_data_interval_timeout: 180

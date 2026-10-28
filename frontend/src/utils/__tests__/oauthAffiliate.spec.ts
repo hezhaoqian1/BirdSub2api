@@ -1,8 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
+  captureAffiliateInviteLink,
   clearAffiliateReferralCode,
   clearOAuthAffiliateCode,
   loadAffiliateReferralCode,
+  loadLockedAffiliateReferralCode,
   loadOAuthAffiliateCode,
   resolveAffiliateReferralCode,
   storeAffiliateReferralCode,
@@ -44,5 +46,34 @@ describe('oauthAffiliate', () => {
 
     clearAffiliateReferralCode()
     expect(loadAffiliateReferralCode()).toBe('')
+  })
+
+  it('locks the code for this browser session when arriving via an invite link', () => {
+    expect(captureAffiliateInviteLink(' vip2026 ')).toBe('VIP2026')
+    expect(loadAffiliateReferralCode()).toBe('VIP2026')
+    expect(loadLockedAffiliateReferralCode()).toBe('VIP2026')
+
+    // A later link replaces the lock (last touch wins).
+    expect(captureAffiliateInviteLink('KOL888')).toBe('KOL888')
+    expect(loadLockedAffiliateReferralCode()).toBe('KOL888')
+
+    // Closing the browser drops sessionStorage: the code is still prefilled but no longer locked.
+    sessionStorage.clear()
+    expect(loadLockedAffiliateReferralCode()).toBe('')
+    expect(loadAffiliateReferralCode()).toBe('KOL888')
+  })
+
+  it('ignores malformed invite link codes', () => {
+    expect(captureAffiliateInviteLink('a b')).toBe('')
+    expect(captureAffiliateInviteLink('<script>')).toBe('')
+    expect(captureAffiliateInviteLink(['AB'])).toBe('')
+    expect(loadLockedAffiliateReferralCode()).toBe('')
+    expect(loadAffiliateReferralCode()).toBe('')
+  })
+
+  it('drops the lock together with the referral code', () => {
+    captureAffiliateInviteLink('VIP2026')
+    clearAffiliateReferralCode()
+    expect(loadLockedAffiliateReferralCode()).toBe('')
   })
 })

@@ -181,6 +181,11 @@ export async function getAffiliateDetail(): Promise<UserAffiliateDetail> {
   return data
 }
 
+export async function updateAffiliateCode(affCode: string): Promise<UserAffiliateDetail> {
+  const { data } = await apiClient.put<UserAffiliateDetail>('/user/aff/code', { aff_code: affCode })
+  return data
+}
+
 export async function transferAffiliateQuota(): Promise<AffiliateTransferResponse> {
   const { data } = await apiClient.post<AffiliateTransferResponse>('/user/aff/transfer')
   return data
@@ -208,6 +213,7 @@ export const userAPI = {
   buildOAuthBindingStartURL,
   startOAuthBinding,
   getAffiliateDetail,
+  updateAffiliateCode,
   transferAffiliateQuota,
   getMyPlatformQuotas,
 }

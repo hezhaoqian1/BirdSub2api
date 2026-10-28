@@ -5,7 +5,7 @@
 
 import { apiClient } from '../client'
 import { listPlatformIds } from '@/constants/platformCatalog'
-import type { AccountPlatform, AdminUser, UpdateUserRequest, PaginatedResponse, ApiKey } from '@/types'
+import type { AccountPlatform, ActiveRequestsResponse, AdminUser, UpdateUserRequest, PaginatedResponse, ApiKey } from '@/types'
 
 export interface AdminBindAuthIdentityChannelRequest {
   channel: string
@@ -404,6 +404,14 @@ export async function resetPlatformQuotaWindow(
   return data
 }
 
+/**
+ * Get the requests currently holding this user's concurrency slots
+ */
+export async function getActiveRequests(id: number): Promise<ActiveRequestsResponse> {
+  const { data } = await apiClient.get<ActiveRequestsResponse>(`/admin/users/${id}/active-requests`)
+  return data
+}
+
 export const usersAPI = {
   list,
   getById,
@@ -422,6 +430,7 @@ export const usersAPI = {
   getPlatformQuotas,
   updatePlatformQuotas,
   resetPlatformQuotaWindow,
+  getActiveRequests,
 }
 
 export default usersAPI

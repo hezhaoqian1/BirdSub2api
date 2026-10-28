@@ -156,6 +156,10 @@ export interface AffiliateInvitee {
 export interface UserAffiliateDetail {
   user_id: number
   aff_code: string
+  /** 邀请码由管理员指定，用户不能自行修改。 */
+  aff_code_custom?: boolean
+  /** 下次可以自助修改邀请码的时间；为空表示现在就可以改。 */
+  aff_code_change_available_at?: string | null
   inviter_id?: number | null
   aff_count: number
   aff_quota: number
@@ -1386,6 +1390,44 @@ export interface AccountSchedulerGroupScore {
   sticky_score?: number
   sticky_score_infinity?: boolean
   sticky_weighted_enabled: boolean
+}
+
+// Active requests (who is holding concurrency slots right now)
+export interface ActiveRequestItem {
+  slot_id: string
+  /** OpenAI Live session lease (no holder details) */
+  live: boolean
+  /** false when the slot has no holder details (started before the feature, or write failed) */
+  recorded: boolean
+  request_id?: string
+  elapsed_seconds: number
+  model?: string
+  user_id?: number
+  user_email?: string
+  username?: string
+  api_key_id?: number
+  api_key_name?: string
+  group_id?: number
+  group_name?: string
+  group_platform?: string
+  /** 0/undefined on a user slot means the request is still selecting an account */
+  account_id?: number
+  account_name?: string
+  account_platform?: string
+}
+
+export interface ActiveRequestsResponse {
+  current: number
+  max: number
+  waiting: number
+  items: ActiveRequestItem[]
+}
+
+/** Header info for the live concurrency dialog (a user or an account). */
+export interface ActiveRequestsTarget {
+  id: number
+  title: string
+  platform?: string
 }
 
 // Account Usage types

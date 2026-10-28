@@ -181,10 +181,25 @@
               v-model="formData.aff_code"
               type="text"
               :disabled="registrationActionDisabled"
+              :readonly="affiliateCodeLocked"
               class="input pl-11"
+              :class="{ 'cursor-not-allowed bg-gray-50 pr-10 dark:bg-dark-800': affiliateCodeLocked }"
               :placeholder="t('auth.invitationCodePlaceholder')"
             />
+            <div
+              v-if="affiliateCodeLocked"
+              class="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-3.5"
+            >
+              <Icon name="lock" size="sm" class="text-gray-400 dark:text-dark-500" />
+            </div>
           </div>
+          <p
+            v-if="affiliateCodeLocked"
+            class="mt-1.5 text-xs text-gray-500 dark:text-dark-400"
+            data-testid="affiliate-code-locked-hint"
+          >
+            {{ t('auth.affiliateCodeLockedHint') }}
+          </p>
         </div>
 
         <!-- Promo Code Input (Optional) -->
@@ -394,8 +409,11 @@ import {
   normalizeRegistrationEmailSuffixWhitelist
 } from '@/utils/registrationEmailPolicy'
 import {
+  captureAffiliateInviteLink,
   clearAffiliateReferralCode,
   loadAffiliateReferralCode,
+  loadLockedAffiliateReferralCode,
+  pickOAuthAffiliateCode,
   resolveAffiliateReferralCode
 } from '@/utils/oauthAffiliate'
 import type { LoginAgreementDocument } from '@/types'
@@ -548,8 +566,22 @@ watch(validationToastMessage, (value, previousValue) => {
   }
 })
 
+// 通过邀请链接进来时（/r/:code 或老格式 ?aff=），邀请码在本次浏览器会话内锁定，
+// 不能修改或清空；关闭浏览器后仍会预填，但可以修改。
+const affiliateCodeLocked = ref(false)
+
 function syncAffiliateReferralCode(): string {
-  const code = resolveAffiliateReferralCode(route.query.aff, route.query.aff_code)
+  const linkCode = pickOAuthAffiliateCode(route.query.aff, route.query.aff_code)
+  if (linkCode) {
+    captureAffiliateInviteLink(linkCode)
+    const query = { ...route.query }
+    delete query.aff
+    delete query.aff_code
+    void router.replace({ query })
+  }
+  const lockedCode = loadLockedAffiliateReferralCode()
+  affiliateCodeLocked.value = lockedCode !== ''
+  const code = lockedCode || resolveAffiliateReferralCode(linkCode)
   if (code) {
     formData.aff_code = code
   }
@@ -1047,7 +1079,8 @@ async function handleRegister(): Promise<void> {
   isLoading.value = true
 
   try {
-    const affCode = formData.aff_code.trim() || loadAffiliateReferralCode()
+    const affCode =
+      loadLockedAffiliateReferralCode() || formData.aff_code.trim() || loadAffiliateReferralCode()
     if (affCode) {
       formData.aff_code = affCode
     }

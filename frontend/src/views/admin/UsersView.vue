@@ -577,6 +577,9 @@
             <UserConcurrencyCell
               :current="row.current_concurrency ?? 0"
               :max="row.concurrency"
+              :clickable="(row.current_concurrency ?? 0) > 0 || row.concurrency <= 0"
+              :title="t('admin.activeRequests.open')"
+              @click="openActiveRequests(row)"
             />
           </template>
 
@@ -785,6 +788,7 @@
     <UserApiKeysModal :show="showApiKeysModal" :user="viewingUser" @close="closeApiKeysModal" />
     <UserAllowedGroupsModal :show="showAllowedGroupsModal" :user="allowedGroupsUser" @close="closeAllowedGroupsModal" @success="loadUsers" />
     <UserBalanceModal :show="showBalanceModal" :user="balanceUser" :operation="balanceOperation" @close="closeBalanceModal" @success="loadUsers" />
+    <ActiveRequestsDialog :show="showActiveRequests" mode="user" :target="activeRequestsTarget" @close="closeActiveRequests" />
     <UserBalanceHistoryModal :show="showBalanceHistoryModal" :user="balanceHistoryUser" @close="closeBalanceHistoryModal" @deposit="handleDepositFromHistory" @withdraw="handleWithdrawFromHistory" />
     <GroupReplaceModal :show="showGroupReplaceModal" :user="groupReplaceUser" :old-group="groupReplaceOldGroup" :all-groups="allGroups" @close="closeGroupReplaceModal" @success="loadUsers" />
     <UserAttributesConfigModal :show="showAttributesModal" @close="handleAttributesModalClose" />
@@ -802,7 +806,7 @@ import Icon from '@/components/icons/Icon.vue'
 
 const { t } = useI18n()
 import { adminAPI } from '@/api/admin'
-import type { AdminUser, AdminGroup, UserAttributeDefinition } from '@/types'
+import type { ActiveRequestsTarget, AdminUser, AdminGroup, UserAttributeDefinition } from '@/types'
 import type { BatchUserUsageStats } from '@/api/admin/dashboard'
 import type { PlatformQuotaItem } from '@/api/admin/users'
 import type { Column } from '@/components/common/types'
@@ -829,6 +833,7 @@ import UserApiKeysModal from '@/components/admin/user/UserApiKeysModal.vue'
 import UserAllowedGroupsModal from '@/components/admin/user/UserAllowedGroupsModal.vue'
 import UserBalanceModal from '@/components/admin/user/UserBalanceModal.vue'
 import UserBalanceHistoryModal from '@/components/admin/user/UserBalanceHistoryModal.vue'
+import ActiveRequestsDialog from '@/components/admin/ActiveRequestsDialog.vue'
 import GroupReplaceModal from '@/components/admin/user/GroupReplaceModal.vue'
 
 const appStore = useAppStore()
@@ -1558,6 +1563,8 @@ const balanceOperation = ref<'add' | 'subtract'>('add')
 // Balance History modal state
 const showBalanceHistoryModal = ref(false)
 const balanceHistoryUser = ref<AdminUser | null>(null)
+const showActiveRequests = ref(false)
+const activeRequestsTarget = ref<ActiveRequestsTarget | null>(null)
 
 // 计算剩余天数
 const getDaysRemaining = (expiresAt: string): number => {
@@ -1867,6 +1874,16 @@ const handleBalanceHistory = (user: AdminUser) => {
 const closeBalanceHistoryModal = () => {
   showBalanceHistoryModal.value = false
   balanceHistoryUser.value = null
+}
+
+const openActiveRequests = (user: AdminUser) => {
+  activeRequestsTarget.value = { id: user.id, title: user.email }
+  showActiveRequests.value = true
+}
+
+const closeActiveRequests = () => {
+  showActiveRequests.value = false
+  activeRequestsTarget.value = null
 }
 
 // Handle deposit from balance history modal

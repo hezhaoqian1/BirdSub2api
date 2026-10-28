@@ -387,6 +387,16 @@ func TestApiKeyAuthWithSubscriptionGoogleSetsGroupContext(t *testing.T) {
 			c.JSON(http.StatusInternalServerError, gin.H{"ok": false})
 			return
 		}
+		// 并发占用者身份带上用户和 Key，但不写 ctxkey.UserID（不改变该入口的用户级策略）。
+		trace := service.SlotHolderTraceFromContext(c.Request.Context())
+		if trace == nil || trace.UserID != user.ID || trace.APIKeyID != apiKey.ID {
+			c.JSON(http.StatusInternalServerError, gin.H{"ok": false, "trace": trace})
+			return
+		}
+		if _, set := c.Request.Context().Value(ctxkey.UserID).(int64); set {
+			c.JSON(http.StatusInternalServerError, gin.H{"ok": false, "user_id_set": true})
+			return
+		}
 		c.JSON(http.StatusOK, gin.H{"ok": true})
 	})
 

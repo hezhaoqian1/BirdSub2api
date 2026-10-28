@@ -235,6 +235,9 @@ type ConcurrencyService struct {
 	accountLoadCacheMu  sync.RWMutex
 	accountLoadCache    map[string]cachedAccountLoadBatch
 	accountLoadGroup    singleflight.Group
+
+	// slotHolderDetailsOff 为 true 时占槽不写占用者详情（零值即默认开启）。
+	slotHolderDetailsOff atomic.Bool
 }
 
 type cachedAccountLoadBatch struct {
@@ -351,7 +354,7 @@ func (s *ConcurrencyService) AcquireAccountSlot(ctx context.Context, accountID i
 	// Generate unique request ID for this slot
 	requestID := generateRequestID()
 
-	acquired, err := s.cache.AcquireAccountSlot(ctx, accountID, maxConcurrency, requestID)
+	acquired, err := s.acquireAccountSlotInCache(ctx, accountID, maxConcurrency, requestID)
 	if err != nil {
 		return nil, err
 	}
@@ -390,7 +393,7 @@ func (s *ConcurrencyService) AcquireUserSlot(ctx context.Context, userID int64, 
 	// Generate unique request ID for this slot
 	requestID := generateRequestID()
 
-	acquired, err := s.cache.AcquireUserSlot(ctx, userID, maxConcurrency, requestID)
+	acquired, err := s.acquireUserSlotInCache(ctx, userID, maxConcurrency, requestID)
 	if err != nil {
 		return nil, err
 	}
