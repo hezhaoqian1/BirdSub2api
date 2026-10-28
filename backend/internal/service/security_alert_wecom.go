@@ -157,22 +157,36 @@ func renderSecurityAlertEvent(ev pendingSecurityAlert) string {
 }
 
 // renderSecurityAlertMessage 把若干条告警拼成一条企业微信纯文本消息。
+// 渠道/用户余额类告警（同一组内类别一致）用「运营告警」标题。
 func renderSecurityAlertMessage(site string, events []pendingSecurityAlert) string {
 	parts := make([]string, 0, len(events)+1)
-	parts = append(parts, fmt.Sprintf("【%s 安全告警】", site))
+	if len(events) > 0 && isOpsAlertKind(events[0].Kind) {
+		parts = append(parts, fmt.Sprintf("【%s 运营告警】", site))
+	} else {
+		parts = append(parts, fmt.Sprintf("【%s 安全告警】", site))
+	}
 	for _, ev := range events {
 		parts = append(parts, renderSecurityAlertEvent(ev))
 	}
 	return strings.Join(parts, "\n\n")
 }
 
-// groupSecurityAlerts 按企业微信单条消息大小上限分组。
+// groupSecurityAlerts 按类别（安全/运营）和企业微信单条消息大小上限分组。
 func groupSecurityAlerts(site string, events []pendingSecurityAlert) [][]pendingSecurityAlert {
+	ordered := make([]pendingSecurityAlert, 0, len(events))
+	for _, ops := range []bool{false, true} {
+		for _, ev := range events {
+			if isOpsAlertKind(ev.Kind) == ops {
+				ordered = append(ordered, ev)
+			}
+		}
+	}
 	var groups [][]pendingSecurityAlert
 	var current []pendingSecurityAlert
-	for _, ev := range events {
+	for _, ev := range ordered {
 		candidate := append(append([]pendingSecurityAlert{}, current...), ev)
-		if len(current) > 0 && len(renderSecurityAlertMessage(site, candidate)) > weComRobotMaxContentBytes {
+		if len(current) > 0 && (isOpsAlertKind(current[0].Kind) != isOpsAlertKind(ev.Kind) ||
+			len(renderSecurityAlertMessage(site, candidate)) > weComRobotMaxContentBytes) {
 			groups = append(groups, current)
 			current = []pendingSecurityAlert{ev}
 			continue

@@ -1,5 +1,6 @@
 import upstreamBalance from './upstreamBalance'
 import adminAccessKeys from './adminAccessKeys'
+import securityAlerts from './securityAlerts'
 import landing from './landing'
 import common from './common'
 import dashboard from './dashboard'
@@ -11,6 +12,7 @@ import misc from './misc'
 export default {
   upstreamBalance,
   adminAccessKeys,
+  securityAlerts,
   ...landing,
   ...common,
   ...dashboard,
