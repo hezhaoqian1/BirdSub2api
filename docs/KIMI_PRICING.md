@@ -4,10 +4,12 @@
 继续以美元额度（$）显示和扣费，不按外汇汇率折算。例如输入价 ¥20 / 百万 tokens
 对应站内 $20 / 百万 tokens，在倍率为 1 时消耗用户充值 ¥20 所得的额度。
 
-当前模型价格核对于 2026-10-15，来源：[Kimi 官方人民币价目](https://platform.kimi.com/docs/pricing/chat)。
+当前模型价格核对于 2026-10-15（K3.1 Pro 及高速版核对于 2026-10-28），来源：[Kimi 官方人民币价目](https://platform.kimi.com/docs/pricing/chat)。
 
 | 模型 | 输入 / 百万 tokens | 输出 / 百万 tokens | 缓存读取 / 百万 tokens |
 | --- | ---: | ---: | ---: |
+| kimi-k3.1-pro | $13 | $68 | $1.3 |
+| kimi-k3.1-pro-highspeed | $26 | $136 | $1.3 |
 | kimi-k3、k3、k3-256k | $20 | $100 | $2 |
 | kimi-k2.7-code | $6.5 | $27 | $1.3 |
 | kimi-k2.7-code-highspeed | $13 | $54 | $2.6 |
@@ -15,8 +17,16 @@
 | kimi-k2.5（历史价） | $4 | $21 | $0.7 |
 | kimi-k2、kimi-k2-thinking（历史价） | $4 | $16 | $1 |
 
-K3 缓存写入单独计价：5 分钟 $20 / 百万 tokens，1 小时 $40 / 百万 tokens。
-未细分 TTL 的缓存写入按 5 分钟档计费。Kimi Code 是订阅产品，代码别名沿用上表
+K3 系列缓存写入单独计价（每百万 tokens）：
+
+| 模型 | 写入 5 分钟 | 写入 1 小时 |
+| --- | ---: | ---: |
+| kimi-k3.1-pro | $13 | $26 |
+| kimi-k3.1-pro-highspeed | $26 | $52 |
+| kimi-k3 | $20 | $40 |
+
+未细分 TTL 的缓存写入按 5 分钟档计费。K3.1 Pro 只认精确模型 ID（以及
+`kimi-k3-1-pro` 连字符写法和带 `/` 的路径前缀），`kimi-k3.1-pro[1m]` 之类的写法不会套用该价。Kimi Code 是订阅产品，代码别名沿用上表
 API 模型的代理计费规则，并不代表官方对 Coding 订阅按 token 收费。
 
 默认展示和扣费共用 `kimiDefaultPricing`。远端价格目录及本地目录覆盖文件中的国际

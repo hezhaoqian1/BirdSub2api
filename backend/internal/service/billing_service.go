@@ -838,12 +838,13 @@ func (s *BillingService) initFallbackPricing() {
 
 	// ---- 月之暗面 Kimi（K 系列）----
 	// 本站 ¥1 购买 $1 额度：人民币价格数值直接作为美元额度单价，不做汇率换算。
-	// Source (2026-10-15): https://platform.kimi.com/docs/pricing/chat
+	// Source (2026-10-15; K3.1 Pro 2026-10-28): https://platform.kimi.com/docs/pricing/chat
 	// K2.5 / K2 / K2-thinking 保留历史人民币价；Moonshot V1 不在本价卡范围内。
 	// Kimi Code bare aliases（k3 / k3-256k）官方无按 token 价目；复用 API Platform
 	// kimi-k3 档位作代理计费 fallback（同 kimi-for-coding 对 K2.6 的处理口径）。
 	for _, model := range []string{
-		"kimi-k3", "kimi-k2.7-code", "kimi-k2.7-code-highspeed", "kimi-k2.6",
+		"kimi-k3", "kimi-k3.1-pro", "kimi-k3.1-pro-highspeed",
+		"kimi-k2.7-code", "kimi-k2.7-code-highspeed", "kimi-k2.6",
 		"kimi-for-coding", "kimi-k2.5", "kimi-k2-thinking", "kimi-k2",
 	} {
 		s.fallbackPrices[model] = kimiDefaultPricing(model)
