@@ -98,6 +98,8 @@ type SecurityAlertConfig struct {
 	ChannelRunwayHours float64 `json:"channel_runway_hours"`
 	// ChannelQuotaErrorNotify 渠道因上游额度不足被停用时告警（覆盖查不到余额的渠道）。
 	ChannelQuotaErrorNotify bool `json:"channel_quota_error_notify"`
+	// ChannelMonitorNotify 渠道监控主模型连续 3 次检测失败时告警，恢复后再通知一次。
+	ChannelMonitorNotify bool `json:"channel_monitor_notify"`
 	// UserBalanceWatches 关注的用户及其余额提醒线。
 	UserBalanceWatches []UserBalanceWatch `json:"user_balance_watches"`
 }
@@ -132,6 +134,7 @@ func DefaultSecurityAlertConfig() SecurityAlertConfig {
 		ChannelLowBalanceCNY:       100,
 		ChannelRunwayHours:         6,
 		ChannelQuotaErrorNotify:    true,
+		ChannelMonitorNotify:       true,
 		UserBalanceWatches:         []UserBalanceWatch{},
 	}
 }
@@ -643,18 +646,27 @@ func (s *SecurityAlertService) refreshBaseline(ctx context.Context) {
 	s.mu.Unlock()
 }
 
+// securityAlertExecer 告警既可以直接写入，也可以和状态更新放进同一个事务。
+type securityAlertExecer interface {
+	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
+}
+
 // emit 写入 outbox；dedupe_key 冲突时忽略。
 func (s *SecurityAlertService) emit(ctx context.Context, d securityAlertDraft) error {
 	if s.db == nil {
 		return nil
 	}
+	return emitSecurityAlert(ctx, s.db, d)
+}
+
+func emitSecurityAlert(ctx context.Context, exec securityAlertExecer, d securityAlertDraft) error {
 	if d.DedupeKey == "" {
 		d.DedupeKey = d.Kind + ":" + uuid.NewString()
 	}
 	if len(d.DedupeKey) > 200 {
 		d.DedupeKey = d.DedupeKey[:200]
 	}
-	res, err := s.db.ExecContext(ctx, `INSERT INTO security_alert_events(dedupe_key, kind, severity, title, body)
+	res, err := exec.ExecContext(ctx, `INSERT INTO security_alert_events(dedupe_key, kind, severity, title, body)
  VALUES ($1, $2, $3, $4, $5) ON CONFLICT (dedupe_key) DO NOTHING`,
 		d.DedupeKey, d.Kind, string(d.Severity), truncateRunes(d.Title, 200), d.body())
 	if err != nil {

@@ -26,6 +26,8 @@ export default {
   "runwayHint": "Estimated from the last 3 hours of spend. 0 turns it off.",
   "quotaErrorNotify": "Alert when a channel is disabled for insufficient quota",
   "quotaErrorHint": "The only signal for channels whose balance cannot be read.",
+  "channelMonitorNotify": "Alert when a channel monitor keeps failing",
+  "channelMonitorHint": "Pushed once after 3 consecutive primary-model check failures, and once more when the channel recovers.",
   "usersTitle": "Watched user balances",
   "usersHint": "Pushed once when a user's balance drops below the line; monitoring resumes after they top up above it.",
   "searchPlaceholder": "Search by user ID or email",

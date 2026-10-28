@@ -16,6 +16,7 @@ export interface SecurityAlertConfig {
   channel_low_balance_cny: number
   channel_runway_hours: number
   channel_quota_error_notify: boolean
+  channel_monitor_notify: boolean
   user_balance_watches: UserBalanceWatch[]
   [key: string]: unknown
 }

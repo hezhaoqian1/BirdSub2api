@@ -72,8 +72,11 @@ type ChannelMonitorRunner struct {
 
 type channelMonitorFailureState struct {
 	consecutive int
-	alerted     bool
-	pending     bool
+	// alerted 这轮故障的告警已落定（本实例推送，或其他实例推送过）。
+	alerted bool
+	// synced 已确认库里没有这个监控未恢复的告警，检测成功时不必再查库。
+	synced  bool
+	pending bool
 }
 
 // scheduledMonitor 单个监控的运行时上下文。
@@ -102,12 +105,13 @@ func (t *scheduledMonitor) nextDelay() time.Duration {
 
 // NewChannelMonitorRunner 构造调度器。Start 在 wire 中调用一次。
 // settingService 用于在每次 fire 前读取功能开关；传 nil 时视为总是启用（兼容测试）。
+// alerts 用于连续失败/恢复推送（企业微信运营告警）；传 nil 时不推送。
 //
 // pool 在构造时即建好：避免 Start 在 mu 内赋值、fire/Stop 在 mu 外读取的竞态隐患，
 // 且 pond.NewPool 创建本身近似零开销，提前建池不会浪费资源。
-func NewChannelMonitorRunner(svc *ChannelMonitorService, settingService *SettingService) *ChannelMonitorRunner {
+func NewChannelMonitorRunner(svc *ChannelMonitorService, settingService *SettingService, alerts *SecurityAlertService) *ChannelMonitorRunner {
 	runner := newChannelMonitorRunner(svc, settingService)
-	runner.alertNotifier = newDingTalkChannelMonitorNotifier(settingService)
+	runner.alertNotifier = newChannelMonitorAlertNotifier(alerts)
 	return runner
 }
 
@@ -234,6 +238,13 @@ func (r *ChannelMonitorRunner) Unschedule(id int64) {
 	r.failureMu.Lock()
 	delete(r.failureStates, id)
 	r.failureMu.Unlock()
+	if ok && r.alertNotifier != nil {
+		if _, submitted := r.alertPool.TrySubmit(func() {
+			r.alertNotifier.Forget(context.Background(), id)
+		}); !submitted {
+			slog.Warn("channel_monitor: alert queue full, alert state not cleared", "monitor_id", id)
+		}
+	}
 }
 
 // Stop 优雅停止：取消所有任务、关闭池。
@@ -368,13 +379,15 @@ func (r *ChannelMonitorRunner) handleCheckResults(_ context.Context, id int64, n
 	}
 	primary := results[0]
 	if primary.Status != MonitorStatusFailed && primary.Status != MonitorStatusError {
-		r.failureMu.Lock()
-		delete(r.failureStates, id)
-		r.failureMu.Unlock()
+		r.handleCheckSuccess(id, name, primary)
 		return
 	}
 
 	r.failureMu.Lock()
+	if r.failureStates == nil {
+		r.failureMu.Unlock()
+		return
+	}
 	state := r.failureStates[id]
 	if state.consecutive < channelMonitorAlertThreshold {
 		state.consecutive++
@@ -402,30 +415,94 @@ func (r *ChannelMonitorRunner) handleCheckResults(_ context.Context, id int64, n
 	if _, ok := r.alertPool.TrySubmit(func() {
 		r.deliverFailureAlert(context.Background(), alert)
 	}); !ok {
-		r.failureMu.Lock()
-		current, exists := r.failureStates[id]
-		if exists {
-			current.pending = false
-			r.failureStates[id] = current
-		}
+		r.clearPendingAlert(id)
+		slog.Warn("channel_monitor: alert queue full", "monitor_id", id, "name", name)
+	}
+}
+
+// handleCheckSuccess 清零连续失败次数。本实例告警过，或启动后还没核对过库里的告警记录时，
+// 交给 notifier 收尾：有未恢复的告警就推送恢复通知。
+func (r *ChannelMonitorRunner) handleCheckSuccess(id int64, name string, primary *CheckResult) {
+	r.failureMu.Lock()
+	if r.failureStates == nil {
 		r.failureMu.Unlock()
-		slog.Warn("channel_monitor: dingtalk alert queue full", "monitor_id", id, "name", name)
+		return
+	}
+	state := r.failureStates[id]
+	state.consecutive = 0
+	shouldNotify := r.alertNotifier != nil && !state.pending && (state.alerted || !state.synced)
+	switch {
+	case r.alertNotifier == nil:
+		delete(r.failureStates, id)
+	case shouldNotify:
+		state.pending = true
+		r.failureStates[id] = state
+	default:
+		r.failureStates[id] = state
+	}
+	r.failureMu.Unlock()
+	if !shouldNotify {
+		return
+	}
+
+	alert := channelMonitorRecoveryAlert{
+		MonitorID:   id,
+		MonitorName: name,
+		Model:       primary.Model,
+		Status:      primary.Status,
+		LatencyMs:   primary.LatencyMs,
+		CheckedAt:   primary.CheckedAt,
+	}
+	if _, ok := r.alertPool.TrySubmit(func() {
+		r.deliverRecoveryAlert(context.Background(), alert)
+	}); !ok {
+		r.clearPendingAlert(id)
+		slog.Warn("channel_monitor: alert queue full", "monitor_id", id, "name", name)
 	}
 }
 
 func (r *ChannelMonitorRunner) deliverFailureAlert(ctx context.Context, alert channelMonitorFailureAlert) {
-	sent, err := r.alertNotifier.NotifyFailure(ctx, alert)
+	handled, err := r.alertNotifier.NotifyFailure(ctx, alert)
 	if err != nil {
-		slog.Warn("channel_monitor: dingtalk alert failed", "monitor_id", alert.MonitorID, "name", alert.MonitorName, "error", err)
+		slog.Warn("channel_monitor: failure alert failed", "monitor_id", alert.MonitorID, "name", alert.MonitorName, "error", err)
 	}
 	r.failureMu.Lock()
 	current, exists := r.failureStates[alert.MonitorID]
 	if exists {
 		current.pending = false
-		if sent {
+		if handled {
 			current.alerted = true
+			current.synced = false
 		}
 		r.failureStates[alert.MonitorID] = current
+	}
+	r.failureMu.Unlock()
+}
+
+func (r *ChannelMonitorRunner) deliverRecoveryAlert(ctx context.Context, alert channelMonitorRecoveryAlert) {
+	handled, err := r.alertNotifier.NotifyRecovery(ctx, alert)
+	if err != nil {
+		slog.Warn("channel_monitor: recovery alert failed", "monitor_id", alert.MonitorID, "name", alert.MonitorName, "error", err)
+	}
+	r.failureMu.Lock()
+	current, exists := r.failureStates[alert.MonitorID]
+	if exists {
+		current.pending = false
+		if handled {
+			current.alerted = false
+			current.synced = true
+		}
+		r.failureStates[alert.MonitorID] = current
+	}
+	r.failureMu.Unlock()
+}
+
+func (r *ChannelMonitorRunner) clearPendingAlert(id int64) {
+	r.failureMu.Lock()
+	current, exists := r.failureStates[id]
+	if exists {
+		current.pending = false
+		r.failureStates[id] = current
 	}
 	r.failureMu.Unlock()
 }

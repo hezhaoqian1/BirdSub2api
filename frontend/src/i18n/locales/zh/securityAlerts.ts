@@ -26,6 +26,8 @@ export default {
   "runwayHint": "按近 3 小时扣费速度估算，预计在这个时间内用完就提醒，0 关闭。",
   "quotaErrorNotify": "渠道因额度不足被停用时提醒",
   "quotaErrorHint": "查不到余额的渠道只能靠上游报错发现。",
+  "channelMonitorNotify": "渠道监控连续失败时提醒",
+  "channelMonitorHint": "渠道监控主模型连续 3 次检测失败时推送一次，恢复正常后再推送一次。",
   "usersTitle": "关注用户余额",
   "usersHint": "用户余额低于提醒线时推送一次，充值回到提醒线以上后重新开始监控。",
   "searchPlaceholder": "输入用户 ID 或邮箱搜索",
