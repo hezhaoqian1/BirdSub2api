@@ -12,10 +12,14 @@ import (
 )
 
 type stubChannelMonitorAlertNotifier struct {
-	mu     sync.Mutex
-	alerts []channelMonitorFailureAlert
-	sent   bool
-	err    error
+	mu         sync.Mutex
+	alerts     []channelMonitorFailureAlert
+	recoveries []channelMonitorRecoveryAlert
+	forgotten  []int64
+	sent       bool
+	err        error
+	// recoveryErr 非 nil 时恢复通知返回该错误；否则恢复总是 handled。
+	recoveryErr error
 }
 
 type blockingChannelMonitorAlertNotifier struct {
@@ -31,11 +35,33 @@ func (n *blockingChannelMonitorAlertNotifier) NotifyFailure(_ context.Context, _
 	return true, nil
 }
 
+func (n *blockingChannelMonitorAlertNotifier) NotifyRecovery(context.Context, channelMonitorRecoveryAlert) (bool, error) {
+	return true, nil
+}
+
+func (n *blockingChannelMonitorAlertNotifier) Forget(context.Context, int64) {}
+
 func (n *stubChannelMonitorAlertNotifier) NotifyFailure(_ context.Context, alert channelMonitorFailureAlert) (bool, error) {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 	n.alerts = append(n.alerts, alert)
 	return n.sent, n.err
+}
+
+func (n *stubChannelMonitorAlertNotifier) NotifyRecovery(_ context.Context, alert channelMonitorRecoveryAlert) (bool, error) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	n.recoveries = append(n.recoveries, alert)
+	if n.recoveryErr != nil {
+		return false, n.recoveryErr
+	}
+	return true, nil
+}
+
+func (n *stubChannelMonitorAlertNotifier) Forget(_ context.Context, monitorID int64) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	n.forgotten = append(n.forgotten, monitorID)
 }
 
 func (n *stubChannelMonitorAlertNotifier) callCount() int {
@@ -44,10 +70,26 @@ func (n *stubChannelMonitorAlertNotifier) callCount() int {
 	return len(n.alerts)
 }
 
+func (n *stubChannelMonitorAlertNotifier) recoveryCount() int {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	return len(n.recoveries)
+}
+
 func waitForNotifierCalls(t *testing.T, notifier *stubChannelMonitorAlertNotifier, want int) {
 	t.Helper()
 	waitFor(t, time.Second, "notifier call count", func() bool {
 		return notifier.callCount() >= want
+	})
+}
+
+// waitForAlertIdle 等异步投递结束（pending 清零）。
+func waitForAlertIdle(t *testing.T, r *ChannelMonitorRunner, id int64) {
+	t.Helper()
+	waitFor(t, time.Second, "alert delivery finished", func() bool {
+		r.failureMu.Lock()
+		defer r.failureMu.Unlock()
+		return !r.failureStates[id].pending
 	})
 }
 
@@ -402,7 +444,12 @@ func TestHandleCheckResults_AlertsOnceAfterThreeFailuresAndResetsOnRecovery(t *t
 		t.Fatalf("expected one alert for the failure episode, got %d", got)
 	}
 
+	waitForAlertIdle(t, r, 7)
 	r.handleCheckResults(context.Background(), 7, "channel-a", []*CheckResult{{Model: "model-a", Status: MonitorStatusDegraded}})
+	waitForAlertIdle(t, r, 7)
+	if got := notifier.recoveryCount(); got != 1 {
+		t.Fatalf("expected one recovery notice after the alerted episode, got %d", got)
+	}
 	for i := 0; i < channelMonitorAlertThreshold; i++ {
 		r.handleCheckResults(context.Background(), 7, "channel-a", failed)
 	}
@@ -457,12 +504,13 @@ func TestHandleCheckResults_RetriesWhenNotifierSkipsAndUsesOnlyPrimaryResult(t *
 		{Status: MonitorStatusOperational},
 		{Status: MonitorStatusFailed},
 	})
+	waitForAlertIdle(t, r, 10)
 	r.handleCheckResults(context.Background(), 10, "channel-secondary", []*CheckResult{nil})
 	r.failureMu.Lock()
-	_, exists := r.failureStates[10]
+	state := r.failureStates[10]
 	r.failureMu.Unlock()
-	if exists {
-		t.Fatal("secondary or nil results unexpectedly changed the failure state")
+	if state.consecutive != 0 || state.alerted {
+		t.Fatalf("secondary or nil results unexpectedly changed the failure state: %+v", state)
 	}
 }
 
@@ -477,6 +525,87 @@ func TestHandleCheckResults_SuppressesWhenNotifierIsNil(t *testing.T) {
 	r.failureMu.Unlock()
 	if state.consecutive != channelMonitorAlertThreshold || state.alerted {
 		t.Fatalf("unexpected state with nil notifier: %+v", state)
+	}
+}
+
+func TestHandleCheckResults_SyncsAlertStateOnceAfterStart(t *testing.T) {
+	notifier := &stubChannelMonitorAlertNotifier{sent: true}
+	r := newRunnerForTest(&stubMonitorSvc{})
+	r.alertNotifier = notifier
+	latency := 820
+	ok := []*CheckResult{{Model: "model-a", Status: MonitorStatusOperational, LatencyMs: &latency}}
+
+	// 启动后第一次成功要核对一次库里的告警记录（可能是重启前没恢复的故障）。
+	r.handleCheckResults(context.Background(), 13, "channel-d", ok)
+	waitForAlertIdle(t, r, 13)
+	r.handleCheckResults(context.Background(), 13, "channel-d", ok)
+	waitForAlertIdle(t, r, 13)
+	if got := notifier.recoveryCount(); got != 1 {
+		t.Fatalf("expected a single sync after start, got %d", got)
+	}
+	notifier.mu.Lock()
+	first := notifier.recoveries[0]
+	notifier.mu.Unlock()
+	if first.MonitorID != 13 || first.MonitorName != "channel-d" || first.LatencyMs == nil || *first.LatencyMs != latency {
+		t.Fatalf("unexpected recovery payload: %+v", first)
+	}
+
+	// 失败次数没到阈值就恢复：不需要再查库。
+	r.handleCheckResults(context.Background(), 13, "channel-d", []*CheckResult{{Status: MonitorStatusFailed}})
+	r.handleCheckResults(context.Background(), 13, "channel-d", ok)
+	waitForAlertIdle(t, r, 13)
+	if got := notifier.recoveryCount(); got != 1 {
+		t.Fatalf("expected no recovery for a short blip, got %d", got)
+	}
+}
+
+func TestHandleCheckResults_RetriesRecoveryUntilHandled(t *testing.T) {
+	notifier := &stubChannelMonitorAlertNotifier{sent: true, recoveryErr: errors.New("db down")}
+	r := newRunnerForTest(&stubMonitorSvc{})
+	r.alertNotifier = notifier
+	failed := []*CheckResult{{Status: MonitorStatusError}}
+	ok := []*CheckResult{{Status: MonitorStatusOperational}}
+
+	for i := 0; i < channelMonitorAlertThreshold; i++ {
+		r.handleCheckResults(context.Background(), 14, "channel-e", failed)
+	}
+	waitForNotifierCalls(t, notifier, 1)
+	waitForAlertIdle(t, r, 14)
+
+	r.handleCheckResults(context.Background(), 14, "channel-e", ok)
+	waitForAlertIdle(t, r, 14)
+	notifier.mu.Lock()
+	notifier.recoveryErr = nil
+	notifier.mu.Unlock()
+	r.handleCheckResults(context.Background(), 14, "channel-e", ok)
+	waitForAlertIdle(t, r, 14)
+	r.handleCheckResults(context.Background(), 14, "channel-e", ok)
+	waitForAlertIdle(t, r, 14)
+	if got := notifier.recoveryCount(); got != 2 {
+		t.Fatalf("expected one failed recovery and one retry, got %d", got)
+	}
+}
+
+func TestUnscheduleForgetsAlertState(t *testing.T) {
+	notifier := &stubChannelMonitorAlertNotifier{sent: true}
+	r := newRunnerForTest(&stubMonitorSvc{})
+	r.alertNotifier = notifier
+	r.mu.Lock()
+	r.tasks[15] = &scheduledMonitor{id: 15, cancel: func() {}}
+	r.mu.Unlock()
+
+	r.Unschedule(15)
+	r.Unschedule(15) // 已经不在任务表里：不再清理
+	waitFor(t, time.Second, "forget called", func() bool {
+		notifier.mu.Lock()
+		defer notifier.mu.Unlock()
+		return len(notifier.forgotten) == 1
+	})
+	r.Stop()
+	notifier.mu.Lock()
+	defer notifier.mu.Unlock()
+	if len(notifier.forgotten) != 1 || notifier.forgotten[0] != 15 {
+		t.Fatalf("unexpected forget calls: %v", notifier.forgotten)
 	}
 }
 

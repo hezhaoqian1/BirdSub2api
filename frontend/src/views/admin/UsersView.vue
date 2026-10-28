@@ -454,6 +454,17 @@
               >
                 {{ t('admin.users.deposit') }}
               </button>
+              <button
+                @click.stop="handleBalanceWatch(row)"
+                class="inline-flex items-center gap-1 rounded px-2 py-0.5 text-xs font-medium transition-colors"
+                :class="balanceWatchButtonClass(row)"
+                :title="balanceWatchTitle(row)"
+                :data-testid="`balance-watch-${row.id}`"
+              >
+                <Icon name="bell" size="xs" class="h-3.5 w-3.5" :stroke-width="2" />
+                <span v-if="balanceWatches[row.id]">${{ balanceWatches[row.id].threshold.toFixed(2) }}</span>
+                <span v-else>{{ t('securityAlerts.userWatch.button') }}</span>
+              </button>
             </div>
           </template>
 
@@ -726,6 +737,15 @@
                 {{ t('admin.users.withdraw') }}
               </button>
 
+              <!-- Balance Watch -->
+              <button
+                @click="handleBalanceWatch(user); closeActionMenu()"
+                class="flex w-full items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-dark-700"
+              >
+                <Icon name="bell" size="sm" class="text-sky-500" :stroke-width="2" />
+                {{ t('securityAlerts.userWatch.menuItem') }}
+              </button>
+
               <!-- Platform Quotas -->
               <button
                 @click="handlePlatformQuota(user); closeActionMenu()"
@@ -788,6 +808,16 @@
     <UserApiKeysModal :show="showApiKeysModal" :user="viewingUser" @close="closeApiKeysModal" />
     <UserAllowedGroupsModal :show="showAllowedGroupsModal" :user="allowedGroupsUser" @close="closeAllowedGroupsModal" @success="loadUsers" />
     <UserBalanceModal :show="showBalanceModal" :user="balanceUser" :operation="balanceOperation" @close="closeBalanceModal" @success="loadUsers" />
+    <UserBalanceWatchModal
+      :show="showBalanceWatchModal"
+      :user="balanceWatchUser"
+      :watch="balanceWatchUser ? balanceWatches[balanceWatchUser.id] ?? null : null"
+      :alerts-enabled="balanceWatchAlertsEnabled"
+      :webhook-configured="balanceWatchWebhookConfigured"
+      @close="closeBalanceWatchModal"
+      @saved="handleBalanceWatchSaved"
+      @removed="handleBalanceWatchRemoved"
+    />
     <ActiveRequestsDialog :show="showActiveRequests" mode="user" :target="activeRequestsTarget" @close="closeActiveRequests" />
     <UserBalanceHistoryModal :show="showBalanceHistoryModal" :user="balanceHistoryUser" @close="closeBalanceHistoryModal" @deposit="handleDepositFromHistory" @withdraw="handleWithdrawFromHistory" />
     <GroupReplaceModal :show="showGroupReplaceModal" :user="groupReplaceUser" :old-group="groupReplaceOldGroup" :all-groups="allGroups" @close="closeGroupReplaceModal" @success="loadUsers" />
@@ -833,6 +863,9 @@ import UserApiKeysModal from '@/components/admin/user/UserApiKeysModal.vue'
 import UserAllowedGroupsModal from '@/components/admin/user/UserAllowedGroupsModal.vue'
 import UserBalanceModal from '@/components/admin/user/UserBalanceModal.vue'
 import UserBalanceHistoryModal from '@/components/admin/user/UserBalanceHistoryModal.vue'
+import UserBalanceWatchModal from '@/components/admin/user/UserBalanceWatchModal.vue'
+import { listUserWatches } from '@/api/admin/securityAlerts'
+import type { UserBalanceWatch } from '@/api/admin/securityAlerts'
 import ActiveRequestsDialog from '@/components/admin/ActiveRequestsDialog.vue'
 import GroupReplaceModal from '@/components/admin/user/GroupReplaceModal.vue'
 
@@ -1560,6 +1593,13 @@ const showBalanceModal = ref(false)
 const balanceUser = ref<AdminUser | null>(null)
 const balanceOperation = ref<'add' | 'subtract'>('add')
 
+// Balance watch (企业微信余额提醒) state
+const showBalanceWatchModal = ref(false)
+const balanceWatchUser = ref<AdminUser | null>(null)
+const balanceWatches = ref<Record<number, UserBalanceWatch>>({})
+const balanceWatchAlertsEnabled = ref(true)
+const balanceWatchWebhookConfigured = ref(true)
+
 // Balance History modal state
 const showBalanceHistoryModal = ref(false)
 const balanceHistoryUser = ref<AdminUser | null>(null)
@@ -1866,6 +1906,58 @@ const closeBalanceModal = () => {
   balanceUser.value = null
 }
 
+// 关注名单只用于标记按钮，加载失败不影响用户列表。
+const loadBalanceWatches = async () => {
+  try {
+    const list = await listUserWatches()
+    balanceWatches.value = Object.fromEntries((list.watches ?? []).map((w) => [w.user_id, w]))
+    balanceWatchAlertsEnabled.value = list.enabled
+    balanceWatchWebhookConfigured.value = list.wecom_webhook_configured
+  } catch (error) {
+    console.warn('Failed to load balance watches:', error)
+  }
+}
+
+const balanceWatchButtonClass = (user: AdminUser) => {
+  const w = balanceWatches.value[user.id]
+  if (!w) {
+    return 'text-gray-400 hover:bg-gray-100 hover:text-sky-600 dark:text-gray-500 dark:hover:bg-dark-700 dark:hover:text-sky-400'
+  }
+  if (user.balance < w.threshold) {
+    return 'bg-amber-50 text-amber-700 hover:bg-amber-100 dark:bg-amber-900/20 dark:text-amber-300 dark:hover:bg-amber-900/40'
+  }
+  return 'bg-sky-50 text-sky-700 hover:bg-sky-100 dark:bg-sky-900/20 dark:text-sky-300 dark:hover:bg-sky-900/40'
+}
+
+const balanceWatchTitle = (user: AdminUser) => {
+  const w = balanceWatches.value[user.id]
+  if (!w) return t('securityAlerts.userWatch.tooltip')
+  const amount = `$${w.threshold.toFixed(2)}`
+  return user.balance < w.threshold
+    ? t('securityAlerts.userWatch.belowTooltip', { amount })
+    : t('securityAlerts.userWatch.activeTooltip', { amount })
+}
+
+const handleBalanceWatch = (user: AdminUser) => {
+  balanceWatchUser.value = user
+  showBalanceWatchModal.value = true
+}
+
+const closeBalanceWatchModal = () => {
+  showBalanceWatchModal.value = false
+  balanceWatchUser.value = null
+}
+
+const handleBalanceWatchSaved = (watch: UserBalanceWatch) => {
+  balanceWatches.value = { ...balanceWatches.value, [watch.user_id]: watch }
+}
+
+const handleBalanceWatchRemoved = (userId: number) => {
+  const next = { ...balanceWatches.value }
+  delete next[userId]
+  balanceWatches.value = next
+}
+
 const handleBalanceHistory = (user: AdminUser) => {
   balanceHistoryUser.value = user
   showBalanceHistoryModal.value = true
@@ -1910,6 +2002,7 @@ onMounted(async () => {
   loadSavedFilters()
   loadSavedColumns()
   loadUsers()
+  loadBalanceWatches()
   if (hasVisibleGroupsColumn.value || visibleFilters.has('group')) {
     loadAllGroups()
   }

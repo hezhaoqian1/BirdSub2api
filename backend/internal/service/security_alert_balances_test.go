@@ -45,6 +45,7 @@ func TestSecurityAlertConfigLegacyJSONKeepsNewDefaults(t *testing.T) {
 	require.Equal(t, 100.0, cfg.ChannelSpendFloor)
 	require.Equal(t, 10, cfg.ChannelBalanceCheckMinutes)
 	require.True(t, cfg.ChannelQuotaErrorNotify)
+	require.True(t, cfg.ChannelMonitorNotify)
 	require.NotNil(t, cfg.UserBalanceWatches)
 	require.NoError(t, cfg.Validate())
 }

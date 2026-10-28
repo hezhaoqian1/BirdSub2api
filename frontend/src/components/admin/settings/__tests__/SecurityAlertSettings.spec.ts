@@ -28,7 +28,7 @@ function configView(watches = [{ user_id: 12, threshold: 50, note: '大客户' }
       enabled: true, trusted_cidrs: ['39.144.0.0/16'], daily_digest_hour: 9,
       channel_spend_floor: 100, channel_spend_multiplier: 3, channel_balance_check_minutes: 10,
       channel_low_balance_usd: 20, channel_low_balance_cny: 100, channel_runway_hours: 6,
-      channel_quota_error_notify: true, user_balance_watches: watches,
+      channel_quota_error_notify: true, channel_monitor_notify: true, user_balance_watches: watches,
     },
     wecom_webhook_configured: true,
     wecom_webhook_masked: 'https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=5e74****0930',
@@ -74,11 +74,14 @@ describe('企业微信告警设置', () => {
     expect((wrapper.get('[data-test="threshold-34"]').element as HTMLInputElement).value).toBe('200')
 
     await wrapper.get('[data-test="channel_low_balance_usd"]').setValue('30')
+    expect((wrapper.get('[data-test="channel-monitor-notify"]').element as HTMLInputElement).checked).toBe(true)
+    await wrapper.get('[data-test="channel-monitor-notify"]').setValue(false)
     await wrapper.get('[data-test="save"]').trigger('click')
     await flushPromises()
     expect(mocks.stepUp).toHaveBeenCalledOnce()
     const patch = mocks.updateConfig.mock.calls[0]![0]
     expect(patch.channel_low_balance_usd).toBe(30)
+    expect(patch.channel_monitor_notify).toBe(false)
     expect(patch.user_balance_watches).toEqual([
       { user_id: 12, threshold: 50, note: '大客户' },
       { user_id: 34, threshold: 200, note: '' },
