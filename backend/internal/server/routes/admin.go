@@ -160,6 +160,9 @@ func registerSecurityAlertRoutes(admin *gin.RouterGroup, h *handler.Handlers, st
 		alerts.PUT("/config", gin.HandlerFunc(stepUpAuth), h.Admin.SecurityAlert.UpdateConfig)
 		alerts.POST("/test", h.Admin.SecurityAlert.SendTest)
 		alerts.GET("/events", h.Admin.SecurityAlert.ListEvents)
+		alerts.GET("/user-watches", h.Admin.SecurityAlert.ListUserWatches)
+		alerts.PUT("/user-watches/:user_id", h.Admin.SecurityAlert.SetUserWatch)
+		alerts.DELETE("/user-watches/:user_id", h.Admin.SecurityAlert.RemoveUserWatch)
 	}
 }
 

@@ -35,3 +35,13 @@
 | `channel_runway_hours` | 预计用完提前提醒的小时数，0 关闭 |
 | `channel_quota_error_notify` | 额度不足停用时是否提醒 |
 | `user_balance_watches` | `[{"user_id": 12, "threshold": 50, "note": "备注"}]`，最多 200 人，整表替换 |
+
+## 单个用户的余额监控
+
+用户管理页每个用户的余额旁边有「监控」按钮（操作菜单里也有「余额监控」），可以直接设置这个用户的提醒线和备注，或取消监控。按钮显示提醒线金额表示已在监控，橙色表示当前余额已低于提醒线。它只改名单里这一个用户，不会覆盖其他配置，也不需要二次验证。
+
+- `GET /api/v1/admin/security-alerts/user-watches`：名单，以及告警开关和机器人是否已配置
+- `PUT /api/v1/admin/security-alerts/user-watches/:user_id`，body `{"threshold": 100, "note": "备注"}`：新增或修改（提醒线按分取整，需大于 0）
+- `DELETE /api/v1/admin/security-alerts/user-watches/:user_id`：取消监控
+
+新增、修改、取消都会往群里发一条「运营告警」通知。修改提醒线后该用户的告警状态会清零，如果余额已低于新提醒线，约 1 分钟内推送一次；只改备注不会重新推送。

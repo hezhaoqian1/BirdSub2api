@@ -364,6 +364,9 @@ type SecurityAlertService struct {
 	baselineLoadedAt time.Time
 	localSeen        map[string]time.Time
 
+	// watchMu 串行化单个用户关注的读改写，避免并发修改互相覆盖。
+	watchMu sync.Mutex
+
 	// 以下字段只在定时 goroutine 内读写。
 	lastLoginCheck         time.Time
 	lastUsageCheck         time.Time

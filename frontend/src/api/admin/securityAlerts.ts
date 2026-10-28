@@ -49,3 +49,25 @@ export async function updateConfig(config: Partial<SecurityAlertConfig>) {
 export async function sendTest() {
   return (await apiClient.post<{ sent: boolean }>(`${base}/test`)).data
 }
+
+export interface UserBalanceWatchList {
+  /** 告警推送总开关；关闭时关注用户也不会推送。 */
+  enabled: boolean
+  wecom_webhook_configured: boolean
+  watches: UserBalanceWatch[]
+}
+
+/** 用户管理页：关注余额的用户名单。 */
+export async function listUserWatches() {
+  return (await apiClient.get<UserBalanceWatchList>(`${base}/user-watches`)).data
+}
+
+/** 新增或修改单个用户的余额提醒线，只改这一个用户。 */
+export async function setUserWatch(userId: number, payload: { threshold: number; note?: string }) {
+  return (await apiClient.put<UserBalanceWatch>(`${base}/user-watches/${userId}`, payload)).data
+}
+
+/** 取消关注单个用户的余额。 */
+export async function removeUserWatch(userId: number) {
+  return (await apiClient.delete<{ user_id: number }>(`${base}/user-watches/${userId}`)).data
+}

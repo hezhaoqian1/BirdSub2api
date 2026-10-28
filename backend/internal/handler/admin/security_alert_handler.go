@@ -90,3 +90,60 @@ func (h *SecurityAlertHandler) ListEvents(c *gin.Context) {
 	}
 	response.Success(c, events)
 }
+
+// ListUserWatches 关注余额的用户名单（用户管理页标记用）。
+// GET /api/v1/admin/security-alerts/user-watches
+func (h *SecurityAlertHandler) ListUserWatches(c *gin.Context) {
+	list, err := h.service.ListUserBalanceWatches(c.Request.Context())
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, list)
+}
+
+type setUserBalanceWatchRequest struct {
+	Threshold float64 `json:"threshold"`
+	Note      string  `json:"note"`
+}
+
+// SetUserWatch 新增或修改单个用户的余额提醒线。
+// PUT /api/v1/admin/security-alerts/user-watches/:user_id
+func (h *SecurityAlertHandler) SetUserWatch(c *gin.Context) {
+	userID, err := strconv.ParseInt(c.Param("user_id"), 10, 64)
+	if err != nil || userID <= 0 {
+		response.BadRequest(c, "Invalid user_id")
+		return
+	}
+	var req setUserBalanceWatchRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "Invalid request: "+err.Error())
+		return
+	}
+	watch, err := h.service.SetUserBalanceWatch(c.Request.Context(), service.SetUserBalanceWatchInput{
+		UserID:    userID,
+		Threshold: req.Threshold,
+		Note:      req.Note,
+		Operator:  c.GetString(middleware.ContextKeyAuthEmail),
+	})
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, watch)
+}
+
+// RemoveUserWatch 取消关注单个用户的余额。
+// DELETE /api/v1/admin/security-alerts/user-watches/:user_id
+func (h *SecurityAlertHandler) RemoveUserWatch(c *gin.Context) {
+	userID, err := strconv.ParseInt(c.Param("user_id"), 10, 64)
+	if err != nil || userID <= 0 {
+		response.BadRequest(c, "Invalid user_id")
+		return
+	}
+	if err := h.service.RemoveUserBalanceWatch(c.Request.Context(), userID, c.GetString(middleware.ContextKeyAuthEmail)); err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, gin.H{"user_id": userID})
+}
