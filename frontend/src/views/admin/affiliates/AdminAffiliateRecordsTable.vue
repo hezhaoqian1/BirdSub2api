@@ -115,6 +115,39 @@
           <template #cell-history_quota_after="{ row }">
             <NullableAmountText :value="row.history_quota_after" />
           </template>
+          <template #cell-agent="{ row }">
+            <span v-if="row.agent_user_id == null" class="text-sm text-gray-400 dark:text-dark-500">-</span>
+            <UserCell
+              v-else
+              :id="row.agent_user_id"
+              :email="row.agent_email"
+              :username="row.agent_username"
+              :clickable="true"
+              @open="openUserOverview"
+            />
+          </template>
+          <template #cell-grant_invitee="{ row }">
+            <span v-if="row.invitee_user_id == null" class="text-sm text-gray-400 dark:text-dark-500">-</span>
+            <UserCell
+              v-else
+              :id="row.invitee_user_id"
+              :email="row.invitee_email"
+              :username="row.invitee_username"
+              :clickable="false"
+            />
+          </template>
+          <template #cell-notes="{ row }">
+            <span class="block max-w-64 whitespace-pre-wrap break-words text-sm text-gray-700 dark:text-gray-300">{{ row.notes || '-' }}</span>
+          </template>
+          <template #cell-invitee_balance_after="{ row }">
+            <NullableAmountText :value="row.invitee_balance_after" />
+          </template>
+          <template #cell-agent_credit_after="{ row }">
+            <span v-if="row.agent_credit_used_after == null || row.agent_credit_limit_after == null" class="text-sm text-gray-400 dark:text-dark-500">-</span>
+            <span v-else class="whitespace-nowrap text-sm text-gray-900 dark:text-white">
+              ${{ formatAmount(row.agent_credit_used_after) }} / ${{ formatAmount(row.agent_credit_limit_after) }}
+            </span>
+          </template>
           <template #cell-created_at="{ row }">
             <span class="text-sm text-gray-700 dark:text-gray-300">{{ formatDateTime(row.created_at) }}</span>
           </template>
@@ -181,13 +214,13 @@ import OrderStatusBadge from '@/components/payment/OrderStatusBadge.vue'
 import AffiliateOfflineWithdrawDialog from './AffiliateOfflineWithdrawDialog.vue'
 import type { Column } from '@/components/common/types'
 import { useAppStore } from '@/stores/app'
-import { affiliatesAPI, type AffiliateInviteRecord, type AffiliateRebateRecord, type AffiliateTransferRecord, type AffiliateUserOverview, type ListAffiliateRecordsParams } from '@/api/admin/affiliates'
+import { affiliatesAPI, type AffiliateAgentGrantRecord, type AffiliateInviteRecord, type AffiliateRebateRecord, type AffiliateTransferRecord, type AffiliateUserOverview, type ListAffiliateRecordsParams } from '@/api/admin/affiliates'
 import type { PaginatedResponse } from '@/types'
 import { extractI18nErrorMessage } from '@/utils/apiError'
 import { formatDateTime as formatDisplayDateTime } from '@/utils/format'
 
-type RecordType = 'invites' | 'rebates' | 'transfers'
-type AffiliateRecord = AffiliateInviteRecord | AffiliateRebateRecord | AffiliateTransferRecord
+type RecordType = 'invites' | 'rebates' | 'transfers' | 'agent-grants'
+type AffiliateRecord = AffiliateInviteRecord | AffiliateRebateRecord | AffiliateTransferRecord | AffiliateAgentGrantRecord
 
 const props = defineProps<{
   type: RecordType
@@ -226,6 +259,17 @@ const columns = computed<Column[]>(() => {
       { key: 'payment_type', label: t('admin.affiliates.records.paymentType'), sortable: true },
       { key: 'order_status', label: t('admin.affiliates.records.orderStatus'), sortable: true },
       { key: 'created_at', label: t('admin.affiliates.records.rebatedAt'), sortable: true },
+    ]
+  }
+  if (props.type === 'agent-grants') {
+    return [
+      { key: 'agent', label: t('admin.affiliates.records.agent'), sortable: true },
+      { key: 'grant_invitee', label: t('admin.affiliates.records.invitee'), sortable: true },
+      { key: 'amount', label: t('admin.affiliates.records.grantAmount'), sortable: true },
+      { key: 'notes', label: t('admin.affiliates.records.notes') },
+      { key: 'invitee_balance_after', label: t('admin.affiliates.records.inviteeBalanceAfter') },
+      { key: 'agent_credit_after', label: t('admin.affiliates.records.agentCreditAfter') },
+      { key: 'created_at', label: t('admin.affiliates.records.grantedAt'), sortable: true },
     ]
   }
   return [
@@ -288,6 +332,9 @@ async function fetchRecords(params: ListAffiliateRecordsParams): Promise<Paginat
   }
   if (props.type === 'rebates') {
     return affiliatesAPI.listRebateRecords(params)
+  }
+  if (props.type === 'agent-grants') {
+    return affiliatesAPI.listAgentGrantRecords(params)
   }
   return affiliatesAPI.listTransferRecords(params)
 }

@@ -173,6 +173,8 @@ const (
 	RedeemTypeSubscription     = domain.RedeemTypeSubscription
 	RedeemTypeInvitation       = domain.RedeemTypeInvitation
 	RedeemTypeAffiliateBalance = "affiliate_balance"
+	// RedeemTypeAgentBalance 代理给自己邀请的用户发放的测试金（余额调整记录）。
+	RedeemTypeAgentBalance = "agent_balance"
 )
 
 // PromoCode status constants

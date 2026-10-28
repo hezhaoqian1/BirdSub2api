@@ -7745,17 +7745,18 @@
                         <th class="px-3 py-2 text-left text-xs font-medium uppercase text-gray-500">{{ t('admin.settings.features.affiliate.customUsers.col.username') }}</th>
                         <th class="px-3 py-2 text-left text-xs font-medium uppercase text-gray-500">{{ t('admin.settings.features.affiliate.customUsers.col.code') }}</th>
                         <th class="px-3 py-2 text-left text-xs font-medium uppercase text-gray-500">{{ t('admin.settings.features.affiliate.customUsers.col.rate') }}</th>
+                        <th class="px-3 py-2 text-left text-xs font-medium uppercase text-gray-500">{{ t('admin.settings.features.affiliate.customUsers.col.agent') }}</th>
                         <th class="px-3 py-2 text-left text-xs font-medium uppercase text-gray-500">{{ t('admin.settings.features.affiliate.customUsers.col.actions') }}</th>
                       </tr>
                     </thead>
                     <tbody class="divide-y divide-gray-200 bg-white dark:divide-dark-700 dark:bg-dark-900">
                       <tr v-if="affiliateState.loading">
-                        <td colspan="6" class="px-3 py-6 text-center text-sm text-gray-500">
+                        <td colspan="7" class="px-3 py-6 text-center text-sm text-gray-500">
                           {{ t('common.loading') }}
                         </td>
                       </tr>
                       <tr v-else-if="affiliateState.entries.length === 0">
-                        <td colspan="6" class="px-3 py-6 text-center text-sm text-gray-500">
+                        <td colspan="7" class="px-3 py-6 text-center text-sm text-gray-500">
                           {{ t('admin.settings.features.affiliate.customUsers.empty') }}
                         </td>
                       </tr>
@@ -7781,8 +7782,20 @@
                           <span v-else class="text-gray-400">{{ t('admin.settings.features.affiliate.customUsers.useGlobal') }}</span>
                         </td>
                         <td class="px-3 py-2 text-sm">
+                          <span v-if="entry.agent_enabled" class="whitespace-nowrap">
+                            <span class="mr-1 inline-block rounded bg-emerald-100 px-1.5 py-0.5 text-[10px] font-medium text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300">{{ t('admin.settings.features.affiliate.customUsers.agentBadge') }}</span>
+                            ${{ formatAffiliateAmount(entry.agent_credit_used) }} / ${{ formatAffiliateAmount(entry.agent_credit_limit) }}
+                          </span>
+                          <span v-else class="text-gray-400">-</span>
+                        </td>
+                        <td class="px-3 py-2 text-sm">
                           <div class="flex items-center gap-2">
-                            <button type="button" class="text-primary-600 hover:underline" @click="openAffiliateModal(entry)">
+                            <button
+                              type="button"
+                              class="text-primary-600 hover:underline"
+                              :data-testid="`affiliate-user-edit-${entry.user_id}`"
+                              @click="openAffiliateModal(entry)"
+                            >
                               {{ t('common.edit') }}
                             </button>
                             <button
@@ -7926,6 +7939,36 @@
                   {{ t('admin.settings.features.affiliate.modal.rateHint') }}
                 </p>
               </div>
+
+              <div class="rounded-lg border border-gray-200 p-3 dark:border-dark-700">
+                <div class="flex items-start justify-between gap-3">
+                  <div>
+                    <label class="input-label mb-0">{{ t('admin.settings.features.affiliate.modal.agentLabel') }}</label>
+                    <p class="mt-0.5 text-xs text-gray-400">
+                      {{ t('admin.settings.features.affiliate.modal.agentHint') }}
+                    </p>
+                  </div>
+                  <Toggle v-model="affiliateModal.agentEnabled" data-testid="affiliate-agent-toggle" />
+                </div>
+                <div v-if="affiliateModal.agentEnabled" class="mt-3">
+                  <label class="input-label">{{ t('admin.settings.features.affiliate.modal.agentCreditLimitLabel') }}</label>
+                  <div class="relative">
+                    <span class="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-gray-400">$</span>
+                    <input
+                      v-model="affiliateModal.agentCreditLimit"
+                      data-testid="affiliate-agent-credit-limit"
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      class="input pl-7"
+                      :placeholder="t('admin.settings.features.affiliate.modal.agentCreditLimitPlaceholder')"
+                    />
+                  </div>
+                  <p class="mt-1 text-xs text-gray-400">
+                    {{ t('admin.settings.features.affiliate.modal.agentCreditUsedHint', { used: formatAffiliateAmount(affiliateModal.editingEntry?.agent_credit_used) }) }}
+                  </p>
+                </div>
+              </div>
             </div>
 
             <div class="mt-6 flex items-center justify-between gap-3">
@@ -7944,6 +7987,7 @@
                   type="button"
                   class="btn btn-primary"
                   :disabled="affiliateModal.saving || !affiliateModalCanSubmit"
+                  data-testid="affiliate-modal-save"
                   @click="submitAffiliateModal"
                 >
                   {{ affiliateModal.saving ? t('common.saving') : t('common.save') }}
@@ -13172,6 +13216,8 @@ interface AffiliateModalState {
   editingEntry: AffiliateAdminEntry | null;
   code: string;
   rate: string | number;
+  agentEnabled: boolean;
+  agentCreditLimit: string | number;
   searchTimer: number | null;
 }
 
@@ -13185,8 +13231,14 @@ const affiliateModal = reactive<AffiliateModalState>({
   editingEntry: null,
   code: "",
   rate: "",
+  agentEnabled: false,
+  agentCreditLimit: "",
   searchTimer: null,
 });
+
+function formatAffiliateAmount(value: number | null | undefined): string {
+  return Number(value || 0).toFixed(2);
+}
 
 const affiliateBatchModal = reactive<{
   open: boolean;
@@ -13330,7 +13382,31 @@ function openAffiliateModal(entry: AffiliateAdminEntry | null) {
   affiliateModal.code = entry?.aff_code_custom ? entry.aff_code : "";
   affiliateModal.rate =
     entry?.aff_rebate_rate_percent != null ? String(entry.aff_rebate_rate_percent) : "";
+  affiliateModal.agentEnabled = !!entry?.agent_enabled;
+  affiliateModal.agentCreditLimit = entry?.agent_enabled ? String(entry.agent_credit_limit ?? 0) : "";
 }
+
+// parseAgentCreditLimit validates the agent allowance (USD, >= 0). Returns
+// undefined on invalid input after surfacing a toast.
+function parseAgentCreditLimit(raw: unknown): number | undefined {
+  const s = String(raw ?? "").trim();
+  const parsed = Number(s);
+  if (s === "" || !Number.isFinite(parsed) || parsed < 0) {
+    appStore.showError(t("admin.settings.features.affiliate.modal.errorBadCreditLimit"));
+    return undefined;
+  }
+  return parsed;
+}
+
+// affiliateAgentChanged reports whether the agent toggle or allowance differs
+// from the entry being edited (any agent setting counts as a change in add mode).
+const affiliateAgentChanged = computed(() => {
+  const entry = affiliateModal.mode === "edit" ? affiliateModal.editingEntry : null;
+  const wasAgent = !!entry?.agent_enabled;
+  if (affiliateModal.agentEnabled !== wasAgent) return true;
+  if (!affiliateModal.agentEnabled) return false;
+  return String(affiliateModal.agentCreditLimit ?? "").trim() !== String(entry?.agent_credit_limit ?? 0);
+});
 
 function closeAffiliateModal() {
   affiliateModal.open = false;
@@ -13379,7 +13455,7 @@ const affiliateModalCanSubmit = computed(() => {
   }
   const codeFilled = affiliateModal.code.trim() !== "";
   const rateFilled = String(affiliateModal.rate ?? "").trim() !== "";
-  if (codeFilled || rateFilled) return true;
+  if (codeFilled || rateFilled || affiliateAgentChanged.value) return true;
   // Edit mode + empty rate input is a meaningful "clear" only if the user
   // currently has an exclusive rate to clear.
   return (
@@ -13414,6 +13490,17 @@ async function submitAffiliateModal() {
     }
   } else {
     payload.aff_rebate_rate_percent = rateInput;
+  }
+
+  if (affiliateAgentChanged.value) {
+    if (affiliateModal.agentEnabled) {
+      const limit = parseAgentCreditLimit(affiliateModal.agentCreditLimit);
+      if (limit === undefined) return; // toast already shown
+      payload.agent_enabled = true;
+      payload.agent_credit_limit = limit;
+    } else {
+      payload.agent_enabled = false;
+    }
   }
 
   affiliateModal.saving = true;

@@ -697,6 +697,18 @@ const routes: RouteRecordRaw[] = [
       descriptionKey: 'admin.affiliates.transfersDescription'
     }
   },
+  {
+    path: '/admin/affiliates/agent-grants',
+    name: 'AdminAffiliateAgentGrants',
+    component: () => import('@/views/admin/affiliates/AdminAffiliateAgentGrantsView.vue'),
+    meta: {
+      requiresAuth: true,
+      requiresAdmin: true,
+      title: 'Agent Test Credit Records',
+      titleKey: 'nav.affiliateAgentGrantRecords',
+      descriptionKey: 'admin.affiliates.agentGrantsDescription'
+    }
+  },
 
 
   // ==================== Payment Admin Routes ====================

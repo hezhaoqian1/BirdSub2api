@@ -438,6 +438,7 @@ export default {
       invitesDescription: 'View site-wide inviter and invitee relationships',
       rebatesDescription: 'View every affiliate rebate accrual from recharge orders, redeem codes, and admin recharges',
       transfersDescription: 'View affiliate quota transfers into balance and offline withdrawals',
+      agentGrantsDescription: 'View test credit agents gave to users they invited. Search by agent, invitee, or notes.',
       errors: {
         loadFailed: 'Failed to load affiliate records',
         AFFILIATE_QUOTA_INSUFFICIENT: 'Insufficient available affiliate quota',
@@ -467,7 +468,13 @@ export default {
         invitedAt: 'Invited At',
         rebatedAt: 'Rebated At',
         transferredAt: 'Transferred At',
-        outflowType: 'Type'
+        outflowType: 'Type',
+        agent: 'Agent',
+        grantAmount: 'Test Credit',
+        notes: 'Notes',
+        inviteeBalanceAfter: 'Invitee Balance After',
+        agentCreditAfter: 'Agent Given / Allowance',
+        grantedAt: 'Granted At'
       },
       outflowTypes: {
         transfer: 'To Balance',
@@ -747,6 +754,7 @@ export default {
       typeBalance: 'Balance (Redeem)',
       typeAffiliateBalance: 'Balance (Affiliate Transfer)',
       typeAdminBalance: 'Balance (Admin)',
+      typeAgentBalance: 'Balance (Agent Test Credit)',
       typeConcurrency: 'Concurrency (Redeem)',
       typeAdminConcurrency: 'Concurrency (Admin)',
       typeSubscription: 'Subscription',

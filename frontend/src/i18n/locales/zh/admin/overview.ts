@@ -438,6 +438,7 @@ export default {
       invitesDescription: '查看全站邀请关系和被邀请用户累计返利',
       rebatesDescription: '查看每一笔返利入账，包括充值订单、兑换码和管理员充值产生的返利',
       transfersDescription: '查看返利额度转入余额与线下提现的流水',
+      agentGrantsDescription: '查看代理给自己邀请的用户发放的测试金，可按代理、被邀请人或备注搜索',
       errors: {
         loadFailed: '加载邀请返利记录失败',
         AFFILIATE_QUOTA_INSUFFICIENT: '可提取返利额度不足',
@@ -467,7 +468,13 @@ export default {
         invitedAt: '邀请时间',
         rebatedAt: '返利时间',
         transferredAt: '提取时间',
-        outflowType: '类型'
+        outflowType: '类型',
+        agent: '代理',
+        grantAmount: '测试金',
+        notes: '备注',
+        inviteeBalanceAfter: '发放后对方余额',
+        agentCreditAfter: '代理已发 / 总额度',
+        grantedAt: '发放时间'
       },
       outflowTypes: {
         transfer: '转入余额',
@@ -748,6 +755,7 @@ export default {
       typeBalance: '余额（兑换码）',
       typeAffiliateBalance: '余额（返利转入）',
       typeAdminBalance: '余额（管理员调整）',
+      typeAgentBalance: '余额（代理测试金）',
       typeConcurrency: '并发（兑换码）',
       typeAdminConcurrency: '并发（管理员调整）',
       typeSubscription: '订阅',

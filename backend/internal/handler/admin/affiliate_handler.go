@@ -49,13 +49,17 @@ func (h *AffiliateHandler) ListUsers(c *gin.Context) {
 // UpdateUserSettings updates a user's affiliate settings.
 // PUT /api/v1/admin/affiliates/users/:user_id
 //
-// Both fields are optional and applied independently.
+// All fields are optional and applied independently.
 type UpdateAffiliateUserRequest struct {
 	AffCode              *string  `json:"aff_code"`
 	AffRebateRatePercent *float64 `json:"aff_rebate_rate_percent"`
 	// ClearRebateRate explicitly clears the per-user rate (sets it to NULL).
 	// Used to disambiguate from "field not provided".
 	ClearRebateRate bool `json:"clear_rebate_rate"`
+	// AgentEnabled / AgentCreditLimit turn the agent role on or off and set the
+	// agent's total test credit (USD). nil leaves the value unchanged.
+	AgentEnabled     *bool    `json:"agent_enabled"`
+	AgentCreditLimit *float64 `json:"agent_credit_limit"`
 }
 
 func (h *AffiliateHandler) UpdateUserSettings(c *gin.Context) {
@@ -90,20 +94,33 @@ func (h *AffiliateHandler) UpdateUserSettings(c *gin.Context) {
 		}
 	}
 
+	if req.AgentEnabled != nil || req.AgentCreditLimit != nil {
+		if err := h.affiliateService.AdminSetUserAgent(c.Request.Context(), userID, req.AgentEnabled, req.AgentCreditLimit); err != nil {
+			response.ErrorFrom(c, err)
+			return
+		}
+	}
+
 	response.Success(c, gin.H{"user_id": userID})
 }
 
-// ClearUserSettings removes ALL of a user's custom affiliate settings — clears
-// the exclusive rebate rate AND regenerates the invite code as a new system
-// random one. Conceptually this "removes the user from the custom list".
+// ClearUserSettings removes ALL of a user's custom affiliate settings — turns
+// off the agent role, clears the exclusive rebate rate AND regenerates the
+// invite code as a new system random one. Conceptually this "removes the user
+// from the custom list". The agent's credit limit and grant history are kept.
 //
-// Both writes happen in this handler; failure of one leaves the other applied,
+// The writes happen in this handler; failure of one leaves the others applied,
 // but the operation is idempotent so the admin can re-run it safely.
 // DELETE /api/v1/admin/affiliates/users/:user_id
 func (h *AffiliateHandler) ClearUserSettings(c *gin.Context) {
 	userID, err := strconv.ParseInt(c.Param("user_id"), 10, 64)
 	if err != nil || userID <= 0 {
 		response.BadRequest(c, "Invalid user_id")
+		return
+	}
+	agentDisabled := false
+	if err := h.affiliateService.AdminSetUserAgent(c.Request.Context(), userID, &agentDisabled, nil); err != nil {
+		response.ErrorFrom(c, err)
 		return
 	}
 	if err := h.affiliateService.AdminSetUserRebateRate(c.Request.Context(), userID, nil); err != nil {
@@ -271,6 +288,19 @@ func (h *AffiliateHandler) ListTransferRecords(c *gin.Context) {
 	page, pageSize := response.ParsePagination(c)
 	filter := parseAffiliateRecordFilter(c, page, pageSize)
 	items, total, err := h.affiliateService.AdminListTransferRecords(c.Request.Context(), filter)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Paginated(c, items, total, filter.Page, filter.PageSize)
+}
+
+// ListAgentGrantRecords returns every test credit grant made by agents.
+// GET /api/v1/admin/affiliates/agent-grants
+func (h *AffiliateHandler) ListAgentGrantRecords(c *gin.Context) {
+	page, pageSize := response.ParsePagination(c)
+	filter := parseAffiliateRecordFilter(c, page, pageSize)
+	items, total, err := h.affiliateService.AdminListAgentGrantRecords(c.Request.Context(), filter)
 	if err != nil {
 		response.ErrorFrom(c, err)
 		return

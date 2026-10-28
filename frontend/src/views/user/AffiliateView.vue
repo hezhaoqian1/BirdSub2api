@@ -120,6 +120,27 @@
           </p>
         </div>
 
+        <div v-if="detail.agent" class="card p-6" data-testid="affiliate-agent-card">
+          <h3 class="text-base font-semibold text-gray-900 dark:text-white">{{ t('affiliate.agent.title') }}</h3>
+          <p class="mt-1 text-sm text-gray-500 dark:text-dark-400">{{ t('affiliate.agent.description') }}</p>
+          <div class="mt-4 grid gap-4 sm:grid-cols-3">
+            <div class="rounded-xl border border-gray-200 bg-gray-50 p-4 dark:border-dark-700 dark:bg-dark-900">
+              <p class="text-sm text-gray-500 dark:text-dark-400">{{ t('affiliate.agent.creditLimit') }}</p>
+              <p class="mt-1 text-xl font-semibold text-gray-900 dark:text-white">{{ formatCurrency(detail.agent.credit_limit) }}</p>
+            </div>
+            <div class="rounded-xl border border-gray-200 bg-gray-50 p-4 dark:border-dark-700 dark:bg-dark-900">
+              <p class="text-sm text-gray-500 dark:text-dark-400">{{ t('affiliate.agent.creditUsed') }}</p>
+              <p class="mt-1 text-xl font-semibold text-gray-900 dark:text-white">{{ formatCurrency(detail.agent.credit_used) }}</p>
+            </div>
+            <div class="rounded-xl border border-gray-200 bg-gray-50 p-4 dark:border-dark-700 dark:bg-dark-900">
+              <p class="text-sm text-gray-500 dark:text-dark-400">{{ t('affiliate.agent.creditRemaining') }}</p>
+              <p class="mt-1 text-xl font-semibold text-emerald-600 dark:text-emerald-400" data-testid="affiliate-agent-remaining">
+                {{ formatCurrency(detail.agent.credit_remaining) }}
+              </p>
+            </div>
+          </div>
+        </div>
+
         <div class="card p-6">
           <h3 class="text-base font-semibold text-gray-900 dark:text-white">{{ t('affiliate.invitees.title') }}</h3>
           <div v-if="detail.invitees.length === 0" class="mt-4 rounded-xl border border-dashed border-gray-300 p-6 text-center text-sm text-gray-500 dark:border-dark-700 dark:text-dark-400">
@@ -132,7 +153,9 @@
                   <th class="px-3 py-2 font-medium">{{ t('affiliate.invitees.columns.email') }}</th>
                   <th class="px-3 py-2 font-medium">{{ t('affiliate.invitees.columns.username') }}</th>
                   <th class="px-3 py-2 font-medium text-right">{{ t('affiliate.invitees.columns.rebate') }}</th>
+                  <th v-if="detail.agent" class="px-3 py-2 font-medium text-right">{{ t('affiliate.invitees.columns.agentGranted') }}</th>
                   <th class="px-3 py-2 font-medium">{{ t('affiliate.invitees.columns.joinedAt') }}</th>
+                  <th v-if="detail.agent" class="px-3 py-2 font-medium text-right">{{ t('affiliate.invitees.columns.actions') }}</th>
                 </tr>
               </thead>
               <tbody>
@@ -144,7 +167,19 @@
                   <td class="px-3 py-3 text-gray-900 dark:text-white">{{ item.email || '-' }}</td>
                   <td class="px-3 py-3 text-gray-700 dark:text-gray-300">{{ item.username || '-' }}</td>
                   <td class="px-3 py-3 text-right font-medium text-emerald-600 dark:text-emerald-400">{{ formatCurrency(item.total_rebate) }}</td>
+                  <td v-if="detail.agent" class="px-3 py-3 text-right text-gray-700 dark:text-gray-300">{{ formatCurrency(item.agent_granted ?? 0) }}</td>
                   <td class="px-3 py-3 text-gray-700 dark:text-gray-300">{{ formatDateTime(item.created_at) || '-' }}</td>
+                  <td v-if="detail.agent" class="px-3 py-3 text-right">
+                    <button
+                      class="btn btn-secondary btn-sm"
+                      :disabled="detail.agent.credit_remaining <= 0"
+                      :data-testid="`affiliate-agent-grant-${item.user_id}`"
+                      @click="openGrantDialog(item)"
+                    >
+                      <Icon name="plus" size="sm" />
+                      <span>{{ t('affiliate.agent.grantButton') }}</span>
+                    </button>
+                  </td>
                 </tr>
               </tbody>
             </table>
@@ -152,6 +187,62 @@
         </div>
       </template>
     </div>
+
+    <BaseDialog :show="grantTarget !== null" :title="t('affiliate.agent.grantTitle')" @close="closeGrantDialog">
+      <form v-if="grantTarget" class="space-y-4" @submit.prevent="submitGrant">
+        <div>
+          <p class="input-label">{{ t('affiliate.agent.recipient') }}</p>
+          <p class="text-sm font-medium text-gray-900 dark:text-white">
+            {{ grantTarget.email || '-' }}
+            <span v-if="grantTarget.username" class="ml-1 text-xs text-gray-500 dark:text-dark-400">({{ grantTarget.username }})</span>
+          </p>
+        </div>
+        <div>
+          <label for="affiliate_agent_grant_amount" class="input-label">{{ t('affiliate.agent.amountLabel') }}</label>
+          <input
+            id="affiliate_agent_grant_amount"
+            v-model="grantAmount"
+            type="number"
+            step="0.01"
+            min="0.01"
+            class="input"
+            :placeholder="t('affiliate.agent.amountPlaceholder')"
+            data-testid="affiliate-agent-grant-amount"
+          />
+          <p class="mt-1 text-xs text-gray-500 dark:text-dark-400">
+            {{ t('affiliate.agent.remainingHint', { amount: formatCurrency(detail?.agent?.credit_remaining ?? 0) }) }}
+          </p>
+        </div>
+        <div>
+          <label for="affiliate_agent_grant_notes" class="input-label">{{ t('affiliate.agent.notesLabel') }}</label>
+          <textarea
+            id="affiliate_agent_grant_notes"
+            v-model="grantNotes"
+            rows="3"
+            class="input"
+            :maxlength="AGENT_NOTES_MAX_LENGTH"
+            :placeholder="t('affiliate.agent.notesPlaceholder')"
+            data-testid="affiliate-agent-grant-notes"
+          ></textarea>
+          <p class="mt-1 text-xs text-gray-500 dark:text-dark-400">
+            {{ t('affiliate.agent.notesHint', { max: AGENT_NOTES_MAX_LENGTH }) }}
+          </p>
+        </div>
+        <p v-if="grantError" class="text-sm text-red-600 dark:text-red-400" data-testid="affiliate-agent-grant-error">{{ grantError }}</p>
+        <ul class="space-y-1 text-sm text-gray-500 dark:text-dark-400">
+          <li>{{ t('affiliate.agent.rule1') }}</li>
+          <li>{{ t('affiliate.agent.rule2') }}</li>
+        </ul>
+      </form>
+      <template #footer>
+        <button class="btn btn-secondary" :disabled="granting" @click="closeGrantDialog">
+          {{ t('common.cancel') }}
+        </button>
+        <button class="btn btn-primary" :disabled="granting" data-testid="affiliate-agent-grant-submit" @click="submitGrant">
+          {{ granting ? t('affiliate.agent.submitting') : t('affiliate.agent.submit') }}
+        </button>
+      </template>
+    </BaseDialog>
 
     <BaseDialog :show="codeDialogOpen" :title="t('affiliate.customCode.title')" @close="closeCodeDialog">
       <form class="space-y-4" @submit.prevent="saveCustomCode">
@@ -194,7 +285,7 @@ import AppLayout from '@/components/layout/AppLayout.vue'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import Icon from '@/components/icons/Icon.vue'
 import userAPI from '@/api/user'
-import type { UserAffiliateDetail } from '@/types'
+import type { AffiliateInvitee, UserAffiliateDetail } from '@/types'
 import { useAppStore } from '@/stores/app'
 import { useAuthStore } from '@/stores/auth'
 import { useClipboard } from '@/composables/useClipboard'
@@ -313,6 +404,91 @@ async function saveCustomCode(): Promise<void> {
       : extractApiErrorMessage(error, t('common.error'))
   } finally {
     savingCode.value = false
+  }
+}
+
+// 代理测试金：与后端 AffiliateAgentNotesMaxLength 保持一致。
+const AGENT_NOTES_MAX_LENGTH = 200
+const AGENT_ERROR_REASONS = new Set([
+  'AFFILIATE_AGENT_AMOUNT_INVALID',
+  'AFFILIATE_AGENT_NOTES_REQUIRED',
+  'AFFILIATE_AGENT_NOTES_TOO_LONG',
+  'AFFILIATE_AGENT_CREDIT_INSUFFICIENT',
+  'AFFILIATE_AGENT_INVITEE_NOT_FOUND',
+  'AFFILIATE_AGENT_NOT_ENABLED',
+  'AFFILIATE_DISABLED',
+  'IDEMPOTENCY_KEY_CONFLICT'
+])
+
+const grantTarget = ref<AffiliateInvitee | null>(null)
+// <input type="number"> 的 v-model 会把值转成 number，所以两种类型都可能出现。
+const grantAmount = ref<string | number>('')
+const grantNotes = ref('')
+const grantError = ref('')
+const granting = ref(false)
+// 一次发放对应一个幂等键：网络出错后重试同一笔不会重复发放。失败的发放会整笔回滚，
+// 所以改了金额再提交也可以沿用这个键。
+let grantKey = ''
+
+function newGrantKey(): string {
+  const id = globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`
+  return `affiliate-agent-grant-${id}`
+}
+
+function openGrantDialog(invitee: AffiliateInvitee): void {
+  grantTarget.value = invitee
+  grantAmount.value = ''
+  grantNotes.value = ''
+  grantError.value = ''
+  grantKey = newGrantKey()
+}
+
+function closeGrantDialog(): void {
+  if (granting.value) return
+  grantTarget.value = null
+}
+
+async function submitGrant(): Promise<void> {
+  const target = grantTarget.value
+  const agent = detail.value?.agent
+  if (granting.value || !target || !agent) return
+
+  const amount = Number(String(grantAmount.value ?? '').trim())
+  if (!Number.isFinite(amount) || amount <= 0) {
+    grantError.value = t('affiliate.agent.errors.AMOUNT_INVALID')
+    return
+  }
+  if (amount > agent.credit_remaining + 1e-9) {
+    grantError.value = t('affiliate.agent.errors.AMOUNT_EXCEEDS_REMAINING')
+    return
+  }
+  const notes = grantNotes.value.trim()
+  if (!notes) {
+    grantError.value = t('affiliate.agent.errors.AFFILIATE_AGENT_NOTES_REQUIRED')
+    return
+  }
+
+  granting.value = true
+  grantError.value = ''
+  try {
+    const result = await userAPI.grantAffiliateAgentCredit(
+      { invitee_user_id: target.user_id, amount, notes },
+      grantKey
+    )
+    granting.value = false
+    grantTarget.value = null
+    appStore.showSuccess(t('affiliate.agent.success', {
+      amount: formatCurrency(result.amount),
+      user: target.email || target.username || `#${target.user_id}`
+    }))
+    await loadAffiliateDetail(true)
+  } catch (error) {
+    const reason = extractApiErrorCode(error)
+    grantError.value = reason && AGENT_ERROR_REASONS.has(reason)
+      ? t(`affiliate.agent.errors.${reason}`)
+      : extractApiErrorMessage(error, t('common.error'))
+  } finally {
+    granting.value = false
   }
 }
 

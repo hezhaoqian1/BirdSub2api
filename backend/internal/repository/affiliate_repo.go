@@ -530,7 +530,13 @@ SELECT ua.user_id,
        COALESCE(u.email, ''),
        COALESCE(u.username, ''),
        ua.created_at,
-       COALESCE(SUM(ual.amount), 0)::double precision AS total_rebate
+       COALESCE(SUM(ual.amount), 0)::double precision AS total_rebate,
+       COALESCE((
+           SELECT SUM(aag.amount)
+           FROM affiliate_agent_grants aag
+           WHERE aag.agent_user_id = $1
+             AND aag.invitee_user_id = ua.user_id
+       ), 0)::double precision AS agent_granted
 FROM user_affiliates ua
 LEFT JOIN users u ON u.id = ua.user_id
 LEFT JOIN user_affiliate_ledger ual
@@ -550,7 +556,7 @@ LIMIT $2`, inviterID, limit)
 	for rows.Next() {
 		var item service.AffiliateInvitee
 		var createdAt time.Time
-		if err := rows.Scan(&item.UserID, &item.Email, &item.Username, &createdAt, &item.TotalRebate); err != nil {
+		if err := rows.Scan(&item.UserID, &item.Email, &item.Username, &createdAt, &item.TotalRebate, &item.AgentGranted); err != nil {
 			return nil, err
 		}
 		item.CreatedAt = &createdAt
@@ -988,6 +994,9 @@ SELECT user_id,
        aff_quota::double precision,
        aff_frozen_quota::double precision,
        aff_history_quota::double precision,
+       agent_enabled,
+       agent_credit_limit::double precision,
+       agent_credit_used::double precision,
        created_at,
        updated_at
 FROM user_affiliates
@@ -1018,6 +1027,9 @@ WHERE user_id = $1`, userID)
 		&out.AffQuota,
 		&out.AffFrozenQuota,
 		&out.AffHistoryQuota,
+		&out.AgentEnabled,
+		&out.AgentCreditLimit,
+		&out.AgentCreditUsed,
 		&out.CreatedAt,
 		&out.UpdatedAt,
 	); err != nil {
@@ -1049,6 +1061,9 @@ SELECT user_id,
        aff_quota::double precision,
        aff_frozen_quota::double precision,
        aff_history_quota::double precision,
+       agent_enabled,
+       agent_credit_limit::double precision,
+       agent_credit_used::double precision,
        created_at,
        updated_at
 FROM user_affiliates
@@ -1081,6 +1096,9 @@ LIMIT 1`, strings.ToUpper(strings.TrimSpace(code)))
 		&out.AffQuota,
 		&out.AffFrozenQuota,
 		&out.AffHistoryQuota,
+		&out.AgentEnabled,
+		&out.AgentCreditLimit,
+		&out.AgentCreditUsed,
 		&out.CreatedAt,
 		&out.UpdatedAt,
 	); err != nil {
@@ -1534,7 +1552,7 @@ func nullableInt64Arg(v *int64) any {
 	return *v
 }
 
-// ListUsersWithCustomSettings 列出有专属配置（自定义码或专属比例）的用户。
+// ListUsersWithCustomSettings 列出有专属配置（自定义码、专属比例或代理身份）的用户。
 //
 // 单一查询同时处理"无搜索"与"按邮箱/用户名模糊搜索"：
 // 空 search 时拼接出的 LIKE 模式为 "%%"，匹配所有行；非空时按 ILIKE 子串匹配。
@@ -1554,7 +1572,7 @@ func (r *affiliateRepository) ListUsersWithCustomSettings(ctx context.Context, f
 	const baseFrom = `
 FROM user_affiliates ua
 JOIN users u ON u.id = ua.user_id
-WHERE (ua.aff_code_custom = true OR ua.aff_rebate_rate_percent IS NOT NULL)
+WHERE (ua.aff_code_custom = true OR ua.aff_rebate_rate_percent IS NOT NULL OR ua.agent_enabled = true)
   AND (u.email ILIKE $1 OR u.username ILIKE $1)`
 
 	client := clientFromContext(ctx, r.client)
@@ -1571,7 +1589,10 @@ SELECT ua.user_id,
        ua.aff_code,
        ua.aff_code_custom,
        ua.aff_rebate_rate_percent,
-       ua.aff_count` + baseFrom + `
+       ua.aff_count,
+       ua.agent_enabled,
+       ua.agent_credit_limit::double precision,
+       ua.agent_credit_used::double precision` + baseFrom + `
 ORDER BY ua.updated_at DESC
 LIMIT $2 OFFSET $3`
 
@@ -1586,7 +1607,8 @@ LIMIT $2 OFFSET $3`
 		var e service.AffiliateAdminEntry
 		var rebate sql.NullFloat64
 		if err := rows.Scan(&e.UserID, &e.Email, &e.Username, &e.AffCode,
-			&e.AffCodeCustom, &rebate, &e.AffCount); err != nil {
+			&e.AffCodeCustom, &rebate, &e.AffCount,
+			&e.AgentEnabled, &e.AgentCreditLimit, &e.AgentCreditUsed); err != nil {
 			return nil, 0, err
 		}
 		if rebate.Valid {

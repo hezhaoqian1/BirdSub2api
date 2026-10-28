@@ -83,6 +83,22 @@ const {
 
 const localeRef = vi.hoisted(() => ({ value: "zh-CN" }));
 
+const { listAffiliateUsers, updateAffiliateUserSettings } = vi.hoisted(() => ({
+  listAffiliateUsers: vi.fn().mockResolvedValue({ items: [], total: 0 }),
+  updateAffiliateUserSettings: vi.fn().mockResolvedValue({ user_id: 0 }),
+}));
+
+vi.mock("@/api/admin/affiliates", () => {
+  const affiliatesAPI = {
+    listUsers: listAffiliateUsers,
+    lookupUsers: vi.fn().mockResolvedValue([]),
+    updateUserSettings: updateAffiliateUserSettings,
+    clearUserSettings: vi.fn(),
+    batchSetRate: vi.fn(),
+  };
+  return { affiliatesAPI, default: affiliatesAPI };
+});
+
 vi.mock("@/api", () => ({
   adminAPI: {
     settings: {
@@ -1356,6 +1372,54 @@ describe("admin SettingsView payment visible method controls", () => {
     expect(payload).not.toHaveProperty("payment_visible_method_wxpay_source");
     expect(payload).not.toHaveProperty("payment_visible_method_alipay_enabled");
     expect(payload).not.toHaveProperty("payment_visible_method_wxpay_enabled");
+  });
+
+  it("edits an affiliate agent's test credit allowance and turns the role off", async () => {
+    const agentEntry = {
+      user_id: 7,
+      email: "agent@example.com",
+      username: "agent",
+      aff_code: "AGENT01",
+      aff_code_custom: false,
+      aff_rebate_rate_percent: null,
+      aff_count: 3,
+      agent_enabled: true,
+      agent_credit_limit: 100,
+      agent_credit_used: 35,
+    };
+    listAffiliateUsers.mockResolvedValue({ items: [agentEntry], total: 1 });
+    updateAffiliateUserSettings.mockClear();
+    getSettings.mockResolvedValueOnce({ ...baseSettingsResponse, affiliate_enabled: true });
+
+    try {
+      const wrapper = mountView();
+      await flushPromises();
+      expect(wrapper.text()).toContain("$35.00 / $100.00");
+
+      // Raise the allowance.
+      await wrapper.get('[data-testid="affiliate-user-edit-7"]').trigger("click");
+      const toggle = wrapper.get('[data-testid="affiliate-agent-toggle"]');
+      expect((toggle.element as HTMLInputElement).checked).toBe(true);
+      const limit = wrapper.get('[data-testid="affiliate-agent-credit-limit"]');
+      expect((limit.element as HTMLInputElement).value).toBe("100");
+      await limit.setValue("150");
+      await wrapper.get('[data-testid="affiliate-modal-save"]').trigger("click");
+      await flushPromises();
+      expect(updateAffiliateUserSettings).toHaveBeenLastCalledWith(7, {
+        agent_enabled: true,
+        agent_credit_limit: 150,
+      });
+
+      // Turning the role off sends only the switch.
+      await wrapper.get('[data-testid="affiliate-user-edit-7"]').trigger("click");
+      await wrapper.get('[data-testid="affiliate-agent-toggle"]').setValue(false);
+      expect(wrapper.find('[data-testid="affiliate-agent-credit-limit"]').exists()).toBe(false);
+      await wrapper.get('[data-testid="affiliate-modal-save"]').trigger("click");
+      await flushPromises();
+      expect(updateAffiliateUserSettings).toHaveBeenLastCalledWith(7, { agent_enabled: false });
+    } finally {
+      listAffiliateUsers.mockResolvedValue({ items: [], total: 0 });
+    }
   });
 
   it("submits the admin recharge affiliate rebate setting", async () => {

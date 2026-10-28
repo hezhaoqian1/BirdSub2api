@@ -244,6 +244,42 @@ func (h *UserHandler) UpdateAffiliateCode(c *gin.Context) {
 	response.Success(c, detail)
 }
 
+// GrantAffiliateAgentCreditRequest 代理给自己邀请的用户发测试金的请求体。
+type GrantAffiliateAgentCreditRequest struct {
+	InviteeUserID int64   `json:"invitee_user_id" binding:"required"`
+	Amount        float64 `json:"amount" binding:"required"`
+	Notes         string  `json:"notes"`
+}
+
+// GrantAffiliateAgentCredit lets an agent add test credit to a user they
+// invited, out of the agent's credit limit. The required Idempotency-Key header
+// identifies one grant: a retry with the same key grants nothing and returns the
+// first result with X-Idempotency-Replayed: true.
+// POST /api/v1/user/aff/agent/grants
+func (h *UserHandler) GrantAffiliateAgentCredit(c *gin.Context) {
+	subject, ok := middleware2.GetAuthSubjectFromContext(c)
+	if !ok {
+		response.Unauthorized(c, "User not authenticated")
+		return
+	}
+
+	var req GrantAffiliateAgentCreditRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "Invalid request: "+err.Error())
+		return
+	}
+
+	result, err := h.affiliateService.GrantAgentCredit(c.Request.Context(), subject.UserID, req.InviteeUserID, req.Amount, req.Notes, c.GetHeader("Idempotency-Key"))
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	if result.Replayed {
+		c.Header("X-Idempotency-Replayed", "true")
+	}
+	response.Success(c, result)
+}
+
 // TransferAffiliateQuota transfers all available affiliate quota into current balance.
 // POST /api/v1/user/aff/transfer
 func (h *UserHandler) TransferAffiliateQuota(c *gin.Context) {
