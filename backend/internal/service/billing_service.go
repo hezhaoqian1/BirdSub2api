@@ -741,90 +741,16 @@ func (s *BillingService) initFallbackPricing() {
 		OutputPricePerToken: 0,
 	}
 
-	// ---- 智谱 GLM（Z.AI）----
-	// Source: https://docs.z.ai/guides/overview/pricing (USD per 1M tokens)
-	// 注意：CacheReadPricePerToken 即"缓存命中"价格，CacheCreationPricePerToken 留空（智谱未公开写入价，按 0 处理）。
-	// GLM-4.6 与 GLM-4.5 在 z.ai 国际版上定价一致；GLM-4.5 国内按 ¥0.8/¥2，汇率换算后约 $0.112/$0.28，与国际版 $0.6/$2.2 不同，本分支采用国际版 USD 口径与现有 Claude/GPT 一致。
-	// GLM-5.3 / GLM-5.2 与 GLM-5.1 在 z.ai 上同价。
-	// GLM-5.3-Flash 列表价 $0.15/$0.50（2026-09-09 前五折促销，此处按列表价，与其它模型口径一致）。
-	s.fallbackPrices["glm-5.3-flash"] = &ModelPricing{
-		InputPricePerToken:     0.15e-6, // $0.15 per MTok
-		OutputPricePerToken:    0.5e-6,  // $0.50 per MTok
-		CacheReadPricePerToken: 0.03e-6,
-		SupportsCacheBreakdown: false,
+	// ---- 智谱 GLM ----
+	// 本站 ¥1 购买 $1 额度：人民币价格数值直接作为美元额度单价，不做汇率换算（见 glm_pricing.go）。
+	for _, model := range glmCNYCardModels {
+		s.fallbackPrices[model] = glmDefaultPricing(model)
 	}
-	// GLM-5.3-Prime 为阿里云百炼优速模式（Prime），z.ai 未上架；新加坡站列表价约 $2.80/$8.80，缓存命中 $0.56，
-	// 恰为 glm-5.3 的 2 倍。若被 strings.Contains("glm-5.3") 抢走会按标准价少收一半。
-	s.fallbackPrices["glm-5.3-prime"] = &ModelPricing{
-		InputPricePerToken:     2.8e-6, // $2.80 per MTok
-		OutputPricePerToken:    8.8e-6, // $8.80 per MTok
-		CacheReadPricePerToken: 0.56e-6,
-		SupportsCacheBreakdown: false,
-	}
-	s.fallbackPrices["glm-5.3"] = &ModelPricing{
-		InputPricePerToken:     1.4e-6, // $1.40 per MTok
-		OutputPricePerToken:    4.4e-6, // $4.40 per MTok
-		CacheReadPricePerToken: 0.26e-6,
-		SupportsCacheBreakdown: false,
-	}
-	s.fallbackPrices["glm-5.2"] = &ModelPricing{
-		InputPricePerToken:     1.4e-6, // $1.40 per MTok
-		OutputPricePerToken:    4.4e-6, // $4.40 per MTok
-		CacheReadPricePerToken: 0.26e-6,
-		SupportsCacheBreakdown: false,
-	}
-	s.fallbackPrices["glm-5.1"] = &ModelPricing{
-		InputPricePerToken:     1.4e-6, // $1.40 per MTok
-		OutputPricePerToken:    4.4e-6, // $4.40 per MTok
-		CacheReadPricePerToken: 0.26e-6,
-		SupportsCacheBreakdown: false,
-	}
-	s.fallbackPrices["glm-5"] = &ModelPricing{
-		InputPricePerToken:     1e-6, // $1.00 per MTok
-		OutputPricePerToken:    3.2e-6,
-		CacheReadPricePerToken: 0.2e-6,
-		SupportsCacheBreakdown: false,
-	}
-	s.fallbackPrices["glm-5-turbo"] = &ModelPricing{
-		InputPricePerToken:     1.2e-6,
-		OutputPricePerToken:    4e-6,
-		CacheReadPricePerToken: 0.24e-6,
-		SupportsCacheBreakdown: false,
-	}
-	s.fallbackPrices["glm-4.7"] = &ModelPricing{
-		InputPricePerToken:     0.6e-6, // $0.60 per MTok
-		OutputPricePerToken:    2.2e-6,
-		CacheReadPricePerToken: 0.11e-6,
-		SupportsCacheBreakdown: false,
-	}
-	s.fallbackPrices["glm-4.7-flashx"] = &ModelPricing{
-		InputPricePerToken:     0.07e-6, // $0.07 per MTok
-		OutputPricePerToken:    0.4e-6,
-		CacheReadPricePerToken: 0.01e-6,
-		SupportsCacheBreakdown: false,
-	}
-	s.fallbackPrices["glm-4.6"] = &ModelPricing{
-		InputPricePerToken:     0.6e-6, // $0.60 per MTok
-		OutputPricePerToken:    2.2e-6,
-		CacheReadPricePerToken: 0.11e-6,
-		SupportsCacheBreakdown: false,
-	}
-	s.fallbackPrices["glm-4.5"] = &ModelPricing{
-		InputPricePerToken:     0.6e-6, // $0.60 per MTok
-		OutputPricePerToken:    2.2e-6,
-		CacheReadPricePerToken: 0.11e-6,
-		SupportsCacheBreakdown: false,
-	}
+	// 以下型号官方已无人民币价目，暂沿用 z.ai 国际站数值（USD per 1M tokens）。
 	s.fallbackPrices["glm-4.5-x"] = &ModelPricing{
 		InputPricePerToken:     2.2e-6, // $2.20 per MTok
 		OutputPricePerToken:    8.9e-6,
 		CacheReadPricePerToken: 0.45e-6,
-		SupportsCacheBreakdown: false,
-	}
-	s.fallbackPrices["glm-4.5-air"] = &ModelPricing{
-		InputPricePerToken:     0.2e-6, // $0.20 per MTok
-		OutputPricePerToken:    1.1e-6,
-		CacheReadPricePerToken: 0.03e-6,
 		SupportsCacheBreakdown: false,
 	}
 	s.fallbackPrices["glm-4.5-airx"] = &ModelPricing{
@@ -838,18 +764,6 @@ func (s *BillingService) initFallbackPricing() {
 		OutputPricePerToken:    0.1e-6,
 		SupportsCacheBreakdown: false,
 	}
-	// GLM-4.5-Flash / GLM-4.7-Flash 在 z.ai 上为 Free，保留 zero-cost entry 防止未知 alias 误计费。
-	s.fallbackPrices["glm-4.5-flash"] = &ModelPricing{
-		InputPricePerToken:     0,
-		OutputPricePerToken:    0,
-		SupportsCacheBreakdown: false,
-	}
-	s.fallbackPrices["glm-4.7-flash"] = &ModelPricing{
-		InputPricePerToken:     0,
-		OutputPricePerToken:    0,
-		SupportsCacheBreakdown: false,
-	}
-
 	// ---- 月之暗面 Kimi（K 系列）----
 	// 本站 ¥1 购买 $1 额度：人民币价格数值直接作为美元额度单价，不做汇率换算。
 	// Source (2026-10-15; K3.1 Pro 2026-10-28): https://platform.kimi.com/docs/pricing/chat
@@ -864,44 +778,9 @@ func (s *BillingService) initFallbackPricing() {
 		s.fallbackPrices[model] = kimiDefaultPricing(model)
 	}
 	// ---- MiniMax M 系列 ----
-	// Source: https://platform.minimax.io/docs/guides/pricing-paygo
-	// 注意：MiniMax M3 在 >512K context 时价格翻倍，本兜底采用 ≤512K 标准 tier（保守口径，对用户有利）。
-	// 如需支持长上下文 multiplier，可后续参考 GPT-5.4 模式扩展 LongContextXxx 字段。
-	s.fallbackPrices["minimax-m3"] = &ModelPricing{
-		InputPricePerToken:     0.60e-6, // $0.60 per MTok (≤512K standard tier, 含 50% 永久折扣前原价 $1.20)
-		OutputPricePerToken:    2.40e-6,
-		CacheReadPricePerToken: 0.12e-6,
-		SupportsCacheBreakdown: false,
-	}
-	s.fallbackPrices["minimax-m2.7"] = &ModelPricing{
-		InputPricePerToken:     0.30e-6, // $0.30 per MTok
-		OutputPricePerToken:    1.20e-6,
-		CacheReadPricePerToken: 0.06e-6,
-		SupportsCacheBreakdown: false,
-	}
-	s.fallbackPrices["minimax-m2.7-highspeed"] = &ModelPricing{
-		InputPricePerToken:     0.60e-6,
-		OutputPricePerToken:    2.40e-6,
-		CacheReadPricePerToken: 0.06e-6,
-		SupportsCacheBreakdown: false,
-	}
-	s.fallbackPrices["minimax-m2.5"] = &ModelPricing{
-		InputPricePerToken:     0.30e-6,
-		OutputPricePerToken:    1.20e-6,
-		CacheReadPricePerToken: 0.03e-6,
-		SupportsCacheBreakdown: false,
-	}
-	s.fallbackPrices["minimax-m2.1"] = &ModelPricing{
-		InputPricePerToken:     0.30e-6,
-		OutputPricePerToken:    1.20e-6,
-		CacheReadPricePerToken: 0.03e-6,
-		SupportsCacheBreakdown: false,
-	}
-	s.fallbackPrices["minimax-m2"] = &ModelPricing{
-		InputPricePerToken:     0.30e-6,
-		OutputPricePerToken:    1.20e-6,
-		CacheReadPricePerToken: 0.03e-6,
-		SupportsCacheBreakdown: false,
+	// 本站 ¥1 购买 $1 额度：人民币价格数值直接作为美元额度单价，不做汇率换算（见 minimax_pricing.go）。
+	for _, model := range minimaxCNYCardModels {
+		s.fallbackPrices[model] = minimaxDefaultPricing(model)
 	}
 
 	// ---- 火山方舟 豆包 Embedding（多模态向量化）----
@@ -1135,60 +1014,9 @@ func (s *BillingService) getFallbackPricing(model string) *ModelPricing {
 	// 匹配策略：长 key 优先（具体模型 → 系列 / 厂商），未知型号不回退以避免误计价。
 	// 与 DeepSeek 一样采用"白名单"语义：未在本表命中的国产模型 alias 一律不返回兜底价。
 
-	// 智谱 GLM（z.ai 公开 SKU：glm-5.3 / glm-5.3-flash / glm-5.2 / glm-5.1 / glm-5 / glm-5-turbo / glm-4.7 / glm-4.6 / glm-4.5 等）
-	// 匹配顺序：先判别最高 tier，再依次降级。
-	// 注意：带小数点的型号必须排在裸 "glm-5" 之前，否则会被 strings.Contains 抢走；
-	// glm-5.3-flash / glm-5.3-prime 必须排在 glm-5.3 之前（前者包含后者子串）。
-	if strings.Contains(modelLower, "glm-5.3-flash") || strings.Contains(modelLower, "glm-5.3flash") {
-		return s.fallbackPrices["glm-5.3-flash"]
-	}
-	if strings.Contains(modelLower, "glm-5.3-prime") || strings.Contains(modelLower, "glm-5.3prime") {
-		return s.fallbackPrices["glm-5.3-prime"]
-	}
-	if strings.Contains(modelLower, "glm-5.3") {
-		return s.fallbackPrices["glm-5.3"]
-	}
-	if strings.Contains(modelLower, "glm-5.2") {
-		return s.fallbackPrices["glm-5.2"]
-	}
-	if strings.Contains(modelLower, "glm-5.1") {
-		return s.fallbackPrices["glm-5.1"]
-	}
-	if strings.Contains(modelLower, "glm-5-turbo") || strings.Contains(modelLower, "glm-5turbo") {
-		return s.fallbackPrices["glm-5-turbo"]
-	}
-	if strings.Contains(modelLower, "glm-5") {
-		return s.fallbackPrices["glm-5"]
-	}
-	if strings.Contains(modelLower, "glm-4.7-flashx") {
-		return s.fallbackPrices["glm-4.7-flashx"]
-	}
-	if strings.Contains(modelLower, "glm-4.7-flash") {
-		return s.fallbackPrices["glm-4.7-flash"]
-	}
-	if strings.Contains(modelLower, "glm-4.7") {
-		return s.fallbackPrices["glm-4.7"]
-	}
-	if strings.Contains(modelLower, "glm-4.6") {
-		return s.fallbackPrices["glm-4.6"]
-	}
-	if strings.Contains(modelLower, "glm-4.5-flash") {
-		return s.fallbackPrices["glm-4.5-flash"]
-	}
-	if strings.Contains(modelLower, "glm-4.5-x") || strings.Contains(modelLower, "glm-4.5x") {
-		return s.fallbackPrices["glm-4.5-x"]
-	}
-	if strings.Contains(modelLower, "glm-4.5-airx") || strings.Contains(modelLower, "glm-4.5airx") {
-		return s.fallbackPrices["glm-4.5-airx"]
-	}
-	if strings.Contains(modelLower, "glm-4.5-air") || strings.Contains(modelLower, "glm-4.5air") {
-		return s.fallbackPrices["glm-4.5-air"]
-	}
-	if strings.Contains(modelLower, "glm-4.5") {
-		return s.fallbackPrices["glm-4.5"]
-	}
-	if strings.Contains(modelLower, "glm-4-32b") {
-		return s.fallbackPrices["glm-4-32b-0414-128k"]
+	// 智谱 GLM：默认价卡与动态价格覆盖共用别名解析（长 key 优先，见 glmPricingModel）。
+	if key := glmPricingModel(modelLower); key != "" {
+		return s.fallbackPrices[key]
 	}
 
 	// Kimi 默认价卡与动态价格覆盖共用别名解析。
@@ -1196,24 +1024,9 @@ func (s *BillingService) getFallbackPricing(model string) *ModelPricing {
 		return s.fallbackPrices[key]
 	}
 
-	// MiniMax M 系列（M3 / M2.7 / M2.5 / M2.1 / M2；含 highspeed 变体）
-	if strings.Contains(modelLower, "minimax-m3") {
-		return s.fallbackPrices["minimax-m3"]
-	}
-	if strings.Contains(modelLower, "minimax-m2.7-highspeed") || strings.Contains(modelLower, "minimax-m2-7-highspeed") {
-		return s.fallbackPrices["minimax-m2.7-highspeed"]
-	}
-	if strings.Contains(modelLower, "minimax-m2.7") || strings.Contains(modelLower, "minimax-m2-7") {
-		return s.fallbackPrices["minimax-m2.7"]
-	}
-	if strings.Contains(modelLower, "minimax-m2.5") || strings.Contains(modelLower, "minimax-m2-5") {
-		return s.fallbackPrices["minimax-m2.5"]
-	}
-	if strings.Contains(modelLower, "minimax-m2.1") || strings.Contains(modelLower, "minimax-m2-1") {
-		return s.fallbackPrices["minimax-m2.1"]
-	}
-	if strings.Contains(modelLower, "minimax-m2") || strings.Contains(modelLower, "minimax-m-2") {
-		return s.fallbackPrices["minimax-m2"]
+	// MiniMax：默认价卡与动态价格覆盖共用别名解析（含 highspeed 变体，见 minimaxPricingModel）。
+	if key := minimaxPricingModel(modelLower); key != "" {
+		return s.fallbackPrices[key]
 	}
 
 	// 火山方舟 豆包 Embedding（多模态向量化）。
@@ -1900,6 +1713,12 @@ func (s *BillingService) applyModelSpecificPricingPolicyEx(model string, pricing
 				cloned := *card
 				return &cloned
 			}
+		}
+		if card := glmDefaultPricing(model); card != nil {
+			return card
+		}
+		if card := minimaxDefaultPricing(model); card != nil {
+			return card
 		}
 	}
 	// Share the exact snapshot/default card with display and fallback pricing.
