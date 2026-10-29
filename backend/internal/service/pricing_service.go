@@ -1272,6 +1272,15 @@ func (s *PricingService) GetModelPricing(modelName string) *LiteLLMModelPricing 
 	if card := minimaxDefaultPricing(modelName); card != nil {
 		return siteCardAsLiteLLMPricing(card, "minimax")
 	}
+	if card := qwenDefaultPricing(modelName); card != nil {
+		return siteCardAsLiteLLMPricing(card, "dashscope")
+	}
+	if card := mimoDefaultPricing(modelName); card != nil {
+		return siteCardAsLiteLLMPricing(card, "xiaomi")
+	}
+	if card := hunyuanDefaultPricing(modelName); card != nil {
+		return siteCardAsLiteLLMPricing(card, "tencent")
+	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
