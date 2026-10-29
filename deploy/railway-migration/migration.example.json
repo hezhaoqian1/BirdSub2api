@@ -1,0 +1,36 @@
+{
+  "env_name": "production",
+  "region": "asia-southeast1-eqsg3a",
+  "old": {"project_id": "<旧项目 ID>", "env_id": "<旧 production 环境 ID>"},
+  "new": {"workspace_id": "<新工作区 ID>", "project_name": "fearless-luck", "project_id": null, "env_id": null},
+
+  "sleep_apps": ["BirdSub2api", "coincoin-proxy", "通联专属"],
+
+  "gateway": {
+    "service": "BirdSub2api", "postgres": "Postgres", "redis": "Redis",
+    "domain": "birdapi.up.railway.app", "port": 8080,
+    "healthcheck_path": "/health", "healthcheck_timeout": 300
+  },
+  "long_entry": {
+    "service": "caddy-long", "source_dir": "deploy/railway-long-entry",
+    "dns_record": "api.birdbirdapi.com", "cf_zone": "birdbirdapi.com"
+  },
+  "apps": {
+    "tl": {"service": "通联专属", "mysql": "通联MySQL", "port": 8000,
+           "service_domain": "datayes.up.railway.app", "custom_domain": "datayes.coincoin.ai"},
+    "zz": {"service": "coincoin-proxy", "mysql": "中转站MySQL", "port": 8000,
+           "service_domain": "clawfather.up.railway.app", "custom_domain": "coincoin.ai"}
+  },
+  "mysql_window_tables": {"coincoin_billing_ledger": "created_at", "coincoin_image_jobs": "updated_at"},
+  "mysql_background_tables": {"coincoin_request_logs": "created_at"},
+  "mysql_window_margin_hours": 12,
+
+  "cf_token_env_for_custom_domains": "CF_TOKEN_COINCOIN",
+  "check_urls": [
+    "https://birdapi.up.railway.app/health",
+    "https://coincoin.ai/",
+    "https://clawfather.up.railway.app/",
+    "https://datayes.coincoin.ai/",
+    "https://datayes.up.railway.app/"
+  ]
+}
