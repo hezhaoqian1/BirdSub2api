@@ -703,7 +703,7 @@ func (s *BillingService) initFallbackPricing() {
 
 	// ============================================================
 	// 国产 LLM 兜底定价（数据源：各家官方定价页/USD 口径）
-	// 顺序：DeepSeek → 智谱 GLM → 月之暗面 Kimi → MiniMax
+	// 顺序：DeepSeek → 智谱 GLM → 月之暗面 Kimi → MiniMax → Qwen / MiMo / 混元
 	// 覆盖逻辑见同文件 getFallbackPricing()
 	// ============================================================
 
@@ -782,6 +782,15 @@ func (s *BillingService) initFallbackPricing() {
 	for _, model := range minimaxCNYCardModels {
 		s.fallbackPrices[model] = minimaxDefaultPricing(model)
 	}
+	// ---- 阿里 Qwen / 小米 MiMo / 腾讯混元 ----
+	// 同样按人民币价格数值计美元额度（见 qwen_pricing.go / mimo_pricing.go / hunyuan_pricing.go）。
+	for _, model := range qwenCNYCardModels {
+		s.fallbackPrices[model] = qwenDefaultPricing(model)
+	}
+	for _, model := range mimoCNYCardModels {
+		s.fallbackPrices[model] = mimoDefaultPricing(model)
+	}
+	s.fallbackPrices["hy4-preview"] = hunyuanDefaultPricing("hy4-preview")
 
 	// ---- 火山方舟 豆包 Embedding（多模态向量化）----
 	// doubao-embedding-vision 图文向量化：上游 usage 回传 prompt_tokens_details.{text_tokens,image_tokens}，
@@ -1026,6 +1035,17 @@ func (s *BillingService) getFallbackPricing(model string) *ModelPricing {
 
 	// MiniMax：默认价卡与动态价格覆盖共用别名解析（含 highspeed 变体，见 minimaxPricingModel）。
 	if key := minimaxPricingModel(modelLower); key != "" {
+		return s.fallbackPrices[key]
+	}
+
+	// Qwen / MiMo / 混元：仅白名单型号命中，未覆盖的同族型号不回退。
+	if key := qwenPricingModel(modelLower); key != "" {
+		return s.fallbackPrices[key]
+	}
+	if key := mimoPricingModel(modelLower); key != "" {
+		return s.fallbackPrices[key]
+	}
+	if key := hunyuanPricingModel(modelLower); key != "" {
 		return s.fallbackPrices[key]
 	}
 
@@ -1718,6 +1738,15 @@ func (s *BillingService) applyModelSpecificPricingPolicyEx(model string, pricing
 			return card
 		}
 		if card := minimaxDefaultPricing(model); card != nil {
+			return card
+		}
+		if card := qwenDefaultPricing(model); card != nil {
+			return card
+		}
+		if card := mimoDefaultPricing(model); card != nil {
+			return card
+		}
+		if card := hunyuanDefaultPricing(model); card != nil {
 			return card
 		}
 	}

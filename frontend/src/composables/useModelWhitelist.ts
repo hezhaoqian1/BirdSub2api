@@ -150,6 +150,7 @@ const zhipuModels = [
 
 // 阿里 通义千问
 const qwenModels = [
+  'qwen3.8-max', 'qwen3.8-flash', 'qwen3.7-max', 'qwen3.7-plus', 'qwen3.6-plus',
   'qwen-turbo', 'qwen-plus', 'qwen-max', 'qwen-max-longcontext', 'qwen-long',
   'qwen2-72b-instruct', 'qwen2-57b-a14b-instruct', 'qwen2-7b-instruct',
   'qwen2.5-72b-instruct', 'qwen2.5-32b-instruct', 'qwen2.5-14b-instruct',
@@ -281,8 +282,12 @@ const sparkModels = [
   'spark-lite', 'spark-pro', 'spark-max', 'spark-ultra'
 ]
 
+// 小米 MiMo
+const mimoModels = ['mimo-v2.6-pro', 'mimo-v2.6-flash', 'mimo-v2.6-pro-ultraspeed']
+
 // 腾讯 混元
 const hunyuanModels = [
+  'hy4-preview',
   'hunyuan-lite', 'hunyuan-standard', 'hunyuan-standard-256k',
   'hunyuan-pro', 'hunyuan-turbo', 'hunyuan-large',
   'hunyuan-vision', 'hunyuan-code'
@@ -315,6 +320,7 @@ const allModelsList: string[] = Array.from(new Set([
   ...baiduModels,
   ...sparkModels,
   ...hunyuanModels,
+  ...mimoModels,
   ...perplexityModels
 ]))
 
