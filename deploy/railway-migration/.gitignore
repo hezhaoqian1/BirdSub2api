@@ -1,0 +1,5 @@
+# exported configs contain decrypted secrets
+work/
+
+# the repo root .gitignore ignores every "scripts" dir; these are the migration tools
+!scripts/
