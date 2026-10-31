@@ -174,13 +174,17 @@ func TestFidelityRequestBodyDisablesThinkingAndAsksForJSON(t *testing.T) {
 	require.Equal(t, "none", body["reasoning_effort"])
 	require.Equal(t, map[string]any{"type": "json_object"}, body["response_format"])
 	require.Equal(t, false, body["stream"])
-	msgs := body["messages"].([]any)
+	msgs, ok := body["messages"].([]any)
+	require.True(t, ok)
 	require.Len(t, msgs, 2)
-	system := msgs[0].(map[string]any)
+	system, ok := msgs[0].(map[string]any)
+	require.True(t, ok)
 	require.Equal(t, "system", system["role"])
 	require.Contains(t, system["content"], "482913")
 	require.Contains(t, system["content"], "JSON")
-	require.Contains(t, msgs[1].(map[string]any)["content"], "123 + 456")
+	user, ok := msgs[1].(map[string]any)
+	require.True(t, ok)
+	require.Contains(t, user["content"], "123 + 456")
 }
 
 func TestChannelFidelityConfigValidate(t *testing.T) {
@@ -319,9 +323,14 @@ func (f *fidelityHTTPStub) Do(r *http.Request, _ string, _ int64, _ int) (*http.
 // fidelityEchoReply 读出请求里的暗号和加数，回一个完全遵守要求的答案。
 func fidelityEchoReply(reasoning string) func(map[string]any) string {
 	return func(req map[string]any) string {
-		msgs := req["messages"].([]any)
-		system := msgs[0].(map[string]any)["content"].(string)
-		user := msgs[1].(map[string]any)["content"].(string)
+		msgs, _ := req["messages"].([]any)
+		if len(msgs) < 2 {
+			return `{"error":{"message":"bad request"}}`
+		}
+		systemMsg, _ := msgs[0].(map[string]any)
+		userMsg, _ := msgs[1].(map[string]any)
+		system, _ := systemMsg["content"].(string)
+		user, _ := userMsg["content"].(string)
 		code := fidelityNumberRegex.FindString(system)
 		nums := fidelityNumberRegex.FindAllString(user, -1)
 		a, _ := strconv.Atoi(nums[0])
