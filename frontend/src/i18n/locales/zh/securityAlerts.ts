@@ -28,6 +28,8 @@ export default {
   "quotaErrorHint": "查不到余额的渠道只能靠上游报错发现。",
   "channelMonitorNotify": "渠道监控连续失败时提醒",
   "channelMonitorHint": "渠道监控主模型连续 3 次检测失败时推送一次，恢复正常后再推送一次。",
+  "channelFidelityNotify": "渠道保真体检不通过时提醒",
+  "channelFidelityHint": "上游丢掉 system 提示词、关不掉思考、不认 JSON 模式或 prompt_tokens 偏离基线时，复测确认后推送一次，恢复后再推送一次。停止调度的账号只记录不推送。体检设置在「渠道监控 → 保真体检」。",
   "usersTitle": "关注用户余额",
   "usersHint": "用户余额低于提醒线时推送一次，充值回到提醒线以上后重新开始监控。",
   "searchPlaceholder": "输入用户 ID 或邮箱搜索",

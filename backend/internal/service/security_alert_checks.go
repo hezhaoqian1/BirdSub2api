@@ -61,6 +61,8 @@ func (s *SecurityAlertService) runTick() {
 		s.maybeStartBalanceSweep(snap)
 		s.maybeDailyDigest(ctx, snap)
 	}
+	// 保真体检有自己的开关；告警总开关关闭时照常体检，只是不推送。
+	s.maybeStartFidelitySweep(ctx)
 	s.deliverPending(ctx)
 	if now.Sub(s.lastCleanup) >= securityAlertCleanupEvery {
 		s.lastCleanup = now
@@ -70,6 +72,7 @@ func (s *SecurityAlertService) runTick() {
 		if _, err := s.db.ExecContext(ctx, `DELETE FROM security_alert_balance_samples WHERE observed_at < $1`, now.Add(-securityAlertBalanceSampleTTL)); err != nil {
 			slog.Warn("[SecurityAlert] balance sample cleanup failed", "error", err)
 		}
+		s.cleanupFidelityChecks(ctx)
 	}
 }
 

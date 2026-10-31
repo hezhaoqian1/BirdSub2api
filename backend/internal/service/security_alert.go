@@ -100,6 +100,8 @@ type SecurityAlertConfig struct {
 	ChannelQuotaErrorNotify bool `json:"channel_quota_error_notify"`
 	// ChannelMonitorNotify 渠道监控主模型连续 3 次检测失败时告警，恢复后再通知一次。
 	ChannelMonitorNotify bool `json:"channel_monitor_notify"`
+	// ChannelFidelityNotify 渠道保真体检（system / 关闭思考 / JSON / prompt_tokens）复测确认不通过时告警，恢复后再通知一次。
+	ChannelFidelityNotify bool `json:"channel_fidelity_notify"`
 	// UserBalanceWatches 关注的用户及其余额提醒线。
 	UserBalanceWatches []UserBalanceWatch `json:"user_balance_watches"`
 }
@@ -135,6 +137,7 @@ func DefaultSecurityAlertConfig() SecurityAlertConfig {
 		ChannelRunwayHours:         6,
 		ChannelQuotaErrorNotify:    true,
 		ChannelMonitorNotify:       true,
+		ChannelFidelityNotify:      true,
 		UserBalanceWatches:         []UserBalanceWatch{},
 	}
 }
@@ -346,6 +349,7 @@ type SecurityAlertService struct {
 	lockCache  LeaderLockCache
 	sender     securityAlertSender
 	balances   channelBalanceReader
+	fidelity   *channelFidelityProber
 	instanceID string
 	loc        *time.Location
 	now        func() time.Time
@@ -380,6 +384,9 @@ type SecurityAlertService struct {
 	channelSpendBaseline   map[int64]float64
 	usageBaselineAt        time.Time
 	balanceSweepInProgress atomic.Bool
+
+	lastFidelitySweepCheck  time.Time
+	fidelitySweepInProgress atomic.Bool
 }
 
 // SetUpstreamBalanceService 注入上游余额查询，用于渠道余额告警；未注入时只做消费与报错告警。
