@@ -29,6 +29,10 @@ const (
 	IngressRejectInvalidAuthRateLimited IngressRejectReason = "invalid_auth_rate_limited"
 	IngressRejectAPIKeyAuthOverloaded   IngressRejectReason = "api_key_auth_overloaded"
 	IngressRejectModelNotAllowed        IngressRejectReason = "model_not_allowed"
+	// IngressRejectGatewayQueueFull 网关排队满（用户或账号的等待队列已满）。这是我们自己的限流，
+	// 不是上游错误：逐条写 ops_error_logs 时一个用户压满就能每小时写 130 万行（2026-11-01），
+	// 改为按分钟聚合计数。
+	IngressRejectGatewayQueueFull IngressRejectReason = "gateway_queue_full"
 )
 
 const ingressRejectReasonContextKey = "ingress_reject_reason"

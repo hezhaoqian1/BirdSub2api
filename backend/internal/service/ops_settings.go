@@ -371,6 +371,7 @@ func defaultOpsAdvancedSettings() *OpsAdvancedSettings {
 			ErrorLogRetentionDays:      30,
 			MinuteMetricsRetentionDays: 30,
 			HourlyMetricsRetentionDays: 30,
+			QueueRejectRetentionDays:   opsQueueRejectDefaultRetentionDays,
 		},
 		Aggregation: OpsAggregationSettings{
 			AggregationEnabled: false,
@@ -421,6 +422,10 @@ func normalizeOpsAdvancedSettings(cfg *OpsAdvancedSettings) {
 	}
 	if cfg.DataRetention.HourlyMetricsRetentionDays < 0 {
 		cfg.DataRetention.HourlyMetricsRetentionDays = 30
+	}
+	// 新字段：旧客户端或旧的已存配置没有它（解析为 0），按默认 5 天处理，不让保存失败。
+	if cfg.DataRetention.QueueRejectRetentionDays <= 0 {
+		cfg.DataRetention.QueueRejectRetentionDays = opsQueueRejectDefaultRetentionDays
 	}
 	// Normalize auto refresh interval (default 30 seconds)
 	if cfg.AutoRefreshIntervalSec <= 0 {
@@ -491,6 +496,10 @@ func validateOpsAdvancedSettings(cfg *OpsAdvancedSettings) error {
 	}
 	if cfg.DataRetention.HourlyMetricsRetentionDays < 0 || cfg.DataRetention.HourlyMetricsRetentionDays > 365 {
 		return errors.New("hourly_metrics_retention_days must be between 0 and 365")
+	}
+	// 0 表示没传（旧客户端），规范化时按默认 5 天处理。
+	if cfg.DataRetention.QueueRejectRetentionDays < 0 || cfg.DataRetention.QueueRejectRetentionDays > 365 {
+		return errors.New("queue_reject_retention_days must be between 1 and 365")
 	}
 	if cfg.AutoRefreshIntervalSec < 15 || cfg.AutoRefreshIntervalSec > 300 {
 		return errors.New("auto_refresh_interval_seconds must be between 15 and 300")

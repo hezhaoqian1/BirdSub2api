@@ -129,6 +129,9 @@ type OpsDataRetentionSettings struct {
 	ErrorLogRetentionDays      int    `json:"error_log_retention_days"`
 	MinuteMetricsRetentionDays int    `json:"minute_metrics_retention_days"`
 	HourlyMetricsRetentionDays int    `json:"hourly_metrics_retention_days"`
+	// QueueRejectRetentionDays 网关排队满的拒绝记录（聚合计数，以及改为聚合之前逐条写入
+	// ops_error_logs 的旧记录）保留天数，比普通错误日志短。
+	QueueRejectRetentionDays int `json:"queue_reject_retention_days"`
 }
 
 type OpsAggregationSettings struct {
