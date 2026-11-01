@@ -77,6 +77,9 @@ func TestEvaluateChannelFidelity_ReasoningTokensOnly(t *testing.T) {
 	res := evaluateChannelFidelity(p, resp, nil, 10)
 	require.Equal(t, fidelityCheckFail, res.ThinkingCheck)
 	require.Equal(t, fidelityStatusFail, res.Status)
+	// Aizzz 收返佣号 2026-11-01：没回传思考内容，只在 usage 里计了思考 token。
+	require.Contains(t, res.Message, "没返回思考内容，但计了 30 个思考 token")
+	require.NotContains(t, res.Message, "0 字思考")
 }
 
 func TestEvaluateChannelFidelity_ThinkingExhaustsOutput(t *testing.T) {

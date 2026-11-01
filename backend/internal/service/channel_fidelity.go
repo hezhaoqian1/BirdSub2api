@@ -203,7 +203,15 @@ type ChannelFidelityCheck struct {
 func (c ChannelFidelityCheck) failures() []string {
 	var out []string
 	if c.ThinkingCheck == fidelityCheckFail {
-		out = append(out, fmt.Sprintf("关闭思考无效（仍返回 %d 字思考）", c.ReasoningChars))
+		switch {
+		case c.ReasoningChars > 0:
+			out = append(out, fmt.Sprintf("关闭思考无效（仍返回 %d 字思考）", c.ReasoningChars))
+		case c.ReasoningTokens != nil && *c.ReasoningTokens > 0:
+			// 有的上游不回传思考内容，只在 usage 里计思考 token。
+			out = append(out, fmt.Sprintf("关闭思考无效（没返回思考内容，但计了 %d 个思考 token）", *c.ReasoningTokens))
+		default:
+			out = append(out, "关闭思考无效")
+		}
 	}
 	if c.SystemCheck == fidelityCheckFail {
 		out = append(out, "system 提示词未生效（暗号没出现）")
