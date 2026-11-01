@@ -251,6 +251,16 @@ func TestFidelityAlertDraft(t *testing.T) {
 	require.Contains(t, body, "重置基线")
 	require.NotContains(t, body, "（上游") // 上游模型与请求模型相同时不重复写
 
+	// 复测超时（Aizzz #135 2026-11-01 08:41）：沿用首次的不通过项，说明复测出错。
+	firstFail := last
+	firstFail.CheckedAt = first.CheckedAt
+	timedOut := ChannelFidelityCheck{CheckedAt: last.CheckedAt, Status: fidelityStatusError, Message: "上游 90 秒内没有返回",
+		SystemCheck: fidelityCheckSkip, ThinkingCheck: fidelityCheckSkip, JSONCheck: fidelityCheckSkip, AnswerCheck: fidelityCheckSkip, PromptCheck: fidelityCheckSkip}
+	body = fidelityAlertDraft(target, &firstFail, timedOut, loc).body()
+	require.Contains(t, body, "关闭思考无效（仍返回 8214 字思考）")
+	require.Contains(t, body, "复测请求出错（上游 90 秒内没有返回），未能确认恢复")
+	require.NotContains(t, body, "两次都不通过")
+
 	target.UpstreamModel = "deepseek-flash"
 	d = fidelityAlertDraft(target, nil, last, loc)
 	require.Contains(t, d.body(), "deepseek-v4.1-flash（上游 deepseek-flash）")
