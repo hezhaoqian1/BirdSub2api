@@ -163,6 +163,12 @@ func registerSecurityAlertRoutes(admin *gin.RouterGroup, h *handler.Handlers, st
 		alerts.GET("/user-watches", h.Admin.SecurityAlert.ListUserWatches)
 		alerts.PUT("/user-watches/:user_id", h.Admin.SecurityAlert.SetUserWatch)
 		alerts.DELETE("/user-watches/:user_id", h.Admin.SecurityAlert.RemoveUserWatch)
+		alerts.GET("/fidelity/status", h.Admin.SecurityAlert.GetFidelityStatus)
+		alerts.GET("/fidelity/config", h.Admin.SecurityAlert.GetFidelityConfig)
+		alerts.PUT("/fidelity/config", h.Admin.SecurityAlert.UpdateFidelityConfig)
+		alerts.POST("/fidelity/run", h.Admin.SecurityAlert.RunFidelitySweep)
+		alerts.POST("/fidelity/check", h.Admin.SecurityAlert.RunFidelityCheck)
+		alerts.POST("/fidelity/reset-baseline", h.Admin.SecurityAlert.ResetFidelityBaseline)
 	}
 }
 

@@ -12,7 +12,7 @@
         </h1>
         <p class="page-description mt-1.5 text-xs text-gray-500 dark:text-gray-400">
           {{
-            adminMonitorTab === 'hybrid' ? '真实流量优先，空闲时主动探测。按分钟确认异常，统一管理服务状态与钉钉通知。' : isV1Mode
+            adminMonitorTab === 'fidelity' ? '检查上游有没有偷偷改掉请求：丢 system 提示词、关不掉思考、不认 JSON、注入隐藏提示词。仅管理员可见。' : adminMonitorTab === 'hybrid' ? '真实流量优先，空闲时主动探测。按分钟确认异常，统一管理服务状态与钉钉通知。' : isV1Mode
               ? t('channelMonitorV2.admin.descriptionV1')
               : t('channelMonitorV2.admin.descriptionV2')
           }}
@@ -44,12 +44,24 @@
             >
               探测配置与历史
             </button>
+            <button
+              type="button"
+              role="tab"
+              class="tab flex-1 sm:flex-none"
+              :class="adminMonitorTab === 'fidelity' ? 'tab-active' : ''"
+              :aria-selected="adminMonitorTab === 'fidelity'"
+              data-test="tab-fidelity"
+              @click="adminMonitorTab = 'fidelity'"
+            >
+              保真体检
+            </button>
           </div>
         </div>
       </header>
 
       <HybridMonitorPanel v-if="adminMonitorTab === 'hybrid'" />
       <MonitorSettingsPanel v-else-if="adminMonitorTab === 'v2'" />
+      <ChannelFidelityPanel v-else-if="adminMonitorTab === 'fidelity'" />
 
       <TablePageLayout v-else>
       <template #filters>
@@ -202,12 +214,13 @@ import { getPersistedPageSize } from '@/composables/usePersistedPageSize'
 import { useChannelMonitorFormat } from '@/composables/useChannelMonitorFormat'
 import MonitorSettingsPanel from '@/features/channel-monitor-v2/MonitorSettingsPanel.vue'
 import HybridMonitorPanel from '@/features/channel-monitor-hybrid/HybridMonitorPanel.vue'
+import ChannelFidelityPanel from '@/features/channel-fidelity/ChannelFidelityPanel.vue'
 import { isChannelMonitorV1Mode } from '@/utils/featureFlags'
 
 const { t } = useI18n()
 const appStore = useAppStore()
 const isV1Mode = computed(() => isChannelMonitorV1Mode())
-const adminMonitorTab = ref<'hybrid' | 'v2' | 'legacy'>('hybrid')
+const adminMonitorTab = ref<'hybrid' | 'v2' | 'legacy' | 'fidelity'>('hybrid')
 const {
   providerLabel,
   providerBadgeClass,

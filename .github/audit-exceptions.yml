@@ -42,3 +42,38 @@ exceptions:
     mitigation: "No zero-size custom generators in codebase; upgrade when nanoid releases fix"
     expires_on: "2026-10-13"
     owner: "security@your-domain"
+  - package: vue-i18n
+    advisory: "GHSA-83rm-6c8r-g728"
+    severity: high
+    reason: "XSS needs attacker-controlled translation messages rendered with srcdoc; our locale messages are static bundled files and the only srcdoc (admin email template preview) does not render i18n messages"
+    mitigation: "No patched 9.x release (fixed in 11.4.14); upgrade vue-i18n 9 -> 11 in a dedicated PR before expiry"
+    expires_on: "2026-12-01"
+    owner: "security@your-domain"
+  - package: @intlify/core-base
+    advisory: "GHSA-83rm-6c8r-g728"
+    severity: high
+    reason: "XSS needs attacker-controlled translation messages rendered with srcdoc; our locale messages are static bundled files and the only srcdoc (admin email template preview) does not render i18n messages"
+    mitigation: "No patched 9.x release (fixed in 11.4.14); upgrade vue-i18n 9 -> 11 in a dedicated PR before expiry"
+    expires_on: "2026-12-01"
+    owner: "security@your-domain"
+  - package: @intlify/shared
+    advisory: "GHSA-83rm-6c8r-g728"
+    severity: high
+    reason: "XSS needs attacker-controlled translation messages rendered with srcdoc; our locale messages are static bundled files and the only srcdoc (admin email template preview) does not render i18n messages"
+    mitigation: "No patched 9.x release (fixed in 11.4.14); upgrade vue-i18n 9 -> 11 in a dedicated PR before expiry"
+    expires_on: "2026-12-01"
+    owner: "security@your-domain"
+  - package: decode-uri-component
+    advisory: "GHSA-qr28-fpjm-wq7f"
+    severity: high
+    reason: "Client-side only (query-string under @lobehub/ui in the browser bundle); a crafted URL can only slow down the visitor's own tab, no server impact"
+    mitigation: "Bump to >=0.5.1 via pnpm override with CI's pnpm version before expiry"
+    expires_on: "2026-12-01"
+    owner: "security@your-domain"
+  - package: follow-redirects
+    advisory: "GHSA-mrwp-f3q8-3g9p"
+    severity: high
+    reason: "Node-only http adapter dependency of axios; the browser bundle uses the XHR/fetch adapter, so it never runs in production"
+    mitigation: "Bump the existing pnpm override to >=1.16.2 with CI's pnpm version before expiry"
+    expires_on: "2026-12-01"
+    owner: "security@your-domain"

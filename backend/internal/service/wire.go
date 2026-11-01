@@ -1035,6 +1035,7 @@ func ProvidePaymentOrderExpiryService(paymentSvc *PaymentService, lockCache Lead
 func ProvideSecurityAlertService(db *sql.DB, settingService *SettingService, lockCache LeaderLockCache, auditLogService *AuditLogService, upstreamBalanceService *UpstreamBalanceService) *SecurityAlertService {
 	svc := NewSecurityAlertService(db, settingService, lockCache)
 	svc.SetUpstreamBalanceService(upstreamBalanceService)
+	svc.SetChannelFidelityProber(newChannelFidelityProber(upstreamBalanceService))
 	auditLogService.SetObserver(svc)
 	svc.Start()
 	return svc

@@ -17,6 +17,8 @@ export interface SecurityAlertConfig {
   channel_runway_hours: number
   channel_quota_error_notify: boolean
   channel_monitor_notify: boolean
+  /** 渠道保真体检复测确认不通过时推送，恢复后再推一次。 */
+  channel_fidelity_notify: boolean
   user_balance_watches: UserBalanceWatch[]
   [key: string]: unknown
 }
