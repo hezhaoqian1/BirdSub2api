@@ -51,6 +51,7 @@ func (s *SecurityAlertService) runTick() {
 			s.checkLoginFailures(ctx, snap)
 			s.checkChannelQuotaErrors(ctx, snap)
 			s.checkUserBalanceWatches(ctx, snap)
+			s.checkRecharges(ctx, snap)
 		}
 		if now.Sub(s.lastUsageCheck) >= securityAlertUsageCheckEvery {
 			s.lastUsageCheck = now
@@ -472,6 +473,9 @@ func (s *SecurityAlertService) buildDailyDigest(ctx context.Context, snap securi
 		fmt.Sprintf("后台操作 %d 次，来自网段：%s", adminOps, prefixText),
 		fmt.Sprintf("后台余额调整 %d 次；新注册 %d 人", balanceOps, signups),
 		fmt.Sprintf("全站消费 $%.2f（%d 次请求）", spend, requests),
+	}
+	if line := s.buildRechargeDigestLine(ctx, start, end); line != "" {
+		lines = append(lines, line)
 	}
 	lines = append(lines, s.buildBalanceDigestLines(ctx, snap.cfg, start, end)...)
 	return append(lines, "这条日报每天都会发，哪天没收到说明告警通道出了问题。"), nil

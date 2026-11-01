@@ -49,6 +49,29 @@
         </label>
       </fieldset>
 
+      <fieldset class="space-y-4 rounded-lg border border-gray-200 p-4 dark:border-dark-700">
+        <legend class="px-1 font-medium">{{ t('securityAlerts.rechargeTitle') }}</legend>
+        <label class="flex items-start gap-2 text-sm">
+          <input v-model="form.recharge_notify" type="checkbox" class="mt-1" data-test="recharge-notify" />
+          <span>
+            <span class="font-medium text-gray-900 dark:text-white">{{ t('securityAlerts.rechargeNotify') }}</span>
+            <span class="block text-xs text-gray-500 dark:text-gray-400">{{ t('securityAlerts.rechargeNotifyHint') }}</span>
+          </span>
+        </label>
+        <div class="grid gap-4 sm:grid-cols-2">
+          <label class="block text-sm">
+            <span class="font-medium text-gray-900 dark:text-white">{{ t('securityAlerts.rechargeExpired') }}</span>
+            <input v-model.number="form.recharge_expired_notify_cny" type="number" min="0" step="100" class="input mt-1" data-test="recharge_expired_notify_cny" />
+            <span class="mt-1 block text-xs text-gray-500 dark:text-gray-400">{{ t('securityAlerts.rechargeExpiredHint') }}</span>
+          </label>
+          <label class="block text-sm">
+            <span class="font-medium text-gray-900 dark:text-white">{{ t('securityAlerts.rechargeStuck') }}</span>
+            <input v-model.number="form.recharge_stuck_minutes" type="number" min="0" max="1440" step="5" class="input mt-1" data-test="recharge_stuck_minutes" />
+            <span class="mt-1 block text-xs text-gray-500 dark:text-gray-400">{{ t('securityAlerts.rechargeStuckHint') }}</span>
+          </label>
+        </div>
+      </fieldset>
+
       <fieldset class="space-y-3 rounded-lg border border-gray-200 p-4 dark:border-dark-700">
         <legend class="px-1 font-medium">{{ t('securityAlerts.usersTitle') }}</legend>
         <p class="text-xs text-gray-500 dark:text-gray-400">{{ t('securityAlerts.usersHint') }}</p>
@@ -122,7 +145,8 @@ import { isStepUpCancelled, useStepUp } from '@/composables/useStepUp'
 type NumberKey = 'channel_spend_floor' | 'channel_spend_multiplier' | 'channel_balance_check_minutes' |
   'channel_low_balance_usd' | 'channel_low_balance_cny' | 'channel_runway_hours'
 // 只提交本卡片管理的字段；其余安全规则由服务端按原值合并保留。
-type EditableConfig = Pick<SecurityAlertConfig, NumberKey | 'enabled' | 'channel_quota_error_notify' | 'channel_monitor_notify' | 'channel_fidelity_notify' | 'user_balance_watches'>
+type EditableConfig = Pick<SecurityAlertConfig, NumberKey | 'enabled' | 'channel_quota_error_notify' | 'channel_monitor_notify' | 'channel_fidelity_notify' | 'user_balance_watches' |
+  'recharge_notify' | 'recharge_expired_notify_cny' | 'recharge_stuck_minutes'>
 interface UserInfo { email: string; balance: number; found: boolean }
 
 const numberFields: { key: NumberKey; label: string; hint: string; step: number }[] = [
@@ -171,6 +195,10 @@ function apply(next: SecurityAlertConfigView) {
     // 旧配置没有这个字段时按服务端默认（开启）处理。
     channel_monitor_notify: c.channel_monitor_notify ?? true,
     channel_fidelity_notify: c.channel_fidelity_notify ?? true,
+    // 旧配置没有充值提醒字段时按服务端默认处理。
+    recharge_notify: c.recharge_notify ?? true,
+    recharge_expired_notify_cny: c.recharge_expired_notify_cny ?? 500,
+    recharge_stuck_minutes: c.recharge_stuck_minutes ?? 10,
     user_balance_watches: (c.user_balance_watches ?? []).map(w => ({ ...w, note: w.note ?? '' })),
   }
   const info: Record<number, UserInfo> = {}
@@ -190,6 +218,8 @@ async function save() {
   if (form.value.user_balance_watches.some(w => !(Number(w.threshold) > 0))) { error.value = t('securityAlerts.thresholdInvalid'); return }
   const patch: EditableConfig = JSON.parse(JSON.stringify(form.value))
   for (const field of numberFields) patch[field.key] = Number(patch[field.key]) || 0
+  patch.recharge_expired_notify_cny = Number(patch.recharge_expired_notify_cny) || 0
+  patch.recharge_stuck_minutes = Math.round(Number(patch.recharge_stuck_minutes) || 0)
   patch.user_balance_watches = patch.user_balance_watches.map(w => ({ user_id: w.user_id, threshold: Number(w.threshold), note: (w.note ?? '').trim() }))
   busy.value = true
   error.value = ''

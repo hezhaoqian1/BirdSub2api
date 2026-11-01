@@ -19,6 +19,12 @@ export interface SecurityAlertConfig {
   channel_monitor_notify: boolean
   /** 渠道保真体检复测确认不通过时推送，恢复后再推一次。 */
   channel_fidelity_notify: boolean
+  /** 用户在线充值成功时每笔推送。 */
+  recharge_notify: boolean
+  /** 充值订单过期没付成且金额 ≥ 该值（元）时推送，0 关闭。 */
+  recharge_expired_notify_cny: number
+  /** 已付款但超过该分钟数未到账时告警，0 关闭。 */
+  recharge_stuck_minutes: number
   user_balance_watches: UserBalanceWatch[]
   [key: string]: unknown
 }

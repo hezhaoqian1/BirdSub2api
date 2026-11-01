@@ -104,6 +104,13 @@ type SecurityAlertConfig struct {
 	ChannelFidelityNotify bool `json:"channel_fidelity_notify"`
 	// UserBalanceWatches 关注的用户及其余额提醒线。
 	UserBalanceWatches []UserBalanceWatch `json:"user_balance_watches"`
+
+	// RechargeNotify 用户在线充值成功时每笔推送一次。
+	RechargeNotify bool `json:"recharge_notify"`
+	// RechargeExpiredNotifyCNY 充值订单过期没付成、金额达到该值（元）时推送，0 关闭。
+	RechargeExpiredNotifyCNY float64 `json:"recharge_expired_notify_cny"`
+	// RechargeStuckMinutes 支付平台已确认付款，超过该分钟数仍未到账时告警，0 关闭。
+	RechargeStuckMinutes int `json:"recharge_stuck_minutes"`
 }
 
 // UserBalanceWatch 关注的用户：余额低于提醒线时推送一次，充值回到提醒线以上后重新开始监控。
@@ -139,6 +146,9 @@ func DefaultSecurityAlertConfig() SecurityAlertConfig {
 		ChannelMonitorNotify:       true,
 		ChannelFidelityNotify:      true,
 		UserBalanceWatches:         []UserBalanceWatch{},
+		RechargeNotify:             true,
+		RechargeExpiredNotifyCNY:   500,
+		RechargeStuckMinutes:       10,
 	}
 }
 
@@ -201,6 +211,12 @@ func (c SecurityAlertConfig) Validate() error {
 	}
 	if c.ChannelRunwayHours > 168 {
 		return errors.New("channel_runway_hours must not exceed 168")
+	}
+	if c.RechargeExpiredNotifyCNY < 0 {
+		return errors.New("recharge_expired_notify_cny must not be negative")
+	}
+	if c.RechargeStuckMinutes < 0 || c.RechargeStuckMinutes > 1440 {
+		return errors.New("recharge_stuck_minutes must be between 0 (off) and 1440")
 	}
 	if len(c.UserBalanceWatches) > securityAlertMaxUserWatches {
 		return fmt.Errorf("at most %d watched users", securityAlertMaxUserWatches)

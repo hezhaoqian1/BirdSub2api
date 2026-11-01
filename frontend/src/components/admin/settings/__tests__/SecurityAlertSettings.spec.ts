@@ -29,6 +29,7 @@ function configView(watches = [{ user_id: 12, threshold: 50, note: '大客户' }
       channel_spend_floor: 100, channel_spend_multiplier: 3, channel_balance_check_minutes: 10,
       channel_low_balance_usd: 20, channel_low_balance_cny: 100, channel_runway_hours: 6,
       channel_quota_error_notify: true, channel_monitor_notify: true, channel_fidelity_notify: true, user_balance_watches: watches,
+      recharge_notify: true, recharge_expired_notify_cny: 500, recharge_stuck_minutes: 10,
     },
     wecom_webhook_configured: true,
     wecom_webhook_masked: 'https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=5e74****0930',
@@ -78,6 +79,9 @@ describe('企业微信告警设置', () => {
     await wrapper.get('[data-test="channel-monitor-notify"]').setValue(false)
     expect((wrapper.get('[data-test="channel-fidelity-notify"]').element as HTMLInputElement).checked).toBe(true)
     await wrapper.get('[data-test="channel-fidelity-notify"]').setValue(false)
+    expect((wrapper.get('[data-test="recharge-notify"]').element as HTMLInputElement).checked).toBe(true)
+    await wrapper.get('[data-test="recharge_expired_notify_cny"]').setValue('1000')
+    await wrapper.get('[data-test="recharge_stuck_minutes"]').setValue('15')
     await wrapper.get('[data-test="save"]').trigger('click')
     await flushPromises()
     expect(mocks.stepUp).toHaveBeenCalledOnce()
@@ -85,6 +89,9 @@ describe('企业微信告警设置', () => {
     expect(patch.channel_low_balance_usd).toBe(30)
     expect(patch.channel_monitor_notify).toBe(false)
     expect(patch.channel_fidelity_notify).toBe(false)
+    expect(patch.recharge_notify).toBe(true)
+    expect(patch.recharge_expired_notify_cny).toBe(1000)
+    expect(patch.recharge_stuck_minutes).toBe(15)
     expect(patch.user_balance_watches).toEqual([
       { user_id: 12, threshold: 50, note: '大客户' },
       { user_id: 34, threshold: 200, note: '' },
