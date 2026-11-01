@@ -30,6 +30,8 @@ const runtimeSettings = ref<OpsAlertRuntimeSettings | null>(null)
 const emailConfig = ref<EmailNotificationConfig | null>(null)
 // 高级设置
 const advancedSettings = ref<OpsAdvancedSettings | null>(null)
+// 不记录请求体快照的用户 ID（输入框为逗号/空格分隔文本，保存时解析）
+const snapshotExcludeUserIdsText = ref('')
 // 指标阈值配置
 const metricThresholds = ref<OpsMetricThresholds>({
   sla_percent_min: 99.5,
@@ -56,6 +58,7 @@ async function loadAllSettings() {
     if (advancedSettings.value && !advancedSettings.value.openai_account_quota_auto_pause) {
       advancedSettings.value.openai_account_quota_auto_pause = { default_threshold_5h: 0, default_threshold_7d: 0 }
     }
+    snapshotExcludeUserIdsText.value = (advancedSettings.value?.request_body_snapshot_exclude_user_ids ?? []).join(', ')
     // 如果后端返回了阈值，使用后端的值；否则保持默认值
     if (thresholds && Object.keys(thresholds).length > 0) {
         metricThresholds.value = {
@@ -148,6 +151,18 @@ const quotaAutoPause7dPercent = computed<number | null>({
   }
 })
 
+function parseUserIdList(text: string): number[] | null {
+  const parts = text.split(/[\s,，;；]+/).filter(Boolean)
+  const ids: number[] = []
+  for (const part of parts) {
+    if (!/^\d+$/.test(part)) return null
+    const id = Number(part)
+    if (!Number.isSafeInteger(id) || id <= 0) return null
+    if (!ids.includes(id)) ids.push(id)
+  }
+  return ids
+}
+
 // 验证
 const validation = computed(() => {
   const errors: string[] = []
@@ -179,6 +194,10 @@ const validation = computed(() => {
     if (default_threshold_5h < 0 || default_threshold_5h > 1 || default_threshold_7d < 0 || default_threshold_7d > 1) {
       errors.push(t('admin.ops.settings.validation.openaiQuotaAutoPauseRange'))
     }
+
+    if (parseUserIdList(snapshotExcludeUserIdsText.value) === null) {
+      errors.push(t('admin.ops.settings.validation.snapshotExcludeUserIds'))
+    }
   }
 
   // 验证指标阈值
@@ -208,6 +227,9 @@ async function saveAllSettings() {
 
   saving.value = true
   try {
+    if (advancedSettings.value) {
+      advancedSettings.value.request_body_snapshot_exclude_user_ids = parseUserIdList(snapshotExcludeUserIdsText.value) ?? []
+    }
     // 无收件人时自动禁用邮件通知
     if (emailConfig.value) {
       if (emailConfig.value.alert.enabled && emailConfig.value.alert.recipients.length === 0) {
@@ -594,6 +616,17 @@ async function saveAllSettings() {
                 </p>
               </div>
               <Toggle v-model="advancedSettings.record_request_body_on_error" />
+            </div>
+
+            <div v-if="advancedSettings.record_request_body_on_error">
+              <label class="input-label">{{ t('admin.ops.settings.snapshotExcludeUserIds') }}</label>
+              <input
+                v-model="snapshotExcludeUserIdsText"
+                type="text"
+                class="input"
+                :placeholder="t('admin.ops.settings.snapshotExcludeUserIdsPlaceholder')"
+              />
+              <p class="mt-1 text-xs text-gray-500">{{ t('admin.ops.settings.snapshotExcludeUserIdsHint') }}</p>
             </div>
           </div>
 

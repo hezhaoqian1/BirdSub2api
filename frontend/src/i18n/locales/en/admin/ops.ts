@@ -771,6 +771,9 @@ export default {
         ignoreInsufficientBalanceErrorsHint: 'When enabled, insufficient account balance errors will not be written to the error log.',
         recordRequestBodyOnError: 'Record request content on errors',
         recordRequestBodyOnErrorHint: 'When enabled, failed user requests store their request body (first and last 32KB plus a summary), viewable and copyable in the error detail. Credential fields such as api_key and authorization_token are redacted.',
+        snapshotExcludeUserIds: 'User IDs excluded from request content',
+        snapshotExcludeUserIdsPlaceholder: 'e.g. 4, 57',
+        snapshotExcludeUserIdsHint: 'Errors from these users are logged without the request body. Use for high-volume customers with large (e.g. image) requests so mass rejections do not bloat the error log table. Separate IDs with commas or spaces.',
         autoRefresh: 'Auto Refresh',
         enableAutoRefresh: 'Enable auto refresh',
         enableAutoRefreshHint: 'Automatically refresh dashboard data at a fixed interval.',
@@ -791,7 +794,8 @@ export default {
           ttftP99MaxRange: 'TTFT P99 maximum must be a number ≥ 0',
           requestErrorRateMaxRange: 'Request error rate maximum must be between 0 and 100',
           upstreamErrorRateMaxRange: 'Upstream error rate maximum must be between 0 and 100',
-          openaiQuotaAutoPauseRange: 'OpenAI quota auto-pause threshold must be between 0 and 100'
+          openaiQuotaAutoPauseRange: 'OpenAI quota auto-pause threshold must be between 0 and 100',
+          snapshotExcludeUserIds: 'User IDs must be positive integers separated by commas or spaces'
         }
       },
       concurrency: {

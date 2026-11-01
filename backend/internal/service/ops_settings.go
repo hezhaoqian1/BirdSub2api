@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -424,6 +426,46 @@ func normalizeOpsAdvancedSettings(cfg *OpsAdvancedSettings) {
 	if cfg.AutoRefreshIntervalSec <= 0 {
 		cfg.AutoRefreshIntervalSec = 30
 	}
+	cfg.RequestBodySnapshotExcludeUserIDs = normalizeOpsUserIDList(cfg.RequestBodySnapshotExcludeUserIDs)
+}
+
+// opsRequestBodySnapshotExcludeUserIDsMax 限制排除名单长度，防止误粘贴超大列表拖慢热路径。
+const opsRequestBodySnapshotExcludeUserIDsMax = 200
+
+// normalizeOpsUserIDList 去掉非正数与重复项并升序排列；空列表归一为非 nil 空切片，
+// 使 JSON 输出稳定为 []。
+func normalizeOpsUserIDList(ids []int64) []int64 {
+	out := make([]int64, 0, len(ids))
+	seen := make(map[int64]struct{}, len(ids))
+	for _, id := range ids {
+		if id <= 0 {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		out = append(out, id)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i] < out[j] })
+	return out
+}
+
+// ShouldRecordRequestBodySnapshot 判断某个用户的报错是否需要附带请求体快照。
+// userID 未知（如鉴权前失败）时只看总开关。
+func (cfg OpsAdvancedSettings) ShouldRecordRequestBodySnapshot(userID *int64) bool {
+	if !cfg.RecordRequestBodyOnError {
+		return false
+	}
+	if userID == nil {
+		return true
+	}
+	for _, excluded := range cfg.RequestBodySnapshotExcludeUserIDs {
+		if excluded == *userID {
+			return false
+		}
+	}
+	return true
 }
 
 func clampOpsQuotaAutoPauseThreshold(value float64) float64 {
@@ -452,6 +494,9 @@ func validateOpsAdvancedSettings(cfg *OpsAdvancedSettings) error {
 	}
 	if cfg.AutoRefreshIntervalSec < 15 || cfg.AutoRefreshIntervalSec > 300 {
 		return errors.New("auto_refresh_interval_seconds must be between 15 and 300")
+	}
+	if len(cfg.RequestBodySnapshotExcludeUserIDs) > opsRequestBodySnapshotExcludeUserIDsMax {
+		return fmt.Errorf("request_body_snapshot_exclude_user_ids supports at most %d users", opsRequestBodySnapshotExcludeUserIDsMax)
 	}
 	return nil
 }

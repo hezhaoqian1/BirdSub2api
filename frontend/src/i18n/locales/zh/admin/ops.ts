@@ -772,6 +772,9 @@ export default {
         ignoreInsufficientBalanceErrorsHint: '启用后，账号余额不足（Insufficient balance）的错误将不会写入错误日志。',
         recordRequestBodyOnError: '报错时记录请求内容',
         recordRequestBodyOnErrorHint: '启用后，用户请求报错时会保存其请求体（开头和结尾各 32KB，并附摘要），可在错误详情中查看和复制。api_key、authorization_token 等凭据字段会被擦除。',
+        snapshotExcludeUserIds: '不记录请求内容的用户 ID',
+        snapshotExcludeUserIdsPlaceholder: '例如：4, 57',
+        snapshotExcludeUserIdsHint: '这些用户报错时只写错误行、不保存请求体。适用于大流量、大请求体（如带图片）的客户，避免批量报错撑爆错误日志表。多个 ID 用逗号或空格分隔。',
         autoRefresh: '自动刷新',
         enableAutoRefresh: '启用自动刷新',
         enableAutoRefreshHint: '自动刷新仪表板数据，启用后会定期拉取最新数据。',
@@ -792,7 +795,8 @@ export default {
           ttftP99MaxRange: 'TTFT P99最大值必须大于等于0',
           requestErrorRateMaxRange: '请求错误率最大值必须在0-100之间',
           upstreamErrorRateMaxRange: '上游错误率最大值必须在0-100之间',
-          openaiQuotaAutoPauseRange: 'OpenAI 配额自动暂停阈值必须在 0-100 之间'
+          openaiQuotaAutoPauseRange: 'OpenAI 配额自动暂停阈值必须在 0-100 之间',
+          snapshotExcludeUserIds: '用户 ID 只能填正整数，用逗号或空格分隔'
         }
       },
       concurrency: {
