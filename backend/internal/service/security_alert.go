@@ -403,6 +403,9 @@ type SecurityAlertService struct {
 
 	lastFidelitySweepCheck  time.Time
 	fidelitySweepInProgress atomic.Bool
+
+	// geminiFP Gemini VT 被动检测记录器（每个实例都写，见 gemini_vt_fingerprint.go）。
+	geminiFP *geminiFingerprintRecorder
 }
 
 // SetUpstreamBalanceService 注入上游余额查询，用于渠道余额告警；未注入时只做消费与报错告警。
@@ -442,6 +445,13 @@ func (s *SecurityAlertService) Start() {
 	s.wg.Add(2)
 	go s.runObserver()
 	go s.runTicker()
+	if s.geminiFP != nil {
+		s.wg.Add(1)
+		go func() {
+			defer s.wg.Done()
+			s.geminiFP.run(s.stopCh)
+		}()
+	}
 }
 
 // Stop 停止服务。

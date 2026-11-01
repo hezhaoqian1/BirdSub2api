@@ -29,6 +29,8 @@ function statusView(): ChannelFidelityStatusView {
     config: {
       enabled: true, interval_minutes: 15, recheck_seconds: 60, models: ['deepseek-v4.1-flash', 'deepseek-v4-pro'], prompt_token_tolerance: 10,
       gemini_models: ['gemini-3.8-flash', 'gemini-4-argon'], gemini_account_ids: [], gemini_signature_prefix: 'AY',
+      gemini_passive_enabled: true, gemini_passive_window_minutes: 10, gemini_passive_min_responses: 20,
+      gemini_passive_threshold_percent: 5, gemini_auto_pause: true,
     },
     notify_enabled: true,
     running: false,
@@ -65,6 +67,8 @@ function statusView(): ChannelFidelityStatusView {
           response_excerpt: '[视频] Tokyo; the woman is Saeka Shimada.',
         }),
         history: [],
+        passive: { responses: 412, non_vertex: 96, no_response_id: 96, other_signature: 0, media_requests: 40, media_dropped: 0, window_minutes: 10 },
+        passive_triggered: true,
       },
     ],
   }
@@ -129,6 +133,27 @@ describe('保真体检面板', () => {
     expect(row.findAll('td.text-red-500').length).toBeGreaterThanOrEqual(2)
     // DeepSeek 表里没有 Gemini 行。
     expect(wrapper.get('[data-test="fidelity-section-deepseek"]').text()).not.toContain('zzshu')
+    // 真实流量（被动检测）一列。
+    expect(section.text()).toContain('真实流量')
+    const passive = section.get('[data-test="fidelity-passive-174-gemini-3.8-flash"]')
+    expect(passive.text()).toContain('412 条 · 非 Vertex 96')
+    expect(passive.find('span.text-red-500').exists()).toBe(true)
+    expect(row.text()).toContain('真实流量混用')
+  })
+
+  it('保存被动检测与自动暂停设置', async () => {
+    mocks.updateConfig.mockImplementation(async (cfg: Record<string, unknown>) => cfg)
+    const wrapper = mount(ChannelFidelityPanel)
+    await flushPromises()
+    await wrapper.get('[data-test="fidelity-auto-pause"]').setValue(false)
+    await wrapper.get('[data-test="fidelity-passive-threshold"]').setValue('10')
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+    expect(mocks.updateConfig).toHaveBeenCalledWith(expect.objectContaining({
+      gemini_passive_enabled: true,
+      gemini_auto_pause: false,
+      gemini_passive_threshold_percent: 10,
+    }))
   })
 
   it('保存 Gemini 额外账号 ID，非法输入不提交', async () => {

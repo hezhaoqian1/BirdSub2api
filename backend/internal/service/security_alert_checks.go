@@ -64,6 +64,7 @@ func (s *SecurityAlertService) runTick() {
 	}
 	// 保真体检有自己的开关；告警总开关关闭时照常体检，只是不推送。
 	s.maybeStartFidelitySweep(ctx)
+	s.checkGeminiPassiveFingerprints(ctx)
 	s.deliverPending(ctx)
 	if now.Sub(s.lastCleanup) >= securityAlertCleanupEvery {
 		s.lastCleanup = now
@@ -74,6 +75,7 @@ func (s *SecurityAlertService) runTick() {
 			slog.Warn("[SecurityAlert] balance sample cleanup failed", "error", err)
 		}
 		s.cleanupFidelityChecks(ctx)
+		s.cleanupGeminiFingerprints(ctx)
 	}
 }
 

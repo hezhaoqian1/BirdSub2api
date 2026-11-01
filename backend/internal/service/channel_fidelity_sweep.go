@@ -212,7 +212,7 @@ func (s *SecurityAlertService) runFidelitySweep(cfg ChannelFidelityConfig) {
 			s.fidelityRecovered(ctx, targets[i], *r)
 		case fidelityStatusFail:
 			if cfg.RecheckSeconds <= 0 {
-				s.fidelityAlert(ctx, targets[i], nil, *r)
+				s.fidelityAlert(ctx, s.autoPauseConfirmedGemini(ctx, cfg, targets[i], *r), nil, *r)
 			} else {
 				retry = append(retry, i)
 			}
@@ -240,8 +240,8 @@ func (s *SecurityAlertService) runFidelitySweep(cfg ChannelFidelityConfig) {
 			continue
 		}
 		// 复测不通过，或复测请求出错/超时（强制思考的上游常常拖到超时）：
-		// 首次的不通过没有被推翻，按确认处理。
-		s.fidelityAlert(ctx, targets[i], &first[i], *r)
+		// 首次的不通过没有被推翻，按确认处理。自动暂停只在复测真的不通过时做。
+		s.fidelityAlert(ctx, s.autoPauseConfirmedGemini(ctx, cfg, targets[i], *r), &first[i], *r)
 	}
 }
 
@@ -438,7 +438,7 @@ func (s *SecurityAlertService) ResetFidelityBaseline(ctx context.Context, accoun
 
 // fidelityAlert 复测确认不通过后抢这轮故障的告警记录并写入 outbox；记录已存在说明已经推送过。
 func (s *SecurityAlertService) fidelityAlert(ctx context.Context, t fidelityTarget, first *ChannelFidelityCheck, last ChannelFidelityCheck) {
-	if !t.Account.Schedulable || !s.fidelityNotifyEnabled(ctx) {
+	if (!t.Account.Schedulable && !t.autoPaused) || !s.fidelityNotifyEnabled(ctx) {
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), fidelityStateTimeout)
@@ -467,6 +467,15 @@ func (s *SecurityAlertService) fidelityAlert(ctx context.Context, t fidelityTarg
 	if err := tx.Commit(); err != nil {
 		slog.Warn("[ChannelFidelity] failed to commit alert", "error", err)
 	}
+}
+
+// autoPauseConfirmedGemini Gemini VT 体检复测确认不通过时按配置自动暂停账号调度。
+func (s *SecurityAlertService) autoPauseConfirmedGemini(ctx context.Context, cfg ChannelFidelityConfig, t fidelityTarget, last ChannelFidelityCheck) fidelityTarget {
+	if t.kind() != fidelityKindGeminiVT || !cfg.GeminiAutoPause || last.Status != fidelityStatusFail || !t.Account.Schedulable {
+		return t
+	}
+	t.autoPaused = s.pauseGeminiVTAccount(ctx, t.Account)
+	return t
 }
 
 func fidelityModelLabel(t fidelityTarget) string {
@@ -503,7 +512,11 @@ func fidelityAlertDraft(t fidelityTarget, first *ChannelFidelityCheck, last Chan
 	}
 	if t.kind() == fidelityKindGeminiVT {
 		lines = append(lines, "判断：疑似混用了 AI Studio 等非 Vertex 资源（这类资源读不了 gs:// 文件、会忽略视频直接按文字回答）。")
-		lines = append(lines, "处理：确认后暂停该账号调度并找上游核实；恢复后会再通知。")
+		if t.autoPaused {
+			lines = append(lines, "处理：已自动暂停该账号调度。确认上游修好后在账号管理里重新开启。")
+		} else {
+			lines = append(lines, "处理：确认后暂停该账号调度并找上游核实；恢复后会再通知。")
+		}
 	} else {
 		lines = append(lines, "处理：确认后可在该账号的模型映射里去掉这个模型，或暂停调度；恢复后会再通知。")
 	}
@@ -588,6 +601,10 @@ type ChannelFidelityRow struct {
 	Alerting             bool                   `json:"alerting"`
 	Latest               *ChannelFidelityCheck  `json:"latest"`
 	History              []ChannelFidelityPoint `json:"history"`
+	// Passive 只用于 Gemini VT：最近窗口内真实流量的回复指纹（被动检测）。
+	Passive *GeminiPassiveStats `json:"passive,omitempty"`
+	// PassiveTriggered 被动检测已判定该账号混用（已暂停或已告警，等管理员处理）。
+	PassiveTriggered bool `json:"passive_triggered"`
 }
 
 // ChannelFidelityStatus 保真体检页的数据。
@@ -665,7 +682,7 @@ func (s *SecurityAlertService) GetFidelityStatus(ctx context.Context) (ChannelFi
 	_ = rows.Close()
 
 	alerting := map[string]struct{}{}
-	rows, err = s.db.QueryContext(ctx, `SELECT subject FROM security_alert_state WHERE subject LIKE 'fidelity:%'`)
+	rows, err = s.db.QueryContext(ctx, `SELECT subject FROM security_alert_state WHERE subject LIKE 'fidelity:%' OR subject LIKE 'vtpassive:%'`)
 	if err != nil {
 		return out, err
 	}
@@ -677,6 +694,13 @@ func (s *SecurityAlertService) GetFidelityStatus(ctx context.Context) (ChannelFi
 	}
 	_ = rows.Close()
 
+	var passive map[string]GeminiPassiveStats
+	for _, t := range targets {
+		if t.kind() == fidelityKindGeminiVT {
+			passive = s.loadGeminiPassiveStatsByTarget(ctx, cfg)
+			break
+		}
+	}
 	for _, t := range targets {
 		key := fidelityKey(t.Account.ID, t.UpstreamModel)
 		row := ChannelFidelityRow{
@@ -699,6 +723,12 @@ func (s *SecurityAlertService) GetFidelityStatus(ctx context.Context) (ChannelFi
 			row.Latest = &c
 		}
 		_, row.Alerting = alerting[fidelityAlertSubject(t.Account.ID, t.UpstreamModel)]
+		if t.kind() == fidelityKindGeminiVT {
+			st := passive[key]
+			st.WindowMinutes = cfg.GeminiPassiveWindowMinutes
+			row.Passive = &st
+			_, row.PassiveTriggered = alerting[geminiPassiveSubjectPrefix+strconv.FormatInt(t.Account.ID, 10)]
+		}
 		out.Rows = append(out.Rows, row)
 	}
 	sort.SliceStable(out.Rows, func(i, j int) bool {

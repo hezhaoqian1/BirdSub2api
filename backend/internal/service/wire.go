@@ -1036,6 +1036,7 @@ func ProvideSecurityAlertService(db *sql.DB, settingService *SettingService, loc
 	svc := NewSecurityAlertService(db, settingService, lockCache)
 	svc.SetUpstreamBalanceService(upstreamBalanceService)
 	svc.SetChannelFidelityProber(newChannelFidelityProber(upstreamBalanceService))
+	svc.SetGeminiFingerprintRecorder(newGeminiFingerprintRecorder(db))
 	auditLogService.SetObserver(svc)
 	svc.Start()
 	return svc

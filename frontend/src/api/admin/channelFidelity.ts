@@ -20,6 +20,24 @@ export interface ChannelFidelityConfig {
   gemini_account_ids: number[]
   /** Vertex thoughtSignature 的固定开头（默认 AY）。 */
   gemini_signature_prefix: string
+  /** 被动检测：看真实客户流量里 Gemini VT 账号的回复指纹。 */
+  gemini_passive_enabled: boolean
+  gemini_passive_window_minutes: number
+  gemini_passive_min_responses: number
+  gemini_passive_threshold_percent: number
+  /** 确认混用后自动暂停该账号调度。 */
+  gemini_auto_pause: boolean
+}
+
+/** 被动检测：窗口内真实流量的回复指纹。 */
+export interface GeminiPassiveStats {
+  responses: number
+  non_vertex: number
+  no_response_id: number
+  other_signature: number
+  media_requests: number
+  media_dropped: number
+  window_minutes: number
 }
 
 export interface ChannelFidelityCheck {
@@ -70,6 +88,9 @@ export interface ChannelFidelityRow {
   alerting: boolean
   latest: ChannelFidelityCheck | null
   history: ChannelFidelityPoint[]
+  /** 只有 Gemini VT 行有。 */
+  passive?: GeminiPassiveStats | null
+  passive_triggered?: boolean
 }
 
 export interface ChannelFidelityStatusView {
