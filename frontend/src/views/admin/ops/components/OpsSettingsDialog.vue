@@ -189,6 +189,10 @@ const validation = computed(() => {
     if (hourly_metrics_retention_days < 0 || hourly_metrics_retention_days > 365) {
       errors.push(t('admin.ops.settings.validation.retentionDaysRange'))
     }
+    const queueRejectDays = advancedSettings.value.data_retention.queue_reject_retention_days ?? 5
+    if (queueRejectDays < 1 || queueRejectDays > 365) {
+      errors.push(t('admin.ops.settings.validation.queueRejectRetentionDaysRange'))
+    }
 
     const { default_threshold_5h, default_threshold_7d } = advancedSettings.value.openai_account_quota_auto_pause
     if (default_threshold_5h < 0 || default_threshold_5h > 1 || default_threshold_7d < 0 || default_threshold_7d > 1) {
@@ -512,6 +516,19 @@ async function saveAllSettings() {
                   max="365"
                   class="input"
                 />
+              </div>
+              <div>
+                <label class="input-label">{{ t('admin.ops.settings.queueRejectRetentionDays') }}</label>
+                <input
+                  v-model.number="advancedSettings.data_retention.queue_reject_retention_days"
+                  type="number"
+                  min="1"
+                  max="365"
+                  placeholder="5"
+                  class="input"
+                  data-test="queue-reject-retention-days"
+                />
+                <p class="mt-1 text-xs text-gray-500">{{ t('admin.ops.settings.queueRejectRetentionDaysHint') }}</p>
               </div>
             </div>
             <p class="text-xs text-gray-500">{{ t('admin.ops.settings.retentionDaysHint') }}</p>

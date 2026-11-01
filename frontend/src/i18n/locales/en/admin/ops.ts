@@ -751,6 +751,8 @@ export default {
         errorLogRetentionDays: 'Error Log Retention Days',
         minuteMetricsRetentionDays: 'Minute Metrics Retention Days',
         hourlyMetricsRetentionDays: 'Hourly Metrics Retention Days',
+        queueRejectRetentionDays: 'Queue-Full Rejection Retention Days',
+        queueRejectRetentionDaysHint: 'Gateway queue-full rejections (Too many pending requests) are counted per minute and kept for this many days (default 5).',
         retentionDaysHint: 'Recommended 7-90 days; longer periods consume more storage. Set to 0 to wipe all history on every scheduled cleanup',
         aggregation: 'Pre-aggregation Tasks',
         enableAggregation: 'Enable Pre-aggregation',
@@ -790,6 +792,7 @@ export default {
         validation: {
           title: 'Please fix the following issues',
           retentionDaysRange: 'Retention days must be between 0 and 365 (0 = wipe all on every cleanup)',
+          queueRejectRetentionDaysRange: 'Queue-full rejection retention must be between 1 and 365 days',
           slaMinPercentRange: 'SLA minimum percentage must be between 0 and 100',
           ttftP99MaxRange: 'TTFT P99 maximum must be a number ≥ 0',
           requestErrorRateMaxRange: 'Request error rate maximum must be between 0 and 100',

@@ -293,6 +293,7 @@ func (h *ConcurrencyHelper) acquireUserSlotWithWaitTimeout(c *gin.Context, userI
 		return nil, err
 	}
 	if !canWait {
+		markGatewayQueueFull(c)
 		return nil, &WaitQueueFullError{SlotType: "user"}
 	}
 	defer h.DecrementWaitCount(ctx, userID)

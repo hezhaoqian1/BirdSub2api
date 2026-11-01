@@ -45,7 +45,7 @@ func TestComputeEffective_FallbackToCfgWhenSettingsAbsent(t *testing.T) {
 
 	svc.computeEffectiveLocked(context.Background())
 
-	want := opsCleanupEffectiveConfig{OpsCleanupConfig: base, SystemLogRetentionDays: 30}
+	want := opsCleanupEffectiveConfig{OpsCleanupConfig: base, SystemLogRetentionDays: 30, QueueRejectRetentionDays: 5}
 	if svc.effective != want {
 		t.Fatalf("expected effective == cfg base, got %#v", svc.effective)
 	}
@@ -79,7 +79,8 @@ func TestComputeEffective_SettingsOverridesAll(t *testing.T) {
 			MinuteMetricsRetentionDays: 7,
 			HourlyMetricsRetentionDays: 14,
 		},
-		SystemLogRetentionDays: 30,
+		SystemLogRetentionDays:   30,
+		QueueRejectRetentionDays: 5, // 设置里没有这一项：保持默认 5 天
 	}
 	if svc.effective != want {
 		t.Fatalf("effective mismatch:\nwant %#v\n got %#v", want, svc.effective)
@@ -160,7 +161,7 @@ func TestComputeEffective_BadJSONFallsBackToCfg(t *testing.T) {
 
 	svc.computeEffectiveLocked(context.Background())
 
-	want := opsCleanupEffectiveConfig{OpsCleanupConfig: base, SystemLogRetentionDays: 30}
+	want := opsCleanupEffectiveConfig{OpsCleanupConfig: base, SystemLogRetentionDays: 30, QueueRejectRetentionDays: 5}
 	if svc.effective != want {
 		t.Fatalf("expected fallback to cfg on bad JSON, got %#v", svc.effective)
 	}
@@ -318,5 +319,22 @@ func TestRefreshEffectiveBeforeRun_UpdatesSnapshot(t *testing.T) {
 	snap := svc.snapshotEffective()
 	if snap.ErrorLogRetentionDays != 7 {
 		t.Fatalf("after refresh, retention should be 7, got %d", snap.ErrorLogRetentionDays)
+	}
+}
+
+func TestComputeEffective_QueueRejectRetentionOverride(t *testing.T) {
+	repo := newRuntimeSettingRepoStub()
+	writeAdvancedSettings(t, repo, OpsDataRetentionSettings{
+		CleanupEnabled:             true,
+		CleanupSchedule:            "0 2 * * *",
+		ErrorLogRetentionDays:      30,
+		MinuteMetricsRetentionDays: 30,
+		HourlyMetricsRetentionDays: 30,
+		QueueRejectRetentionDays:   7,
+	})
+	svc := makeOverlayService(repo, config.OpsCleanupConfig{Enabled: true, Schedule: "0 2 * * *", ErrorLogRetentionDays: 30})
+	svc.computeEffectiveLocked(context.Background())
+	if svc.effective.QueueRejectRetentionDays != 7 {
+		t.Fatalf("expected queue reject retention 7, got %d", svc.effective.QueueRejectRetentionDays)
 	}
 }

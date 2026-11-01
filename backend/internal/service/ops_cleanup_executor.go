@@ -87,6 +87,20 @@ func deleteOldRowsByID(
 	batchSize int,
 	castCutoffToDate bool,
 ) (int64, error) {
+	return deleteOldRowsByIDWhere(ctx, db, table, timeColumn, "", cutoff, batchSize, castCutoffToDate)
+}
+
+// deleteOldRowsByIDWhere 与 deleteOldRowsByID 相同，额外加一个固定的过滤条件（只用常量 SQL）。
+func deleteOldRowsByIDWhere(
+	ctx context.Context,
+	db *sql.DB,
+	table string,
+	timeColumn string,
+	extraWhere string,
+	cutoff time.Time,
+	batchSize int,
+	castCutoffToDate bool,
+) (int64, error) {
 	if db == nil {
 		return 0, nil
 	}
@@ -97,6 +111,9 @@ func deleteOldRowsByID(
 	where := fmt.Sprintf("%s < $1", timeColumn)
 	if castCutoffToDate {
 		where = fmt.Sprintf("%s < $1::date", timeColumn)
+	}
+	if extraWhere != "" {
+		where += " AND (" + extraWhere + ")"
 	}
 
 	q := fmt.Sprintf(`
@@ -129,6 +146,28 @@ WHERE id IN (SELECT id FROM batch)
 		}
 	}
 	return total, nil
+}
+
+const (
+	opsQueueRejectDefaultRetentionDays = 5
+	// 改为聚合之前逐条写入 ops_error_logs 的网关排队满拒绝（Phase=request、业务限制、429）。
+	opsQueueRejectErrorLogFilter  = `error_phase = 'request' AND is_business_limited AND status_code = 429 AND error_message LIKE 'Too many pending requests%'`
+	opsQueueRejectAggregateFilter = `reject_reason = 'gateway_queue_full'`
+)
+
+// cleanupOpsQueueRejects 按 queueDays 删除网关排队满的拒绝记录。普通错误日志保留更短（或为 0 时整表清空）时
+// 已经由常规清理覆盖，不再重复删除。
+func cleanupOpsQueueRejects(ctx context.Context, db *sql.DB, now time.Time, queueDays, errorLogDays int) (errorLogs, aggregates int64, err error) {
+	if db == nil || queueDays <= 0 || errorLogDays == 0 || (errorLogDays > 0 && queueDays >= errorLogDays) {
+		return 0, 0, nil
+	}
+	cutoff := now.AddDate(0, 0, -queueDays)
+	errorLogs, err = deleteOldRowsByIDWhere(ctx, db, "ops_error_logs", "created_at", opsQueueRejectErrorLogFilter, cutoff, opsCleanupBatchSize, false)
+	if err != nil {
+		return errorLogs, 0, err
+	}
+	aggregates, err = deleteOldRowsByIDWhere(ctx, db, "ops_ingress_reject_aggregates", "bucket_start", opsQueueRejectAggregateFilter, cutoff, opsCleanupBatchSize, false)
+	return errorLogs, aggregates, err
 }
 
 // truncateOpsTable 用 TRUNCATE TABLE 清空指定表，先 SELECT COUNT(*) 取得清空前行数用于 heartbeat。

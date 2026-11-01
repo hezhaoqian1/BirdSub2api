@@ -66,6 +66,8 @@ type OpsCleanupService struct {
 type opsCleanupEffectiveConfig struct {
 	config.OpsCleanupConfig
 	SystemLogRetentionDays int
+	// QueueRejectRetentionDays 网关排队满拒绝的保留天数（默认 5）。
+	QueueRejectRetentionDays int
 }
 
 func NewOpsCleanupService(
@@ -207,7 +209,8 @@ func (s *OpsCleanupService) Reload(ctx context.Context) error {
 // Missing or invalid settings fall back independently instead of disabling all cleanup overlays.
 func (s *OpsCleanupService) computeEffectiveLocked(ctx context.Context) {
 	base := opsCleanupEffectiveConfig{
-		SystemLogRetentionDays: defaultOpsRuntimeLogConfig(s.cfg).RetentionDays,
+		SystemLogRetentionDays:   defaultOpsRuntimeLogConfig(s.cfg).RetentionDays,
+		QueueRejectRetentionDays: opsQueueRejectDefaultRetentionDays,
 	}
 	if s.cfg != nil {
 		base.OpsCleanupConfig = s.cfg.Ops.Cleanup
@@ -248,6 +251,9 @@ func (s *OpsCleanupService) computeEffectiveLocked(ctx context.Context) {
 			}
 			if dr.HourlyMetricsRetentionDays >= 0 {
 				base.HourlyMetricsRetentionDays = dr.HourlyMetricsRetentionDays
+			}
+			if dr.QueueRejectRetentionDays > 0 {
+				base.QueueRejectRetentionDays = dr.QueueRejectRetentionDays
 			}
 		}
 	}
@@ -346,6 +352,15 @@ func (s *OpsCleanupService) runCleanupOnce(ctx context.Context) (opsCleanupDelet
 			return out, err
 		}
 		*t.counter = n
+	}
+
+	// 网关排队满的拒绝单独按更短的天数保留：聚合计数，以及改为聚合之前逐条写进
+	// ops_error_logs 的旧记录（2026-11-01 一个用户压满时每小时 130 万行）。
+	if n, m, err := cleanupOpsQueueRejects(ctx, s.db, now, effective.QueueRejectRetentionDays, effective.ErrorLogRetentionDays); err != nil {
+		return out, err
+	} else {
+		out.errorLogs += n
+		out.ingressRejects += m
 	}
 
 	// Channel monitor 每日维护（聚合昨日明细 + 软删过期明细/聚合）。

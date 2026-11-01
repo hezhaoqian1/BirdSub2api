@@ -840,6 +840,8 @@ export interface OpsDataRetentionSettings {
   error_log_retention_days: number
   minute_metrics_retention_days: number
   hourly_metrics_retention_days: number
+  /** 网关排队满的拒绝记录保留天数（1-365，默认 5）。 */
+  queue_reject_retention_days?: number
 }
 
 export interface OpsAggregationSettings {
