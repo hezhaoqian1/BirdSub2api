@@ -127,7 +127,9 @@ func TestApplyOpsRequestBodySnapshot_SkipsExcludedUsers(t *testing.T) {
 		installOpsRequestBodyHolder(c, ops)
 		value, ok := c.Get(opsRequestBodyHolderKey)
 		require.True(t, ok)
-		value.(*opsRequestBodyHolder).ObserveRequestBody([]byte(snapshotTestRequestBody))
+		holder, ok := value.(*opsRequestBodyHolder)
+		require.True(t, ok)
+		holder.ObserveRequestBody([]byte(snapshotTestRequestBody))
 		return c
 	}
 
