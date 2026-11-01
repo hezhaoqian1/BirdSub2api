@@ -29,7 +29,7 @@ export default {
   "channelMonitorNotify": "Alert when a channel monitor keeps failing",
   "channelMonitorHint": "Pushed once after 3 consecutive primary-model check failures, and once more when the channel recovers.",
   "channelFidelityNotify": "Alert when a channel fails the fidelity probe",
-  "channelFidelityHint": "Pushed once, after a recheck confirms it, when an upstream drops the system prompt, ignores thinking-off or JSON mode, or its prompt_tokens drift from the baseline; and once more on recovery. Unschedulable accounts are recorded only. Probe settings live under Channel Monitor → Fidelity.",
+  "channelFidelityHint": "Pushed once, after a recheck confirms it, when a DeepSeek upstream drops the system prompt, ignores thinking-off or JSON mode, or its prompt_tokens drift from the baseline, or when a Gemini VT channel mixes in or falls back to AI Studio (non-Vertex signature, gs:// video not read, previous signature rejected, responseId missing); and once more on recovery. Unschedulable accounts are recorded only. Probe settings live under Channel Monitor → Fidelity.",
   "rechargeTitle": "User recharges",
   "rechargeNotify": "Notify on every successful online recharge",
   "rechargeNotifyHint": "One message per payment: user, amount paid, amount credited (incl. bonus), balance after, order number. Admin balance top-ups are covered by the sensitive-action alert above.",
