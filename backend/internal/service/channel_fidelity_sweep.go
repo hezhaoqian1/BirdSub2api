@@ -16,7 +16,7 @@ import (
 
 // 渠道保真体检的调度、落库与告警。挂在安全告警服务上：抢到 leader 锁的实例按配置的间隔
 // 发起一轮体检（跨实例由 claimSweep 协调），不通过的目标隔 RecheckSeconds 复测，
-// 复测仍不通过才写入告警 outbox；security_alert_state 里的 fidelity:<账号>:<上游模型>
+// 复测没有通过（仍不通过，或请求出错/超时无法证明已恢复）才写入告警 outbox；security_alert_state 里的 fidelity:<账号>:<上游模型>
 // 记录保证一轮故障只推一次告警、一次恢复。停止调度的账号照常体检，但只记录不告警。
 
 const (
@@ -234,12 +234,13 @@ func (s *SecurityAlertService) runFidelitySweep(cfg ChannelFidelityConfig) {
 		r := &second[j]
 		r.IsRecheck = true
 		s.recordFidelityCheck(ctx, targets[i], r, baselines)
-		switch r.Status {
-		case fidelityStatusPass:
+		if r.Status == fidelityStatusPass {
 			s.fidelityRecovered(ctx, targets[i], *r)
-		case fidelityStatusFail:
-			s.fidelityAlert(ctx, targets[i], &first[i], *r)
+			continue
 		}
+		// 复测不通过，或复测请求出错/超时（强制思考的上游常常拖到超时）：
+		// 首次的不通过没有被推翻，按确认处理。
+		s.fidelityAlert(ctx, targets[i], &first[i], *r)
 	}
 }
 
@@ -411,18 +412,26 @@ func fidelityModelLabel(t fidelityTarget) string {
 
 func fidelityAlertDraft(t fidelityTarget, first *ChannelFidelityCheck, last ChannelFidelityCheck, loc *time.Location) securityAlertDraft {
 	problems := last.failures()
+	if len(problems) == 0 && first != nil {
+		problems = first.failures()
+	}
 	if len(problems) == 0 {
 		problems = []string{sanitizeSecurityText(last.Message, 200)}
 	}
+	recheckErrored := first != nil && last.Status == fidelityStatusError
 	lines := []string{
 		"账号：" + channelMonitorLabel(t.Account.ID, t.Account.Name),
 		"模型：" + fidelityModelLabel(t),
 		"异常：" + strings.Join(problems, "；"),
 	}
-	if first != nil {
+	switch {
+	case recheckErrored:
+		lines = append(lines, "首次体检 "+formatSecurityTime(first.CheckedAt, loc)+" 不通过；"+
+			formatSecurityTime(last.CheckedAt, loc)+" 复测请求出错（"+sanitizeSecurityText(last.Message, 80)+"），未能确认恢复")
+	case first != nil:
 		lines = append(lines, "已复测确认："+formatSecurityTime(first.CheckedAt, loc)+"、"+
 			formatSecurityTime(last.CheckedAt, loc)+" 两次都不通过")
-	} else {
+	default:
 		lines = append(lines, "检测于 "+formatSecurityTime(last.CheckedAt, loc))
 	}
 	lines = append(lines, "处理：确认后可在该账号的模型映射里去掉这个模型，或暂停调度；恢复后会再通知。")
