@@ -29,7 +29,7 @@ export default {
   "channelMonitorNotify": "渠道监控连续失败时提醒",
   "channelMonitorHint": "渠道监控主模型连续 3 次检测失败时推送一次，恢复正常后再推送一次。",
   "channelFidelityNotify": "渠道保真体检不通过时提醒",
-  "channelFidelityHint": "上游丢掉 system 提示词、关不掉思考、不认 JSON 模式或 prompt_tokens 偏离基线时，复测确认后推送一次，恢复后再推送一次。停止调度的账号只记录不推送。体检设置在「渠道监控 → 保真体检」。",
+  "channelFidelityHint": "DeepSeek 上游丢掉 system 提示词、关不掉思考、不认 JSON 模式或 prompt_tokens 偏离基线时，Gemini VT 渠道混用或兜底到 AI Studio（签名不是 Vertex 格式、读不了 gs:// 视频、旧签名被拒、返回缺 responseId）时，复测确认后推送一次，恢复后再推送一次。停止调度的账号只记录不推送。体检设置在「渠道监控 → 保真体检」。",
   "rechargeTitle": "用户充值",
   "rechargeNotify": "用户在线充值成功时提醒",
   "rechargeNotifyHint": "每笔推送一次：用户、实付金额、到账金额（含赠送）、充值后余额和订单号。后台给用户加余额不在这里，走上面的敏感操作提醒。",

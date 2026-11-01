@@ -80,7 +80,8 @@ func (h *SecurityAlertHandler) RunFidelityCheck(c *gin.Context) {
 		response.BadRequest(c, "account_id and model are required")
 		return
 	}
-	ctx, cancel := context.WithTimeout(c.Request.Context(), 2*time.Minute)
+	// Gemini VT 体检要发三个请求（每个最多 90 秒）；留在 Railway 5 分钟首字节限制以内。
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 280*time.Second)
 	defer cancel()
 	res, err := h.service.RunFidelityCheck(ctx, req.AccountID, req.Model)
 	if err != nil {

@@ -191,7 +191,7 @@ func (s *SecurityAlertService) runFidelitySweep(cfg ChannelFidelityConfig) {
 		}
 	}()
 
-	targets, err := s.fidelity.targets(ctx, cfg.Models)
+	targets, err := s.fidelity.allTargets(ctx, cfg)
 	if err != nil {
 		slog.Warn("[ChannelFidelity] failed to list targets", "error", err)
 		return
@@ -199,6 +199,7 @@ func (s *SecurityAlertService) runFidelitySweep(cfg ChannelFidelityConfig) {
 	if len(targets) == 0 {
 		return
 	}
+	s.attachFidelityCanaries(ctx, targets)
 	baselines := s.loadFidelityBaselines(ctx)
 	first := s.probeFidelityTargets(ctx, targets, baselines, cfg.PromptTokenTolerance)
 
@@ -272,7 +273,8 @@ func (s *SecurityAlertService) probeFidelityTargets(ctx context.Context, targets
 const fidelityCheckColumns = `id, account_id, model, upstream_model, checked_at, status, is_recheck,
  system_check, thinking_check, json_check, answer_check, prompt_check,
  prompt_tokens, baseline_prompt_tokens, completion_tokens, reasoning_tokens, reasoning_chars,
- latency_ms, http_status, message, response_excerpt`
+ latency_ms, http_status, message, response_excerpt,
+ probe_kind, signature_check, media_check, canary_check, meta_check, signature_prefix`
 
 func scanFidelityCheck(scan func(dest ...any) error) (ChannelFidelityCheck, error) {
 	var c ChannelFidelityCheck
@@ -280,7 +282,8 @@ func scanFidelityCheck(scan func(dest ...any) error) (ChannelFidelityCheck, erro
 	err := scan(&c.ID, &c.AccountID, &c.Model, &c.UpstreamModel, &c.CheckedAt, &c.Status, &c.IsRecheck,
 		&c.SystemCheck, &c.ThinkingCheck, &c.JSONCheck, &c.AnswerCheck, &c.PromptCheck,
 		&prompt, &baseline, &completion, &reasoning, &c.ReasoningChars,
-		&latency, &status, &c.Message, &c.ResponseExcerpt)
+		&latency, &status, &c.Message, &c.ResponseExcerpt,
+		&c.ProbeKind, &c.SignatureCheck, &c.MediaCheck, &c.CanaryCheck, &c.MetaCheck, &c.SignaturePrefix)
 	c.PromptTokens = nullIntPtr(prompt)
 	c.BaselinePromptTokens = nullIntPtr(baseline)
 	c.CompletionTokens = nullIntPtr(completion)
@@ -312,20 +315,47 @@ func (s *SecurityAlertService) recordFidelityCheck(ctx context.Context, t fideli
 	}
 	writeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), fidelityStateTimeout)
 	defer cancel()
+	kind := r.ProbeKind
+	if kind == "" {
+		kind = t.kind()
+	}
+	skipIfEmpty := func(v string) string {
+		if v == "" {
+			return fidelityCheckSkip
+		}
+		return v
+	}
 	err := s.db.QueryRowContext(writeCtx, `INSERT INTO channel_fidelity_checks(account_id, model, upstream_model, checked_at, status, is_recheck,
  system_check, thinking_check, json_check, answer_check, prompt_check,
  prompt_tokens, baseline_prompt_tokens, completion_tokens, reasoning_tokens, reasoning_chars,
- latency_ms, http_status, message, response_excerpt)
- VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20) RETURNING id`,
+ latency_ms, http_status, message, response_excerpt,
+ probe_kind, signature_check, media_check, canary_check, meta_check, signature_prefix)
+ VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26) RETURNING id`,
 		t.Account.ID, t.Model, t.UpstreamModel, r.CheckedAt, r.Status, r.IsRecheck,
-		r.SystemCheck, r.ThinkingCheck, r.JSONCheck, r.AnswerCheck, r.PromptCheck,
+		skipIfEmpty(r.SystemCheck), skipIfEmpty(r.ThinkingCheck), skipIfEmpty(r.JSONCheck), skipIfEmpty(r.AnswerCheck), skipIfEmpty(r.PromptCheck),
 		intPtrArg(r.PromptTokens), intPtrArg(r.BaselinePromptTokens), intPtrArg(r.CompletionTokens),
 		intPtrArg(r.ReasoningTokens), r.ReasoningChars, intPtrArg(r.LatencyMs), intPtrArg(r.HTTPStatus),
-		r.Message, r.ResponseExcerpt).Scan(&r.ID)
+		r.Message, r.ResponseExcerpt,
+		kind, skipIfEmpty(r.SignatureCheck), skipIfEmpty(r.MediaCheck), skipIfEmpty(r.CanaryCheck), skipIfEmpty(r.MetaCheck),
+		truncateRunes(r.SignaturePrefix, 16)).Scan(&r.ID)
 	if err != nil {
 		slog.Warn("[ChannelFidelity] failed to record check", "account_id", t.Account.ID, "model", t.UpstreamModel, "error", err)
 	}
 	key := fidelityKey(t.Account.ID, t.UpstreamModel)
+	if kind == fidelityKindGeminiVT && r.Status == fidelityStatusPass && r.PromptTokens != nil && r.CanarySignature != "" {
+		// Gemini：每次全部通过都换上新签名做下一轮的金丝雀；prompt 基线只在第一次写入。
+		if _, err := s.db.ExecContext(writeCtx, `INSERT INTO channel_fidelity_baselines(account_id, upstream_model, prompt_tokens, canary_signature, updated_at)
+ VALUES ($1, $2, $3, $4, NOW()) ON CONFLICT (account_id, upstream_model)
+ DO UPDATE SET canary_signature = EXCLUDED.canary_signature, updated_at = NOW()`,
+			t.Account.ID, t.UpstreamModel, *r.PromptTokens, r.CanarySignature); err != nil {
+			slog.Warn("[ChannelFidelity] failed to save canary", "account_id", t.Account.ID, "error", err)
+			return
+		}
+		if _, has := baselines[key]; !has {
+			baselines[key] = *r.PromptTokens
+		}
+		return
+	}
 	if _, has := baselines[key]; has || r.Status != fidelityStatusPass || r.PromptTokens == nil {
 		return
 	}
@@ -360,7 +390,44 @@ func (s *SecurityAlertService) loadFidelityBaselines(ctx context.Context) map[st
 	return out
 }
 
-// ResetFidelityBaseline 删除基线，下次全部通过时重新记录。
+// attachFidelityCanaries 给 Gemini VT 目标带上上一轮通过时留下的签名。
+func (s *SecurityAlertService) attachFidelityCanaries(ctx context.Context, targets []fidelityTarget) {
+	if s.db == nil {
+		return
+	}
+	hasGemini := false
+	for _, t := range targets {
+		if t.kind() == fidelityKindGeminiVT {
+			hasGemini = true
+			break
+		}
+	}
+	if !hasGemini {
+		return
+	}
+	rows, err := s.db.QueryContext(ctx, `SELECT account_id, upstream_model, canary_signature FROM channel_fidelity_baselines
+ WHERE canary_signature IS NOT NULL AND canary_signature <> ''`)
+	if err != nil {
+		slog.Warn("[ChannelFidelity] failed to load canaries", "error", err)
+		return
+	}
+	defer func() { _ = rows.Close() }()
+	canaries := map[string]string{}
+	for rows.Next() {
+		var id int64
+		var model, sig string
+		if rows.Scan(&id, &model, &sig) == nil {
+			canaries[fidelityKey(id, model)] = sig
+		}
+	}
+	for i := range targets {
+		if targets[i].kind() == fidelityKindGeminiVT {
+			targets[i].Canary = canaries[fidelityKey(targets[i].Account.ID, targets[i].UpstreamModel)]
+		}
+	}
+}
+
+// ResetFidelityBaseline 删除基线（Gemini 的金丝雀签名一并删除），下次全部通过时重新记录。
 func (s *SecurityAlertService) ResetFidelityBaseline(ctx context.Context, accountID int64, upstreamModel string) error {
 	_, err := s.db.ExecContext(ctx, `DELETE FROM channel_fidelity_baselines WHERE account_id = $1 AND upstream_model = $2`,
 		accountID, strings.TrimSpace(upstreamModel))
@@ -434,7 +501,12 @@ func fidelityAlertDraft(t fidelityTarget, first *ChannelFidelityCheck, last Chan
 	default:
 		lines = append(lines, "检测于 "+formatSecurityTime(last.CheckedAt, loc))
 	}
-	lines = append(lines, "处理：确认后可在该账号的模型映射里去掉这个模型，或暂停调度；恢复后会再通知。")
+	if t.kind() == fidelityKindGeminiVT {
+		lines = append(lines, "判断：疑似混用了 AI Studio 等非 Vertex 资源（这类资源读不了 gs:// 文件、会忽略视频直接按文字回答）。")
+		lines = append(lines, "处理：确认后暂停该账号调度并找上游核实；恢复后会再通知。")
+	} else {
+		lines = append(lines, "处理：确认后可在该账号的模型映射里去掉这个模型，或暂停调度；恢复后会再通知。")
+	}
 	if last.PromptCheck == fidelityCheckFail {
 		lines = append(lines, "如果是上游正常调整了模板，可在「渠道监控 → 保真体检」重置基线。")
 	}
@@ -505,6 +577,8 @@ type ChannelFidelityPoint struct {
 
 // ChannelFidelityRow 一个（账号，模型）的体检状态。
 type ChannelFidelityRow struct {
+	// Kind deepseek 或 gemini_vt，决定展示哪组检查项。
+	Kind                 string                 `json:"kind"`
 	AccountID            int64                  `json:"account_id"`
 	AccountName          string                 `json:"account_name"`
 	Schedulable          bool                   `json:"schedulable"`
@@ -548,7 +622,7 @@ func (s *SecurityAlertService) GetFidelityStatus(ctx context.Context) (ChannelFi
 	if s.fidelity == nil {
 		return out, nil
 	}
-	targets, err := s.fidelity.targets(ctx, cfg.Models)
+	targets, err := s.fidelity.allTargets(ctx, cfg)
 	if err != nil {
 		return out, err
 	}
@@ -606,6 +680,7 @@ func (s *SecurityAlertService) GetFidelityStatus(ctx context.Context) (ChannelFi
 	for _, t := range targets {
 		key := fidelityKey(t.Account.ID, t.UpstreamModel)
 		row := ChannelFidelityRow{
+			Kind:          t.kind(),
 			AccountID:     t.Account.ID,
 			AccountName:   t.Account.Name,
 			Schedulable:   t.Account.Schedulable,
@@ -646,7 +721,7 @@ func (s *SecurityAlertService) RunFidelityCheck(ctx context.Context, accountID i
 		return ChannelFidelityCheck{}, err
 	}
 	model = strings.TrimSpace(model)
-	targets, err := s.fidelity.targets(ctx, cfg.Models)
+	targets, err := s.fidelity.allTargets(ctx, cfg)
 	if err != nil {
 		return ChannelFidelityCheck{}, err
 	}
@@ -654,6 +729,9 @@ func (s *SecurityAlertService) RunFidelityCheck(ctx context.Context, accountID i
 		if t.Account.ID != accountID || (t.Model != model && t.UpstreamModel != model) {
 			continue
 		}
+		one := []fidelityTarget{t}
+		s.attachFidelityCanaries(ctx, one)
+		t = one[0]
 		baselines := s.loadFidelityBaselines(ctx)
 		res := s.probeFidelityTargets(ctx, []fidelityTarget{t}, baselines, cfg.PromptTokenTolerance)[0]
 		s.recordFidelityCheck(ctx, t, &res, baselines)
@@ -662,7 +740,7 @@ func (s *SecurityAlertService) RunFidelityCheck(ctx context.Context, accountID i
 		}
 		return res, nil
 	}
-	return ChannelFidelityCheck{}, fmt.Errorf("account %d does not serve model %q (or is not an active DeepSeek API key account)", accountID, model)
+	return ChannelFidelityCheck{}, fmt.Errorf("account %d does not serve model %q (or is not an active DeepSeek / Gemini VT API key account)", accountID, model)
 }
 
 // cleanupFidelityChecks 删除 7 天前的体检记录。

@@ -59,23 +59,32 @@ type ChannelFidelityConfig struct {
 	Models []string `json:"models"`
 	// PromptTokenTolerance prompt_tokens 与基线的允许偏差。
 	PromptTokenTolerance int `json:"prompt_token_tolerance"`
+	// GeminiModels Gemini VT 账号要体检的模型（客户请求的模型名）；为空表示不体检 Gemini。
+	GeminiModels []string `json:"gemini_models"`
+	// GeminiAccountIDs 名字里没有 VT/Vertex、但也要按 Vertex 体检的 Gemini 账号。
+	GeminiAccountIDs []int64 `json:"gemini_account_ids"`
+	// GeminiSignaturePrefix Vertex thoughtSignature 的固定开头。
+	GeminiSignaturePrefix string `json:"gemini_signature_prefix"`
 }
 
-// DefaultChannelFidelityConfig 默认配置：默认关闭，DeepSeek flash 与 pro 各测一次。
+// DefaultChannelFidelityConfig 默认配置：默认关闭；DeepSeek flash 与 pro、Gemini VT 的 3.8-flash 与 4-argon 各测一次。
 func DefaultChannelFidelityConfig() ChannelFidelityConfig {
 	return ChannelFidelityConfig{
-		Enabled:              false,
-		IntervalMinutes:      fidelityDefaultInterval,
-		RecheckSeconds:       fidelityDefaultRecheck,
-		Models:               []string{"deepseek-v4.1-flash", "deepseek-v4-pro"},
-		PromptTokenTolerance: fidelityDefaultTolerance,
+		Enabled:               false,
+		IntervalMinutes:       fidelityDefaultInterval,
+		RecheckSeconds:        fidelityDefaultRecheck,
+		Models:                []string{"deepseek-v4.1-flash", "deepseek-v4-pro"},
+		PromptTokenTolerance:  fidelityDefaultTolerance,
+		GeminiModels:          defaultGeminiFidelityModels(),
+		GeminiAccountIDs:      []int64{},
+		GeminiSignaturePrefix: fidelityGeminiDefaultSignaturePrefix,
 	}
 }
 
-func (c *ChannelFidelityConfig) normalize() {
-	models := make([]string, 0, len(c.Models))
+func normalizeFidelityModels(in []string) []string {
+	models := make([]string, 0, len(in))
 	seen := map[string]struct{}{}
-	for _, m := range c.Models {
+	for _, m := range in {
 		m = strings.TrimSpace(m)
 		if m == "" {
 			continue
@@ -86,7 +95,26 @@ func (c *ChannelFidelityConfig) normalize() {
 		seen[m] = struct{}{}
 		models = append(models, m)
 	}
-	c.Models = models
+	return models
+}
+
+func (c *ChannelFidelityConfig) normalize() {
+	c.Models = normalizeFidelityModels(c.Models)
+	c.GeminiModels = normalizeFidelityModels(c.GeminiModels)
+	ids := make([]int64, 0, len(c.GeminiAccountIDs))
+	seen := map[int64]struct{}{}
+	for _, id := range c.GeminiAccountIDs {
+		if _, dup := seen[id]; dup || id <= 0 {
+			continue
+		}
+		seen[id] = struct{}{}
+		ids = append(ids, id)
+	}
+	c.GeminiAccountIDs = ids
+	c.GeminiSignaturePrefix = strings.TrimSpace(c.GeminiSignaturePrefix)
+	if c.GeminiSignaturePrefix == "" {
+		c.GeminiSignaturePrefix = fidelityGeminiDefaultSignaturePrefix
+	}
 }
 
 // Validate 校验取值范围。
@@ -106,10 +134,19 @@ func (c ChannelFidelityConfig) Validate() error {
 	if len(c.Models) > fidelityMaxModels {
 		return fmt.Errorf("at most %d models", fidelityMaxModels)
 	}
-	for _, m := range c.Models {
+	if len(c.GeminiModels) > fidelityMaxModels {
+		return fmt.Errorf("at most %d gemini models", fidelityMaxModels)
+	}
+	for _, m := range append(append([]string{}, c.Models...), c.GeminiModels...) {
 		if len(m) > 100 {
 			return fmt.Errorf("model name %q is too long", m)
 		}
+	}
+	if len(c.GeminiAccountIDs) > fidelityGeminiMaxAccountIDs {
+		return fmt.Errorf("at most %d gemini account ids", fidelityGeminiMaxAccountIDs)
+	}
+	if len(c.GeminiSignaturePrefix) > 16 {
+		return errors.New("gemini_signature_prefix must be at most 16 characters")
 	}
 	return nil
 }
@@ -197,11 +234,53 @@ type ChannelFidelityCheck struct {
 	HTTPStatus           *int      `json:"http_status"`
 	Message              string    `json:"message"`
 	ResponseExcerpt      string    `json:"response_excerpt"`
+	// ProbeKind deepseek（system/关思考/JSON/算术）或 gemini_vt（签名/gs:// 视频/金丝雀/元数据）。
+	ProbeKind       string `json:"probe_kind"`
+	SignatureCheck  string `json:"signature_check"`
+	MediaCheck      string `json:"media_check"`
+	CanaryCheck     string `json:"canary_check"`
+	MetaCheck       string `json:"meta_check"`
+	SignaturePrefix string `json:"signature_prefix"`
+
+	// CanarySignature 全部通过时本轮拿到的签名，落库后作为下一轮的金丝雀（不对外返回）。
+	CanarySignature string `json:"-"`
+	// 下面几项是本次判定的细节，只用于告警文案（落库的是汇总后的 Message）。
+	mediaDetail  string
+	canaryDetail string
+	metaDetail   string
 }
 
 // failures 返回不通过项的中文描述（用于告警与列表提示）。
 func (c ChannelFidelityCheck) failures() []string {
 	var out []string
+	if c.SignatureCheck == fidelityCheckFail {
+		if c.SignaturePrefix == "" {
+			out = append(out, "函数调用没有返回 thoughtSignature（Vertex 一定会带）")
+		} else {
+			out = append(out, "签名开头是 "+sanitizeSecurityText(c.SignaturePrefix, 16)+"…，不是 Vertex 格式")
+		}
+	}
+	if c.MediaCheck == fidelityCheckFail {
+		msg := "gs:// 视频没被读取"
+		if c.mediaDetail != "" {
+			msg += "（" + c.mediaDetail + "）"
+		}
+		out = append(out, msg)
+	}
+	if c.CanaryCheck == fidelityCheckFail {
+		msg := "上一轮的 Vertex 签名被拒"
+		if c.canaryDetail != "" {
+			msg += "（" + c.canaryDetail + "）"
+		}
+		out = append(out, msg+"，请求可能被转给了非 Vertex 来源")
+	}
+	if c.MetaCheck == fidelityCheckFail {
+		detail := c.metaDetail
+		if detail == "" {
+			detail = "缺 createTime / responseId"
+		}
+		out = append(out, "返回不像 Vertex："+detail+"（Vertex 每次都带）")
+	}
 	if c.ThinkingCheck == fidelityCheckFail {
 		switch {
 		case c.ReasoningChars > 0:
@@ -233,14 +312,7 @@ var fidelityNumberRegex = regexp.MustCompile(`-?\d+`)
 
 // evaluateChannelFidelity 按上游返回判定各检查项。baseline 为 nil 表示还没有基线（prompt 项记为 skip）。
 func evaluateChannelFidelity(p fidelityPrompt, resp fidelityResponse, baseline *int, tolerance int) ChannelFidelityCheck {
-	res := ChannelFidelityCheck{
-		Status:        fidelityStatusPass,
-		SystemCheck:   fidelityCheckSkip,
-		ThinkingCheck: fidelityCheckSkip,
-		JSONCheck:     fidelityCheckSkip,
-		AnswerCheck:   fidelityCheckSkip,
-		PromptCheck:   fidelityCheckSkip,
-	}
+	res := deepseekFidelityCheck(fidelityStatusPass)
 	if resp.Usage != nil {
 		res.PromptTokens = resp.Usage.PromptTokens
 		res.CompletionTokens = resp.Usage.CompletionTokens
@@ -329,6 +401,16 @@ func evaluateChannelFidelity(p fidelityPrompt, resp fidelityResponse, baseline *
 	return res
 }
 
+// deepseekFidelityCheck DeepSeek 体检结果的初始值：各项都还没判断，Gemini 专属的检查项不适用。
+func deepseekFidelityCheck(status string) ChannelFidelityCheck {
+	return ChannelFidelityCheck{
+		ProbeKind: fidelityKindDeepSeek, Status: status,
+		SystemCheck: fidelityCheckSkip, ThinkingCheck: fidelityCheckSkip, JSONCheck: fidelityCheckSkip,
+		AnswerCheck: fidelityCheckSkip, PromptCheck: fidelityCheckSkip,
+		SignatureCheck: fidelityCheckSkip, MediaCheck: fidelityCheckSkip, CanaryCheck: fidelityCheckSkip, MetaCheck: fidelityCheckSkip,
+	}
+}
+
 func passFail(ok bool) string {
 	if ok {
 		return fidelityCheckPass
@@ -381,6 +463,31 @@ type fidelityTarget struct {
 	Account       *Account
 	Model         string
 	UpstreamModel string
+	// Kind 为空或 deepseek 表示 DeepSeek 体检，gemini_vt 表示 Gemini VT 体检。
+	Kind string
+	// SignaturePrefix / Canary 只用于 Gemini VT：Vertex 签名开头与上一轮通过时留下的签名。
+	SignaturePrefix string
+	Canary          string
+}
+
+func (t fidelityTarget) kind() string {
+	if t.Kind == "" {
+		return fidelityKindDeepSeek
+	}
+	return t.Kind
+}
+
+// allTargets DeepSeek 与 Gemini VT 的全部体检目标。
+func (p *channelFidelityProber) allTargets(ctx context.Context, cfg ChannelFidelityConfig) ([]fidelityTarget, error) {
+	out, err := p.targets(ctx, cfg.Models)
+	if err != nil {
+		return nil, err
+	}
+	gemini, err := p.geminiTargets(ctx, cfg)
+	if err != nil {
+		return nil, err
+	}
+	return append(out, gemini...), nil
 }
 
 // fidelityTargets 列出所有启用中的 DeepSeek API Key 账号及其支持的体检模型（同一上游模型只测一次）。
@@ -416,9 +523,13 @@ func (p *channelFidelityProber) targets(ctx context.Context, models []string) ([
 
 // probe 对一个目标发起一次体检请求并判定结果（不写库）。
 func (p *channelFidelityProber) probe(ctx context.Context, t fidelityTarget, baseline *int, tolerance int) ChannelFidelityCheck {
-	prompt := newFidelityPrompt()
 	started := time.Now()
-	res := p.doProbe(ctx, t, prompt, baseline, tolerance)
+	var res ChannelFidelityCheck
+	if t.kind() == fidelityKindGeminiVT {
+		res = p.doGeminiProbe(ctx, t, baseline, tolerance)
+	} else {
+		res = p.doProbe(ctx, t, newFidelityPrompt(), baseline, tolerance)
+	}
 	latency := int(time.Since(started) / time.Millisecond)
 	res.LatencyMs = &latency
 	res.AccountID = t.Account.ID
@@ -430,11 +541,10 @@ func (p *channelFidelityProber) probe(ctx context.Context, t fidelityTarget, bas
 
 func (p *channelFidelityProber) doProbe(ctx context.Context, t fidelityTarget, prompt fidelityPrompt, baseline *int, tolerance int) ChannelFidelityCheck {
 	fail := func(msg string, status *int) ChannelFidelityCheck {
-		return ChannelFidelityCheck{
-			Status: fidelityStatusError, SystemCheck: fidelityCheckSkip, ThinkingCheck: fidelityCheckSkip,
-			JSONCheck: fidelityCheckSkip, AnswerCheck: fidelityCheckSkip, PromptCheck: fidelityCheckSkip,
-			Message: truncateRunes(msg, fidelityMessageRunes), HTTPStatus: status,
-		}
+		res := deepseekFidelityCheck(fidelityStatusError)
+		res.Message = truncateRunes(msg, fidelityMessageRunes)
+		res.HTTPStatus = status
+		return res
 	}
 	a := t.Account
 	base := strings.TrimSpace(a.GetOpenAIBaseURL())
