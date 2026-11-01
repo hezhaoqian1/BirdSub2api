@@ -110,3 +110,40 @@ func TestEnqueueOpsErrorLog_DropsSnapshotUnderQueuePressure(t *testing.T) {
 	require.Empty(t, job.entry.RequestSnapshot)
 	require.Equal(t, http.StatusBadGateway, job.entry.StatusCode)
 }
+
+func TestApplyOpsRequestBodySnapshot_SkipsExcludedUsers(t *testing.T) {
+	settings := &ingressRejectSettingRepo{}
+	ops := service.NewOpsService(nil, settings, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	cfg, err := ops.GetOpsAdvancedSettings(context.Background())
+	require.NoError(t, err)
+	cfg.RequestBodySnapshotExcludeUserIDs = []int64{4}
+	_, err = ops.UpdateOpsAdvancedSettings(context.Background(), cfg)
+	require.NoError(t, err)
+
+	newContext := func() *gin.Context {
+		gin.SetMode(gin.TestMode)
+		c, _ := gin.CreateTestContext(httptest.NewRecorder())
+		c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+		installOpsRequestBodyHolder(c, ops)
+		value, ok := c.Get(opsRequestBodyHolderKey)
+		require.True(t, ok)
+		holder, ok := value.(*opsRequestBodyHolder)
+		require.True(t, ok)
+		holder.ObserveRequestBody([]byte(snapshotTestRequestBody))
+		return c
+	}
+
+	excluded, other := int64(4), int64(5)
+
+	entry := &service.OpsInsertErrorLogInput{UserID: &excluded}
+	applyOpsRequestBodySnapshot(newContext(), ops, entry)
+	require.Empty(t, entry.RequestSnapshot, "excluded user must not get a snapshot")
+
+	entry = &service.OpsInsertErrorLogInput{UserID: &other}
+	applyOpsRequestBodySnapshot(newContext(), ops, entry)
+	require.NotEmpty(t, entry.RequestSnapshot, "other users keep their snapshot")
+
+	entry = &service.OpsInsertErrorLogInput{}
+	applyOpsRequestBodySnapshot(newContext(), ops, entry)
+	require.NotEmpty(t, entry.RequestSnapshot, "unknown user follows the global switch")
+}

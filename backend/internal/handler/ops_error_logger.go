@@ -508,7 +508,7 @@ func applyOpsRequestBodySnapshot(c *gin.Context, ops *service.OpsService, entry 
 	if c == nil || ops == nil || entry == nil {
 		return
 	}
-	if !ops.OpsAdvancedSettingsSnapshot().RecordRequestBodyOnError {
+	if !ops.OpsAdvancedSettingsSnapshot().ShouldRecordRequestBodySnapshot(entry.UserID) {
 		return
 	}
 	value, ok := c.Get(opsRequestBodyHolderKey)

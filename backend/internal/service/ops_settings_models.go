@@ -109,10 +109,13 @@ type OpsAdvancedSettings struct {
 	// RecordRequestBodyOnError 开启后，用户可见的报错会附带记录其请求体快照
 	// （首尾各 32KB + 结构化摘要），便于排查与重放。默认开启。
 	RecordRequestBodyOnError bool `json:"record_request_body_on_error"`
-	DisplayOpenAITokenStats  bool `json:"display_openai_token_stats"`
-	DisplayAlertEvents       bool `json:"display_alert_events"`
-	AutoRefreshEnabled       bool `json:"auto_refresh_enabled"`
-	AutoRefreshIntervalSec   int  `json:"auto_refresh_interval_seconds"`
+	// RequestBodySnapshotExcludeUserIDs 中的用户报错时不记录请求体快照（错误行照常写入）。
+	// 用于大流量、大请求体的客户：被批量拒绝时每行快照可达数十 KB，会撑爆错误日志表。
+	RequestBodySnapshotExcludeUserIDs []int64 `json:"request_body_snapshot_exclude_user_ids"`
+	DisplayOpenAITokenStats           bool    `json:"display_openai_token_stats"`
+	DisplayAlertEvents                bool    `json:"display_alert_events"`
+	AutoRefreshEnabled                bool    `json:"auto_refresh_enabled"`
+	AutoRefreshIntervalSec            int     `json:"auto_refresh_interval_seconds"`
 }
 
 type OpsOpenAIAccountQuotaAutoPauseSettings struct {

@@ -804,6 +804,7 @@ export interface OpsAdvancedSettings {
   ignore_invalid_api_key_errors: boolean
   ignore_insufficient_balance_errors: boolean
   record_request_body_on_error: boolean
+  request_body_snapshot_exclude_user_ids?: number[]
   display_openai_token_stats: boolean
   display_alert_events: boolean
   auto_refresh_enabled: boolean
