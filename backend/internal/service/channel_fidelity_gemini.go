@@ -206,7 +206,7 @@ func (r *geminiFidelityResponse) visibleText() string {
 	for _, c := range r.Candidates {
 		for _, p := range c.Content.Parts {
 			if !p.Thought {
-				b.WriteString(p.Text)
+				_, _ = b.WriteString(p.Text)
 			}
 		}
 	}
