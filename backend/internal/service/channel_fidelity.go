@@ -65,6 +65,16 @@ type ChannelFidelityConfig struct {
 	GeminiAccountIDs []int64 `json:"gemini_account_ids"`
 	// GeminiSignaturePrefix Vertex thoughtSignature 的固定开头。
 	GeminiSignaturePrefix string `json:"gemini_signature_prefix"`
+	// GeminiPassiveEnabled 被动检测：看真实客户流量里 Gemini VT 账号的回复指纹（不额外发请求）。
+	GeminiPassiveEnabled bool `json:"gemini_passive_enabled"`
+	// GeminiPassiveWindowMinutes 被动检测看最近多少分钟。
+	GeminiPassiveWindowMinutes int `json:"gemini_passive_window_minutes"`
+	// GeminiPassiveMinResponses 窗口内至少多少条回复才判断。
+	GeminiPassiveMinResponses int `json:"gemini_passive_min_responses"`
+	// GeminiPassiveThresholdPercent 非 Vertex 回复占比达到多少（%）算混用（同时至少 3 条）。
+	GeminiPassiveThresholdPercent int `json:"gemini_passive_threshold_percent"`
+	// GeminiAutoPause 确认混用后自动暂停该账号调度（主动体检复测确认、被动检测超阈值都适用）。
+	GeminiAutoPause bool `json:"gemini_auto_pause"`
 }
 
 // DefaultChannelFidelityConfig 默认配置：默认关闭；DeepSeek flash 与 pro、Gemini VT 的 3.8-flash 与 4-argon 各测一次。
@@ -78,6 +88,12 @@ func DefaultChannelFidelityConfig() ChannelFidelityConfig {
 		GeminiModels:          defaultGeminiFidelityModels(),
 		GeminiAccountIDs:      []int64{},
 		GeminiSignaturePrefix: fidelityGeminiDefaultSignaturePrefix,
+
+		GeminiPassiveEnabled:          true,
+		GeminiPassiveWindowMinutes:    10,
+		GeminiPassiveMinResponses:     20,
+		GeminiPassiveThresholdPercent: 5,
+		GeminiAutoPause:               true,
 	}
 }
 
@@ -147,6 +163,15 @@ func (c ChannelFidelityConfig) Validate() error {
 	}
 	if len(c.GeminiSignaturePrefix) > 16 {
 		return errors.New("gemini_signature_prefix must be at most 16 characters")
+	}
+	if c.GeminiPassiveWindowMinutes < 5 || c.GeminiPassiveWindowMinutes > 120 {
+		return errors.New("gemini_passive_window_minutes must be between 5 and 120")
+	}
+	if c.GeminiPassiveMinResponses < 5 || c.GeminiPassiveMinResponses > 100000 {
+		return errors.New("gemini_passive_min_responses must be between 5 and 100000")
+	}
+	if c.GeminiPassiveThresholdPercent < 1 || c.GeminiPassiveThresholdPercent > 100 {
+		return errors.New("gemini_passive_threshold_percent must be between 1 and 100")
 	}
 	return nil
 }
@@ -468,6 +493,8 @@ type fidelityTarget struct {
 	// SignaturePrefix / Canary 只用于 Gemini VT：Vertex 签名开头与上一轮通过时留下的签名。
 	SignaturePrefix string
 	Canary          string
+	// autoPaused 本次确认不通过后已自动暂停该账号调度（只用于告警文案与放行告警）。
+	autoPaused bool
 }
 
 func (t fidelityTarget) kind() string {

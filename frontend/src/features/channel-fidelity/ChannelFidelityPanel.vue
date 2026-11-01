@@ -79,6 +79,28 @@
           Vertex 签名开头
           <input v-model="form.gemini_signature_prefix" class="input mt-2" maxlength="16" data-test="fidelity-gemini-prefix" />
         </label>
+        <div class="grid grid-cols-1 gap-4 rounded-xl bg-gray-50 p-4 dark:bg-dark-900 sm:grid-cols-2 xl:col-span-5 xl:grid-cols-5">
+          <label class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300 xl:col-span-2">
+            <input v-model="form.gemini_passive_enabled" type="checkbox" data-test="fidelity-passive-enabled" />
+            Gemini VT 被动检测（看真实客户流量的回复指纹，不额外发请求）
+          </label>
+          <label class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300 xl:col-span-3">
+            <input v-model="form.gemini_auto_pause" type="checkbox" data-test="fidelity-auto-pause" />
+            确认混用后自动暂停该账号调度（主动体检复测确认、被动检测超阈值都适用）
+          </label>
+          <label class="fidelity-label">
+            被动检测窗口（分钟）
+            <input v-model.number="form.gemini_passive_window_minutes" class="input mt-2" type="number" min="5" max="120" required />
+          </label>
+          <label class="fidelity-label">
+            至少多少条回复才判断
+            <input v-model.number="form.gemini_passive_min_responses" class="input mt-2" type="number" min="5" required />
+          </label>
+          <label class="fidelity-label">
+            非 Vertex 占比阈值（%，且至少 3 条）
+            <input v-model.number="form.gemini_passive_threshold_percent" class="input mt-2" type="number" min="1" max="100" required data-test="fidelity-passive-threshold" />
+          </label>
+        </div>
         <div class="flex justify-end xl:col-span-5">
           <button class="btn btn-primary text-xs" :disabled="busy" data-test="fidelity-save">保存设置</button>
         </div>
@@ -102,6 +124,7 @@
               <th class="px-4 py-3 font-medium">账号</th>
               <th class="px-4 py-3 font-medium">模型</th>
               <th v-for="col in section.columns" :key="col.key" class="px-3 py-3 text-center font-medium" :title="col.hint">{{ col.label }}</th>
+              <th v-if="section.kind === 'gemini_vt'" class="px-3 py-3 font-medium" title="被动检测：最近窗口内真实客户流量的回复指纹">真实流量</th>
               <th class="px-3 py-3 font-medium">prompt / 基线</th>
               <th class="px-4 py-3 font-medium">最近体检</th>
               <th class="px-4 py-3 font-medium">近 24 小时</th>
@@ -115,6 +138,7 @@
                 <div class="mt-1 flex gap-1">
                   <span v-if="!row.schedulable" class="rounded bg-gray-100 px-1.5 py-0.5 text-[10px] text-gray-500 dark:bg-dark-700">已停用 · 不告警</span>
                   <span v-if="row.alerting" class="rounded bg-red-50 px-1.5 py-0.5 text-[10px] text-red-600 dark:bg-red-500/10">告警中</span>
+                  <span v-if="row.passive_triggered" class="rounded bg-red-50 px-1.5 py-0.5 text-[10px] text-red-600 dark:bg-red-500/10">真实流量混用</span>
                 </div>
               </td>
               <td class="px-4 py-3 text-gray-700 dark:text-gray-300">
@@ -128,6 +152,15 @@
               </template>
               <td v-else :colspan="section.columns.length" class="px-3 py-3 text-center text-gray-400">
                 {{ row.latest ? '请求出错' : '还没有体检' }}
+              </td>
+              <td v-if="section.kind === 'gemini_vt'" class="px-3 py-3" :data-test="`fidelity-passive-${rowKey(row)}`">
+                <template v-if="row.passive && row.passive.responses > 0">
+                  <span class="font-mono" :class="row.passive.non_vertex > 0 ? 'font-semibold text-red-500' : 'text-emerald-600'" :title="passiveTitle(row)">
+                    {{ row.passive.responses }} 条 · 非 Vertex {{ row.passive.non_vertex }}
+                  </span>
+                  <div class="text-[10px] text-gray-400">最近 {{ row.passive.window_minutes }} 分钟</div>
+                </template>
+                <span v-else class="text-gray-400">{{ form?.gemini_passive_enabled === false ? '已关闭' : '没有流量' }}</span>
               </td>
               <td class="px-3 py-3 font-mono" :class="row.latest?.prompt_check === 'fail' ? 'text-red-500' : 'text-gray-500'">
                 {{ row.latest?.prompt_tokens ?? '–' }} / {{ row.baseline_prompt_tokens ?? '待记录' }}
@@ -293,6 +326,11 @@ function statusClass(s: FidelityStatus) {
 function dotClass(s: FidelityStatus) {
   return s === 'pass' ? 'bg-emerald-500' : s === 'fail' ? 'bg-red-500' : 'bg-amber-400'
 }
+function passiveTitle(row: ChannelFidelityRow) {
+  const p = row.passive
+  if (!p) return ''
+  return `缺 responseId ${p.no_response_id} 条 · 签名不是 AY ${p.other_signature} 条 · 媒体被丢 ${p.media_dropped}/${p.media_requests} 条`
+}
 function formatTime(value: string) {
   const d = new Date(value)
   if (Number.isNaN(d.getTime())) return value
@@ -354,6 +392,11 @@ function applyForm(cfg: ChannelFidelityConfig) {
     gemini_models: [...geminiModels],
     gemini_account_ids: [...geminiIds],
     gemini_signature_prefix: cfg.gemini_signature_prefix || 'AY',
+    gemini_passive_enabled: cfg.gemini_passive_enabled ?? true,
+    gemini_passive_window_minutes: cfg.gemini_passive_window_minutes || 10,
+    gemini_passive_min_responses: cfg.gemini_passive_min_responses || 20,
+    gemini_passive_threshold_percent: cfg.gemini_passive_threshold_percent || 5,
+    gemini_auto_pause: cfg.gemini_auto_pause ?? true,
   }
   modelsText.value = cfg.models.join(', ')
   geminiModelsText.value = geminiModels.join(', ')

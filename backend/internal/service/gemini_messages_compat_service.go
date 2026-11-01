@@ -1552,6 +1552,8 @@ func (s *GeminiMessagesCompatService) ForwardNative(ctx context.Context, c *gin.
 	var firstTokenMs *int
 	clientDisconnect := false
 	streamFinished := false
+	// Gemini VT 被动检测：只给 Gemini API Key 账号挂指纹观察器（见 gemini_vt_fingerprint.go）。
+	fingerprint := beginGeminiFingerprint(c, account)
 
 	if stream {
 		streamRes, err := s.handleNativeStreamingResponse(c, resp, startTime, isOAuth, account, requestID)
@@ -1569,6 +1571,7 @@ func (s *GeminiMessagesCompatService) ForwardNative(ctx context.Context, c *gin.
 				if sig, ok := detectGeminiResponseSignal(rawBytes); ok && sig.Kind > best.Kind {
 					best = sig
 				}
+				fingerprint.observe(rawBytes)
 			})
 			if err != nil {
 				return nil, s.writeGoogleError(c, http.StatusBadGateway, "Failed to read upstream stream")
@@ -1587,6 +1590,7 @@ func (s *GeminiMessagesCompatService) ForwardNative(ctx context.Context, c *gin.
 			usage = usageResp
 		}
 	}
+	finishGeminiFingerprint(fingerprint, account.ID, mappedModel, body)
 
 	if usage == nil {
 		usage = &ClaudeUsage{}
@@ -2858,6 +2862,7 @@ func (s *GeminiMessagesCompatService) handleNativeNonStreamingResponse(c *gin.Co
 	}
 	observer.ObserveGemini(respBody)
 	observeGeminiImageOutputs(c, respBody)
+	geminiFingerprintFromContext(c).observe(respBody)
 	if sig, ok := detectGeminiResponseSignalInBody(respBody); ok {
 		s.markGeminiResponseSignal(c, account, sig, false, upstreamRequestID)
 	} else if isGeminiEmptyResponseBody(respBody) {
@@ -2919,6 +2924,7 @@ func (s *GeminiMessagesCompatService) handleNativeStreamingResponse(c *gin.Conte
 	var best geminiResponseSignal
 	sawDataEvent := false
 	fallback := &geminiSSEFallbackBody{}
+	fingerprint := geminiFingerprintFromContext(c)
 	clientDisconnect := false
 	finished := false
 
@@ -2957,6 +2963,7 @@ func (s *GeminiMessagesCompatService) handleNativeStreamingResponse(c *gin.Conte
 					}
 					observer.ObserveGemini(rawBytes)
 					observeGeminiImageOutputs(c, rawBytes)
+					fingerprint.observe(rawBytes)
 
 					if gjson.GetBytes(rawBytes, "candidates.0.finishReason").String() != "" {
 						finished = true
