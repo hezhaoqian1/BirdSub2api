@@ -150,12 +150,15 @@ WHERE id IN (SELECT id FROM batch)
 
 const (
 	opsQueueRejectDefaultRetentionDays = 5
-	// 改为聚合之前逐条写入 ops_error_logs 的网关排队满拒绝（Phase=request、业务限制、429）。
-	opsQueueRejectErrorLogFilter  = `error_phase = 'request' AND is_business_limited AND status_code = 429 AND error_message LIKE 'Too many pending requests%'`
-	opsQueueRejectAggregateFilter = `reject_reason = 'gateway_queue_full'`
+	// 改为聚合之前逐条写入 ops_error_logs 的容量拒绝：
+	//   - 网关排队满（Phase=request、业务限制、429）；
+	//   - 纯路由的"无可用账号"（Phase=routing、503、没有任何上游尝试）。
+	opsQueueRejectErrorLogFilter = `(error_phase = 'request' AND is_business_limited AND status_code = 429 AND error_message LIKE 'Too many pending requests%')` +
+		` OR (error_phase = 'routing' AND status_code = 503 AND error_message LIKE 'No available%' AND (upstream_errors IS NULL OR upstream_errors::text IN ('null', '[]')))`
+	opsQueueRejectAggregateFilter = `reject_reason IN ('gateway_queue_full', 'no_available_accounts')`
 )
 
-// cleanupOpsQueueRejects 按 queueDays 删除网关排队满的拒绝记录。普通错误日志保留更短（或为 0 时整表清空）时
+// cleanupOpsQueueRejects 按 queueDays 删除容量拒绝记录（排队满、无可用账号）。普通错误日志保留更短（或为 0 时整表清空）时
 // 已经由常规清理覆盖，不再重复删除。
 func cleanupOpsQueueRejects(ctx context.Context, db *sql.DB, now time.Time, queueDays, errorLogDays int) (errorLogs, aggregates int64, err error) {
 	if db == nil || queueDays <= 0 || errorLogDays == 0 || (errorLogDays > 0 && queueDays >= errorLogDays) {

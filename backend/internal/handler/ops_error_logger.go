@@ -1217,6 +1217,12 @@ func OpsErrorLoggerMiddleware(ops *service.OpsService) gin.HandlerFunc {
 			return
 		}
 
+		// 纯路由拒绝（无可用账号且没试过任何上游）改为按分钟聚合，不逐条写库。
+		if isOpsPureNoAvailableAccountsReject(c, parsed, status) {
+			middleware2.MarkIngressRejected(c, middleware2.IngressRejectNoAvailableAccounts)
+			return
+		}
+
 		// Skip logging if the error should be filtered based on settings
 		if shouldSkipOpsErrorLog(c.Request.Context(), ops, parsed.Message, string(body), c.Request.URL.Path) {
 			return
@@ -2462,6 +2468,25 @@ func hasOpsAccountAuthFailure(c *gin.Context) bool {
 		}
 	}
 	return false
+}
+
+// isOpsPureNoAvailableAccountsReject 判断是否为"分组里没有可调度账号、一次上游都没试"的路由拒绝。
+// 这类请求和排队满一样是我们自己的容量拒绝：客户在无容量时狂重试，逐条写 ops_error_logs
+// 一小时就是 150 万行（2026-11-02），所以交给入口拒绝聚合按分钟计数。
+// 换号用尽后才报"无可用账号"的请求带有上游错误事件，仍逐条记录以便排查。
+func isOpsPureNoAvailableAccountsReject(c *gin.Context, parsed parsedOpsError, status int) bool {
+	if c == nil || status < 400 || parsed.StreamFailure {
+		return false
+	}
+	if !isOpsNoAvailableAccountMessage(parsed.Message) {
+		return false
+	}
+	if v, ok := c.Get(service.OpsUpstreamErrorsKey); ok {
+		if events, ok := v.([]*service.OpsUpstreamErrorEvent); ok && len(events) > 0 {
+			return false
+		}
+	}
+	return true
 }
 
 func isOpsNoAvailableAccountMessage(message string) bool {

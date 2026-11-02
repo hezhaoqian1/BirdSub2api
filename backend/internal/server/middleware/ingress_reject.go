@@ -33,6 +33,9 @@ const (
 	// 不是上游错误：逐条写 ops_error_logs 时一个用户压满就能每小时写 130 万行（2026-11-01），
 	// 改为按分钟聚合计数。
 	IngressRejectGatewayQueueFull IngressRejectReason = "gateway_queue_full"
+	// IngressRejectNoAvailableAccounts 分组里没有可调度账号、一次上游都没试就被拒（纯路由拒绝）。
+	// 客户在无容量时狂重试会每小时写 150 万行（2026-11-02），和排队满一样按分钟聚合计数。
+	IngressRejectNoAvailableAccounts IngressRejectReason = "no_available_accounts"
 )
 
 const ingressRejectReasonContextKey = "ingress_reject_reason"
