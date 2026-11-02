@@ -13,6 +13,7 @@ import { useRoutePrefetch } from '@/composables/useRoutePrefetch'
 import { getSetupStatus } from '@/api/setup'
 import { resolveCompletedSetupRedirectPath } from './setupRedirect'
 import { resolveRouteDocumentTitle } from './title'
+import { recoverFromChunkLoadError } from './chunkReload'
 import { captureAffiliateInviteLink } from '@/utils/oauthAffiliate'
 
 /**
@@ -1032,30 +1033,32 @@ router.afterEach((to) => {
  * Navigation guard: Error handling
  * Handles dynamic import failures caused by deployment updates
  */
-router.onError((error) => {
+router.onError((error, to) => {
   console.error('Router error:', error)
 
-  // Check if this is a dynamic import failure (chunk loading error)
-  const isChunkLoadError =
-    error.message?.includes('Failed to fetch dynamically imported module') ||
-    error.message?.includes('Loading chunk') ||
-    error.message?.includes('Loading CSS chunk') ||
-    error.name === 'ChunkLoadError'
-
-  if (isChunkLoadError) {
-    // Avoid infinite reload loop by checking sessionStorage
-    const reloadKey = 'chunk_reload_attempted'
-    const lastReload = sessionStorage.getItem(reloadKey)
-    const now = Date.now()
-
-    // Allow reload if never attempted or more than 10 seconds ago
-    if (!lastReload || now - parseInt(lastReload) > 10000) {
-      sessionStorage.setItem(reloadKey, now.toString())
-      console.warn('Chunk load error detected, reloading page to fetch latest version...')
-      window.location.reload()
-    } else {
-      console.error('Chunk load error persists after reload. Please clear browser cache.')
-    }
+  // 发版后旧分片已不存在：整页跳到"目标页"（而不是刷新来源页），细节见 chunkReload.ts
+  let targetHref: string | null = null
+  try {
+    targetHref = to ? router.resolve(to).href : null
+  } catch {
+    targetHref = null
+  }
+  let storage: Storage | null = null
+  try {
+    storage = window.sessionStorage
+  } catch {
+    storage = null
+  }
+  const outcome = recoverFromChunkLoadError(error, targetHref, {
+    storage,
+    now: () => Date.now(),
+    assign: (href) => window.location.assign(href),
+    reload: () => window.location.reload()
+  })
+  if (outcome === 'navigate' || outcome === 'reload') {
+    console.warn('Chunk load error detected, loading latest version of', targetHref ?? 'current page')
+  } else if (outcome === 'suppressed') {
+    console.error('Chunk load error persists after reload. Please clear browser cache.')
   }
 })
 
