@@ -327,6 +327,8 @@ func (s *OpenAIGatewayService) forwardAsChatCompletions(
 	}
 	responsesBody = updatedBody
 	responsesReq.ServiceTier = normalizedOpenAIServiceTierValue(gjson.GetBytes(responsesBody, "service_tier").String())
+	// 模型级输出上限（hy4 ≤ 64000），避免上游因超限 500 并冷却账号。
+	responsesBody = clampModelMaxOutputTokens(responsesBody, responsesOutputLimitKeys, upstreamModel, billingModel, originalModel)
 
 	// 5. Get access token
 	token, _, err := s.GetAccessToken(ctx, account)
