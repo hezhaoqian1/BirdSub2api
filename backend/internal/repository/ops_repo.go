@@ -224,7 +224,10 @@ func (r *opsRepository) ListErrorLogs(ctx context.Context, filter *service.OpsEr
 	}
 
 	where, args := buildOpsErrorLogsWhere(filter)
-	countSQL := "SELECT COUNT(*) FROM ops_error_logs e " + where
+	// 总数只数到 opsErrorLogCountCap 为止：精确 COUNT(*) 要扫完整个时间窗，
+	// 大客户被拒高峰时两天就有数百万行（实测冷缓存 26s），而列表页只取 20 行（<1ms）。
+	countSQL := "SELECT COUNT(*) FROM (SELECT 1 FROM ops_error_logs e " + where +
+		" LIMIT " + itoa(opsErrorLogCountCap) + ") capped"
 
 	var total int
 	if err := r.db.QueryRowContext(ctx, countSQL, args...).Scan(&total); err != nil {
@@ -389,12 +392,16 @@ LIMIT $` + itoa(len(args)+1) + ` OFFSET $` + itoa(len(args)+2)
 	}
 
 	return &service.OpsErrorLogList{
-		Errors:   out,
-		Total:    total,
-		Page:     page,
-		PageSize: pageSize,
+		Errors:      out,
+		Total:       total,
+		TotalCapped: total >= opsErrorLogCountCap,
+		Page:        page,
+		PageSize:    pageSize,
 	}, nil
 }
+
+// opsErrorLogCountCap 是错误列表总数的上限（20 条/页即 500 页，足够翻阅）。
+const opsErrorLogCountCap = 10000
 
 func (r *opsRepository) GetErrorLogByID(ctx context.Context, id int64) (*service.OpsErrorLogDetail, error) {
 	if r == nil || r.db == nil {
@@ -990,13 +997,15 @@ func buildOpsErrorLogsWhere(filter *service.OpsErrorLogFilter) (string, []any) {
 		clauses = append(clauses, "NOT (COALESCE(e.upstream_status_code, e.status_code, 0) = ANY($"+itoa(len(args))+"))")
 	}
 	// Exact correlation keys (preferred for request↔upstream linkage).
+	// 值非空时 COALESCE(col,'') = $x 与 col = $x 等价；必须写裸列，
+	// 否则用不上 idx_ops_error_logs_(client_)request_id，会扫 30 天窗口（实测 8.7s）。
 	if rid := strings.TrimSpace(filter.RequestID); rid != "" {
 		args = append(args, rid)
-		clauses = append(clauses, "COALESCE(e.request_id,'') = $"+itoa(len(args)))
+		clauses = append(clauses, "e.request_id = $"+itoa(len(args)))
 	}
 	if crid := strings.TrimSpace(filter.ClientRequestID); crid != "" {
 		args = append(args, crid)
-		clauses = append(clauses, "COALESCE(e.client_request_id,'') = $"+itoa(len(args)))
+		clauses = append(clauses, "e.client_request_id = $"+itoa(len(args)))
 	}
 
 	if q := strings.TrimSpace(filter.Query); q != "" {

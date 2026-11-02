@@ -176,8 +176,10 @@ func (f *OpsErrorLogFilter) SetSort(sortBy, sortOrder string) {
 }
 
 type OpsErrorLogList struct {
-	Errors   []*OpsErrorLog `json:"errors"`
-	Total    int            `json:"total"`
-	Page     int            `json:"page"`
-	PageSize int            `json:"page_size"`
+	Errors []*OpsErrorLog `json:"errors"`
+	Total  int            `json:"total"`
+	// TotalCapped 表示 Total 是计数上限（实际可能更多），不是精确值。
+	TotalCapped bool `json:"total_capped,omitempty"`
+	Page        int  `json:"page"`
+	PageSize    int  `json:"page_size"`
 }
