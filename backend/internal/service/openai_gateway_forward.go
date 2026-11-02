@@ -632,6 +632,10 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 	if clampedCap, ok := ollamaCloudResponsesMaxOutputTokensClamp(account, upstreamModel, body); ok {
 		markPatchSet("max_output_tokens", clampedCap)
 	}
+	// 模型级输出上限（hy4 ≤ 64000），避免上游因超限 500 并冷却账号。
+	if modelCap, ok := modelResponsesMaxOutputTokensClamp(account, body, !isCodexCLI, upstreamModel, billingModel); ok {
+		markPatchSet("max_output_tokens", modelCap)
+	}
 	if wsDecision.Transport != OpenAIUpstreamTransportResponsesWebsocketV2 &&
 		!account.IsOpenAIApiKey() && gjson.GetBytes(body, "previous_response_id").Exists() {
 		markPatchDelete("previous_response_id")

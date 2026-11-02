@@ -329,6 +329,8 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 	}
 	responsesBody = updatedBody
 	responsesReq.ServiceTier = normalizedOpenAIServiceTierValue(gjson.GetBytes(responsesBody, "service_tier").String())
+	// 模型级输出上限（hy4 ≤ 64000），避免上游因超限 500 并冷却账号。
+	responsesBody = clampModelMaxOutputTokens(responsesBody, responsesOutputLimitKeys, upstreamModel, billingModel)
 	grokCacheIdentity := ""
 	if account.Platform == PlatformGrok {
 		grokIntentBody := responsesBody
