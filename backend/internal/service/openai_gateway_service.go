@@ -233,6 +233,9 @@ type OpenAIUsage struct {
 
 // OpenAIForwardResult represents the result of forwarding
 type OpenAIForwardResult struct {
+	// streamOutputMeter 累计已转发给客户的输出文本量；上游没给 usage 时据此估算计费。
+	streamOutputMeter *streamOutputTextMeter
+
 	RequestID  string
 	ResponseID string
 	// UpstreamHeaders 是直接上游的响应头，用于按账户配置解析上游请求标识。
