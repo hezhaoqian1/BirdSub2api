@@ -23,7 +23,7 @@ func TestCleanupOpsQueueRejectsDeletesOnlyQueueFullRows(t *testing.T) {
 	mock.ExpectExec(errLogDelete).WithArgs(cutoff, opsCleanupBatchSize).WillReturnResult(sqlmock.NewResult(0, 1200))
 	mock.ExpectExec(errLogDelete).WithArgs(cutoff, opsCleanupBatchSize).WillReturnResult(sqlmock.NewResult(0, 0))
 	aggDelete := regexp.QuoteMeta(`SELECT id FROM ops_ingress_reject_aggregates
-  WHERE bucket_start < $1 AND (reject_reason = 'gateway_queue_full')`)
+  WHERE bucket_start < $1 AND (` + opsQueueRejectAggregateFilter + `)`)
 	mock.ExpectExec(aggDelete).WithArgs(cutoff, opsCleanupBatchSize).WillReturnResult(sqlmock.NewResult(0, 40))
 	mock.ExpectExec(aggDelete).WithArgs(cutoff, opsCleanupBatchSize).WillReturnResult(sqlmock.NewResult(0, 0))
 
