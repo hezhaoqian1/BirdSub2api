@@ -1263,6 +1263,10 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 				return nil, err
 			}
 			usage = streamResult.usage
+			if usage != nil {
+				// 上游发了终止事件却不带 usage（lcodex 等常见）：按已输出内容估算计费。
+				settleOpenAIStreamUsage(c, usage, streamResult.outputMeter, body, billingModel, account.ID, "terminal_without_usage")
+			}
 			firstTokenMs = streamResult.firstTokenMs
 			responseID = strings.TrimSpace(streamResult.responseID)
 			imageCount = streamResult.imageCount

@@ -285,6 +285,13 @@ func (s *OpenAIGatewayService) forwardAsRawChatCompletionsWithStartTime(
 		result, forwardErr = s.bufferRawChatCompletions(c, resp, account, originalModel, billingModel, upstreamModel, reasoningEffort, serviceTier, startTime)
 	}
 	if result != nil {
+		if clientStream {
+			reason := "stream_ended_without_usage"
+			if forwardErr != nil {
+				reason = "stream_interrupted"
+			}
+			settleOpenAIStreamUsage(c, &result.Usage, result.streamOutputMeter, upstreamBody, billingModel, account.ID, reason)
+		}
 		addOpenAIUsage(&result.Usage, bridgeUsage)
 		result.UpstreamEndpoint = grokChatRawEndpoint
 	}
@@ -360,6 +367,7 @@ func (s *OpenAIGatewayService) streamRawChatCompletions(
 	openEventLines := make([]string, 0, 4)
 	refusalDetector := newOpenAIChatSilentRefusalDetector(requestBodyLen)
 	var terminal openAIRawStreamTerminalState
+	outputMeter := &streamOutputTextMeter{}
 
 	writeLine := func(line string) {
 		if clientDisconnected {
@@ -405,6 +413,7 @@ func (s *OpenAIGatewayService) streamRawChatCompletions(
 				if u := extractCCStreamUsage(payload); u != nil {
 					usage = *u
 				}
+				outputMeter.observeChatChunk(trimmedPayload)
 				if firstTokenMs == nil && !usageOnlyChunk {
 					elapsed := int(time.Since(startTime).Milliseconds())
 					firstTokenMs = &elapsed
@@ -482,6 +491,7 @@ func (s *OpenAIGatewayService) streamRawChatCompletions(
 			Stream:                        true,
 			Duration:                      time.Since(startTime),
 			FirstTokenMs:                  firstTokenMs,
+			streamOutputMeter:             outputMeter,
 		}
 	}
 
