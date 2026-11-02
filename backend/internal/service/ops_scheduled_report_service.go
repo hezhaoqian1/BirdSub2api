@@ -695,10 +695,13 @@ func buildOpsSummaryEmailHTML(title string, start, end time.Time, overview *OpsD
 }
 
 func buildOpsErrorDigestEmailHTML(title string, start, end time.Time, list *OpsErrorLogList) string {
-	total := 0
+	total := "0"
 	recent := []*OpsErrorLog{}
 	if list != nil {
-		total = list.Total
+		total = strconv.Itoa(list.Total)
+		if list.TotalCapped {
+			total += "+"
+		}
 		recent = list.Errors
 	}
 	if len(recent) > 10 {
@@ -725,7 +728,7 @@ func buildOpsErrorDigestEmailHTML(title string, start, end time.Time, list *OpsE
 	return fmt.Sprintf(`
 <h2>%s</h2>
 <p><b>Period</b>: %s ~ %s (UTC)</p>
-<p><b>Total Errors</b>: %d</p>
+<p><b>Total Errors</b>: %s</p>
 <h3>Recent</h3>
 <table border="1" cellpadding="6" cellspacing="0" style="border-collapse:collapse;">
   <thead><tr><th>Time</th><th>Platform</th><th>Status</th><th>Message</th></tr></thead>
