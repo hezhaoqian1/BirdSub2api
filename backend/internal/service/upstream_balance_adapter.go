@@ -228,7 +228,10 @@ func (s *UpstreamBalanceService) query(ctx context.Context, a *Account, cfg bala
 		if err != nil {
 			return nil, err
 		}
-		status, _ := s.fetchBalanceJSON(ctx, a, root, "/api/status", "", "")
+		status, err := s.newAPIStatus(ctx, a, root)
+		if err != nil {
+			return nil, err
+		}
 		return parseNewAPIBalance(body, status, true)
 	}
 	if cfg.Mode == "auto" || cfg.Mode == "sub2api" {
@@ -248,6 +251,20 @@ func (s *UpstreamBalanceService) query(ctx context.Context, a *Account, cfg bala
 	if err != nil {
 		return nil, fmt.Errorf("未能查询令牌额度：%w；New API 可配置访问令牌后重试", err)
 	}
-	status, _ := s.fetchBalanceJSON(ctx, a, root, "/api/status", "", "")
+	status, err := s.newAPIStatus(ctx, a, root)
+	if err != nil {
+		return nil, err
+	}
 	return parseNewAPIBalance(body, status, false)
+}
+
+// newAPIStatus 读取 New API 站点的额度换算参数（quota_per_unit / 币种 / 汇率）。
+// 读取失败时整次查询按失败处理，不能退回原始额度：偶发失败时原始额度（如 6252750）
+// 比换算后的余额（如 ¥91.29）大几万倍，余额告警会把它当成「充值」而重复推送。
+func (s *UpstreamBalanceService) newAPIStatus(ctx context.Context, a *Account, root string) ([]byte, error) {
+	status, err := s.fetchBalanceJSON(ctx, a, root, "/api/status", "", "")
+	if err != nil {
+		return nil, fmt.Errorf("无法读取上游额度换算参数（/api/status）：%w", err)
+	}
+	return status, nil
 }

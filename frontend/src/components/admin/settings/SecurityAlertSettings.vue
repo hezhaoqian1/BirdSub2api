@@ -27,6 +27,13 @@
           </label>
         </div>
         <label class="flex items-start gap-2 text-sm">
+          <input v-model="form.channel_recharge_notify" type="checkbox" class="mt-1" data-test="channel-recharge-notify" />
+          <span>
+            <span class="font-medium text-gray-900 dark:text-white">{{ t('securityAlerts.channelRechargeNotify') }}</span>
+            <span class="block text-xs text-gray-500 dark:text-gray-400">{{ t('securityAlerts.channelRechargeHint') }}</span>
+          </span>
+        </label>
+        <label class="flex items-start gap-2 text-sm">
           <input v-model="form.channel_quota_error_notify" type="checkbox" class="mt-1" />
           <span>
             <span class="font-medium text-gray-900 dark:text-white">{{ t('securityAlerts.quotaErrorNotify') }}</span>
@@ -143,17 +150,19 @@ import TotpStepUpDialog from '@/components/auth/TotpStepUpDialog.vue'
 import { isStepUpCancelled, useStepUp } from '@/composables/useStepUp'
 
 type NumberKey = 'channel_spend_floor' | 'channel_spend_multiplier' | 'channel_balance_check_minutes' |
-  'channel_low_balance_usd' | 'channel_low_balance_cny' | 'channel_runway_hours'
+  'channel_low_balance_usd' | 'channel_low_balance_cny' | 'channel_runway_hours' | 'channel_urgent_minutes' | 'channel_reject_threshold'
 // 只提交本卡片管理的字段；其余安全规则由服务端按原值合并保留。
-type EditableConfig = Pick<SecurityAlertConfig, NumberKey | 'enabled' | 'channel_quota_error_notify' | 'channel_monitor_notify' | 'channel_fidelity_notify' | 'user_balance_watches' |
-  'recharge_notify' | 'recharge_expired_notify_cny' | 'recharge_stuck_minutes'>
+type EditableConfig = Required<Pick<SecurityAlertConfig, NumberKey | 'enabled' | 'channel_quota_error_notify' | 'channel_recharge_notify' | 'channel_monitor_notify' | 'channel_fidelity_notify' | 'user_balance_watches' |
+  'recharge_notify' | 'recharge_expired_notify_cny' | 'recharge_stuck_minutes'>>
 interface UserInfo { email: string; balance: number; found: boolean }
 
-const numberFields: { key: NumberKey; label: string; hint: string; step: number }[] = [
+const numberFields: { key: NumberKey; label: string; hint: string; step: number; integer?: boolean }[] = [
   { key: 'channel_spend_floor', label: 'securityAlerts.spendFloor', hint: 'securityAlerts.spendFloorHint', step: 10 },
   { key: 'channel_spend_multiplier', label: 'securityAlerts.spendMultiplier', hint: 'securityAlerts.spendMultiplierHint', step: 0.5 },
-  { key: 'channel_balance_check_minutes', label: 'securityAlerts.balanceInterval', hint: 'securityAlerts.balanceIntervalHint', step: 5 },
+  { key: 'channel_balance_check_minutes', label: 'securityAlerts.balanceInterval', hint: 'securityAlerts.balanceIntervalHint', step: 5, integer: true },
   { key: 'channel_runway_hours', label: 'securityAlerts.runwayHours', hint: 'securityAlerts.runwayHint', step: 1 },
+  { key: 'channel_urgent_minutes', label: 'securityAlerts.urgentMinutes', hint: 'securityAlerts.urgentHint', step: 10, integer: true },
+  { key: 'channel_reject_threshold', label: 'securityAlerts.rejectThreshold', hint: 'securityAlerts.rejectHint', step: 1, integer: true },
   { key: 'channel_low_balance_usd', label: 'securityAlerts.lowUSD', hint: 'securityAlerts.lowHint', step: 5 },
   { key: 'channel_low_balance_cny', label: 'securityAlerts.lowCNY', hint: 'securityAlerts.lowHint', step: 10 },
 ]
@@ -191,6 +200,10 @@ function apply(next: SecurityAlertConfigView) {
     channel_low_balance_usd: c.channel_low_balance_usd,
     channel_low_balance_cny: c.channel_low_balance_cny,
     channel_runway_hours: c.channel_runway_hours,
+    // 旧配置没有这些字段时按服务端默认处理。
+    channel_urgent_minutes: c.channel_urgent_minutes ?? 60,
+    channel_reject_threshold: c.channel_reject_threshold ?? 5,
+    channel_recharge_notify: c.channel_recharge_notify ?? true,
     channel_quota_error_notify: c.channel_quota_error_notify,
     // 旧配置没有这个字段时按服务端默认（开启）处理。
     channel_monitor_notify: c.channel_monitor_notify ?? true,
@@ -217,7 +230,10 @@ async function save() {
   notice.value = ''
   if (form.value.user_balance_watches.some(w => !(Number(w.threshold) > 0))) { error.value = t('securityAlerts.thresholdInvalid'); return }
   const patch: EditableConfig = JSON.parse(JSON.stringify(form.value))
-  for (const field of numberFields) patch[field.key] = Number(patch[field.key]) || 0
+  for (const field of numberFields) {
+    const value = Number(patch[field.key]) || 0
+    patch[field.key] = field.integer ? Math.round(value) : value
+  }
   patch.recharge_expired_notify_cny = Number(patch.recharge_expired_notify_cny) || 0
   patch.recharge_stuck_minutes = Math.round(Number(patch.recharge_stuck_minutes) || 0)
   patch.user_balance_watches = patch.user_balance_watches.map(w => ({ user_id: w.user_id, threshold: Number(w.threshold), note: (w.note ?? '').trim() }))
