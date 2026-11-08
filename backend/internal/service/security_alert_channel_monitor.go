@@ -22,13 +22,24 @@ func channelMonitorAlertSubject(monitorID int64) string {
 
 type channelMonitorWeComNotifier struct {
 	alerts *SecurityAlertService
+	// monitors / slots 用于推送时回查出错渠道（见 security_alert_channel_monitor_trace.go），可为空。
+	monitors channelMonitorLookup
+	slots    channelMonitorSlotLister
 }
 
-func newChannelMonitorAlertNotifier(alerts *SecurityAlertService) channelMonitorAlertNotifier {
+func newChannelMonitorWeComNotifier(alerts *SecurityAlertService) *channelMonitorWeComNotifier {
 	if alerts == nil || alerts.db == nil {
 		return nil
 	}
 	return &channelMonitorWeComNotifier{alerts: alerts}
+}
+
+func newChannelMonitorAlertNotifier(alerts *SecurityAlertService) channelMonitorAlertNotifier {
+	notifier := newChannelMonitorWeComNotifier(alerts)
+	if notifier == nil {
+		return nil
+	}
+	return notifier
 }
 
 // channelMonitorNotifyEnabled 告警总开关和渠道监控开关都打开时才推送。
@@ -71,17 +82,20 @@ func (n *channelMonitorWeComNotifier) NotifyFailure(ctx context.Context, alert c
 	if strings.TrimSpace(alert.Message) != "" {
 		message = sanitizeSecurityText(alert.Message, channelMonitorAlertMessageRunes)
 	}
+	lines := []string{
+		"监控：" + channelMonitorLabel(alert.MonitorID, alert.MonitorName),
+		"模型：" + sanitizeSecurityText(alert.Model, 100),
+		fmt.Sprintf("连续 %d 次%s，最近一次 %s", alert.ConsecutiveFailures,
+			channelMonitorStatusLabel(alert.Status), formatSecurityTime(checkedAt, s.loc)),
+		channelMonitorReasonLine(alert),
+		"错误：" + message,
+	}
+	lines = append(lines, n.channelMonitorChannelLines(ctx, alert)...)
 	if err := emitSecurityAlert(ctx, tx, securityAlertDraft{
 		Kind:     securityAlertKindChannelMonitor,
 		Severity: SecurityAlertWarning,
 		Title:    "渠道监控连续失败",
-		Lines: []string{
-			"监控：" + channelMonitorLabel(alert.MonitorID, alert.MonitorName),
-			"模型：" + sanitizeSecurityText(alert.Model, 100),
-			fmt.Sprintf("连续 %d 次%s，最近一次 %s", alert.ConsecutiveFailures,
-				channelMonitorStatusLabel(alert.Status), formatSecurityTime(checkedAt, s.loc)),
-			"错误：" + message,
-		},
+		Lines:    lines,
 	}); err != nil {
 		return false, err
 	}

@@ -77,6 +77,8 @@ type channelMonitorFailureState struct {
 	// synced 已确认库里没有这个监控未恢复的告警，检测成功时不必再查库。
 	synced  bool
 	pending bool
+	// recent 这轮连续失败里最近 channelMonitorAlertThreshold 次检测，成功后清空。
+	recent []channelMonitorFailureSample
 }
 
 // scheduledMonitor 单个监控的运行时上下文。
@@ -106,13 +108,31 @@ func (t *scheduledMonitor) nextDelay() time.Duration {
 // NewChannelMonitorRunner 构造调度器。Start 在 wire 中调用一次。
 // settingService 用于在每次 fire 前读取功能开关；传 nil 时视为总是启用（兼容测试）。
 // alerts 用于连续失败/恢复推送（企业微信运营告警）；传 nil 时不推送。
+// concurrency 用于推送时查这个监控还卡在网关哪个账号上；传 nil 时只查已落库的网关记录。
 //
 // pool 在构造时即建好：避免 Start 在 mu 内赋值、fire/Stop 在 mu 外读取的竞态隐患，
 // 且 pond.NewPool 创建本身近似零开销，提前建池不会浪费资源。
-func NewChannelMonitorRunner(svc *ChannelMonitorService, settingService *SettingService, alerts *SecurityAlertService) *ChannelMonitorRunner {
+func NewChannelMonitorRunner(svc *ChannelMonitorService, settingService *SettingService, alerts *SecurityAlertService, concurrency *ConcurrencyService) *ChannelMonitorRunner {
 	runner := newChannelMonitorRunner(svc, settingService)
-	runner.alertNotifier = newChannelMonitorAlertNotifier(alerts)
+	if notifier := newChannelMonitorWeComNotifier(alerts); notifier != nil {
+		if svc != nil {
+			notifier.monitors = svc
+		}
+		if concurrency != nil {
+			notifier.slots = concurrency
+		}
+		runner.alertNotifier = notifier
+	}
 	return runner
+}
+
+// appendChannelMonitorFailureSample 追加一次失败，只保留最近 channelMonitorAlertThreshold 次。
+func appendChannelMonitorFailureSample(recent []channelMonitorFailureSample, sample channelMonitorFailureSample) []channelMonitorFailureSample {
+	recent = append(recent, sample)
+	if extra := len(recent) - channelMonitorAlertThreshold; extra > 0 {
+		recent = append([]channelMonitorFailureSample(nil), recent[extra:]...)
+	}
+	return recent
 }
 
 // newChannelMonitorRunner 内部构造，接受最小化接口，便于单元测试注入 stub。
@@ -392,6 +412,11 @@ func (r *ChannelMonitorRunner) handleCheckResults(_ context.Context, id int64, n
 	if state.consecutive < channelMonitorAlertThreshold {
 		state.consecutive++
 	}
+	state.recent = appendChannelMonitorFailureSample(state.recent, channelMonitorFailureSample{
+		Status:    primary.Status,
+		Message:   primary.Message,
+		CheckedAt: primary.CheckedAt,
+	})
 	r.failureStates[id] = state
 	shouldNotify := state.consecutive >= channelMonitorAlertThreshold && !state.alerted && !state.pending && r.alertNotifier != nil
 	if shouldNotify {
@@ -411,6 +436,7 @@ func (r *ChannelMonitorRunner) handleCheckResults(_ context.Context, id int64, n
 		Message:             primary.Message,
 		CheckedAt:           primary.CheckedAt,
 		ConsecutiveFailures: state.consecutive,
+		Failures:            append([]channelMonitorFailureSample(nil), state.recent...),
 	}
 	if _, ok := r.alertPool.TrySubmit(func() {
 		r.deliverFailureAlert(context.Background(), alert)
@@ -430,6 +456,7 @@ func (r *ChannelMonitorRunner) handleCheckSuccess(id int64, name string, primary
 	}
 	state := r.failureStates[id]
 	state.consecutive = 0
+	state.recent = nil
 	shouldNotify := r.alertNotifier != nil && !state.pending && (state.alerted || !state.synced)
 	switch {
 	case r.alertNotifier == nil:
