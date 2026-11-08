@@ -577,7 +577,7 @@ func (s *BillingService) initFallbackPricing() {
 		LongContextOutputMultiplier:        1.5,
 	}
 
-	// GPT-6 Sol/Luna official rates, 2026-09-22.
+	// GPT-6.1 Terra official rates, 2026-10-26.
 	s.fallbackPrices["gpt-6.1-terra"] = &ModelPricing{
 		InputPricePerToken:                 1e-6,
 		InputPricePerTokenPriority:         2e-6,
@@ -592,6 +592,7 @@ func (s *BillingService) initFallbackPricing() {
 		LongContextInputMultiplier:         2,
 		LongContextOutputMultiplier:        1.5,
 	}
+	// GPT-6 Sol/Luna official rates, 2026-09-22.
 	s.fallbackPrices["gpt-6.1-sol"] = &ModelPricing{
 		InputPricePerToken:                 2e-6,
 		InputPricePerTokenPriority:         4e-6,
@@ -917,6 +918,14 @@ func (s *BillingService) getFallbackPricing(model string) *ModelPricing {
 	// Keep the fork's Flash Lite SKU without overriding upstream Argon tier matching.
 	if normalizeModelNameForPricing(modelLower) == "gemini-3.5-flash-lite" {
 		return s.fallbackPrices["gemini-3.5-flash-lite"]
+	}
+	if modelLower == "gpt-image-2.6-flare" || modelLower == "gpt-image-2.6-sunburst" {
+		p := openAIGPTImage25FallbackPricing
+		return &ModelPricing{
+			InputPricePerToken: p.InputCostPerToken, CacheReadPricePerToken: p.CacheReadInputTokenCost,
+			ImageInputPricePerToken: p.InputCostPerImageToken, ImageCacheReadPricePerToken: p.CacheReadInputImageTokenCost,
+			ImageOutputPricePerToken: p.OutputCostPerImageToken,
+		}
 	}
 	if modelLower == "jev-latest" {
 		return s.fallbackPrices["jev-latest"]

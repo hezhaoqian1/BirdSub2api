@@ -256,6 +256,7 @@ export default {
     errors: {
       INVALID_CREDENTIALS: '邮箱或密码错误。',
       USER_NOT_ACTIVE: '账号已被禁用',
+      EMAIL_BLOCKED: '该邮箱不允许注册，请更换其他邮箱。',
     },
     registrationFailed: '注册失败，请重试。',
     emailDomainRegistrationLimit:
