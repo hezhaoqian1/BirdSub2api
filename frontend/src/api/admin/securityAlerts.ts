@@ -15,6 +15,12 @@ export interface SecurityAlertConfig {
   channel_low_balance_usd: number
   channel_low_balance_cny: number
   channel_runway_hours: number
+  /** 按最近扣费速度预计在这么多分钟内用完时再提醒一次，0 关闭。 */
+  channel_urgent_minutes?: number
+  /** 同一钱包 5 分钟内被上游以余额不足拒绝达到该次数时立即提醒，0 关闭。 */
+  channel_reject_threshold?: number
+  /** 余额告警过的渠道检测到充值时推送一条。 */
+  channel_recharge_notify?: boolean
   channel_quota_error_notify: boolean
   channel_monitor_notify: boolean
   /** 渠道保真体检复测确认不通过时推送，恢复后再推一次。 */

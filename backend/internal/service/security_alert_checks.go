@@ -50,6 +50,7 @@ func (s *SecurityAlertService) runTick() {
 			s.lastLoginCheck = now
 			s.checkLoginFailures(ctx, snap)
 			s.checkChannelQuotaErrors(ctx, snap)
+			s.checkChannelBalanceRejects(ctx, snap)
 			s.checkUserBalanceWatches(ctx, snap)
 			s.checkRecharges(ctx, snap)
 		}

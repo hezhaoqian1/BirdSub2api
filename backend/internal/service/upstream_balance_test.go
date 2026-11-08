@@ -138,6 +138,21 @@ func TestUpstreamBalanceRequestsUseCorrectCredentialsAndBlockRedirects(t *testin
 	}
 }
 
+// 2026-11 nat6：/api/status 偶发失败时余额退回原始额度（6252750），余额告警把它当成充值，
+// 同一个 ¥91.29 推了 15 次。换算参数读不到必须整次失败。
+func TestUpstreamBalanceStatusFailureFailsTheQuery(t *testing.T) {
+	a := &Account{ID: 149, Type: "apikey", Credentials: map[string]any{"base_url": "https://example.com", "api_key": "k"}}
+	panel := &balanceHTTPTestStub{bodies: map[string]string{"/api/user/self": `{"success":true,"data":{"quota":6252750,"used_quota":0}}`}}
+	s := NewUpstreamBalanceService(nil, nil, nil, panel, ollamaUsageTestEncryptor{}, nil)
+	_, err := s.query(context.Background(), a, balanceStoredConfig{Mode: "new_api", Token: "cipher:t", UserID: "389"})
+	require.ErrorContains(t, err, "/api/status")
+
+	token := &balanceHTTPTestStub{bodies: map[string]string{"/api/usage/token/": `{"code":true,"data":{"total_available":6252750,"total_used":0}}`}}
+	s = NewUpstreamBalanceService(nil, nil, nil, token, nil, nil)
+	_, err = s.query(context.Background(), a, balanceStoredConfig{Mode: "token"})
+	require.ErrorContains(t, err, "/api/status")
+}
+
 func TestUpstreamBalanceFailurePreservesLastGoodAndPersistsCooldown(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	require.NoError(t, err)

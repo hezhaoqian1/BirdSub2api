@@ -75,6 +75,11 @@ describe('企业微信告警设置', () => {
     expect((wrapper.get('[data-test="threshold-34"]').element as HTMLInputElement).value).toBe('200')
 
     await wrapper.get('[data-test="channel_low_balance_usd"]').setValue('30')
+    expect((wrapper.get('[data-test="channel_urgent_minutes"]').element as HTMLInputElement).value).toBe('60')
+    await wrapper.get('[data-test="channel_urgent_minutes"]').setValue('45.6')
+    await wrapper.get('[data-test="channel_reject_threshold"]').setValue('8')
+    expect((wrapper.get('[data-test="channel-recharge-notify"]').element as HTMLInputElement).checked).toBe(true)
+    await wrapper.get('[data-test="channel-recharge-notify"]').setValue(false)
     expect((wrapper.get('[data-test="channel-monitor-notify"]').element as HTMLInputElement).checked).toBe(true)
     await wrapper.get('[data-test="channel-monitor-notify"]').setValue(false)
     expect((wrapper.get('[data-test="channel-fidelity-notify"]').element as HTMLInputElement).checked).toBe(true)
@@ -87,6 +92,9 @@ describe('企业微信告警设置', () => {
     expect(mocks.stepUp).toHaveBeenCalledOnce()
     const patch = mocks.updateConfig.mock.calls[0]![0]
     expect(patch.channel_low_balance_usd).toBe(30)
+    expect(patch.channel_urgent_minutes).toBe(46)
+    expect(patch.channel_reject_threshold).toBe(8)
+    expect(patch.channel_recharge_notify).toBe(false)
     expect(patch.channel_monitor_notify).toBe(false)
     expect(patch.channel_fidelity_notify).toBe(false)
     expect(patch.recharge_notify).toBe(true)

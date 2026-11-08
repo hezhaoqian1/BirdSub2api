@@ -94,8 +94,14 @@ type SecurityAlertConfig struct {
 	// ChannelLowBalanceUSD / ChannelLowBalanceCNY 上游余额低于该值时告警（按余额币种），0 关闭。
 	ChannelLowBalanceUSD float64 `json:"channel_low_balance_usd"`
 	ChannelLowBalanceCNY float64 `json:"channel_low_balance_cny"`
-	// ChannelRunwayHours 按近 3 小时的扣费速度预计在该小时数内用完时告警，0 关闭。
+	// ChannelRunwayHours 按最近扣费速度（近 30 分钟 / 1 小时 / 3 小时里最快的）预计在该小时数内用完时告警，0 关闭。
 	ChannelRunwayHours float64 `json:"channel_runway_hours"`
+	// ChannelUrgentMinutes 按最近扣费速度预计在该分钟数内用完时再告警一次（即将用完），0 关闭。
+	ChannelUrgentMinutes int `json:"channel_urgent_minutes"`
+	// ChannelRejectThreshold 同一上游钱包 5 分钟内被上游以「余额/额度不足」拒绝达到该次数时立即告警，0 关闭。
+	ChannelRejectThreshold int `json:"channel_reject_threshold"`
+	// ChannelRechargeNotify 余额告警过的渠道检测到充值时推送一条「渠道已充值」。
+	ChannelRechargeNotify bool `json:"channel_recharge_notify"`
 	// ChannelQuotaErrorNotify 渠道因上游额度不足被停用时告警（覆盖查不到余额的渠道）。
 	ChannelQuotaErrorNotify bool `json:"channel_quota_error_notify"`
 	// ChannelMonitorNotify 渠道监控主模型连续 3 次检测失败时告警，恢复后再通知一次。
@@ -142,6 +148,9 @@ func DefaultSecurityAlertConfig() SecurityAlertConfig {
 		ChannelLowBalanceUSD:       20,
 		ChannelLowBalanceCNY:       100,
 		ChannelRunwayHours:         6,
+		ChannelUrgentMinutes:       60,
+		ChannelRejectThreshold:     5,
+		ChannelRechargeNotify:      true,
 		ChannelQuotaErrorNotify:    true,
 		ChannelMonitorNotify:       true,
 		ChannelFidelityNotify:      true,
@@ -211,6 +220,12 @@ func (c SecurityAlertConfig) Validate() error {
 	}
 	if c.ChannelRunwayHours > 168 {
 		return errors.New("channel_runway_hours must not exceed 168")
+	}
+	if c.ChannelUrgentMinutes < 0 || c.ChannelUrgentMinutes > 1440 {
+		return errors.New("channel_urgent_minutes must be between 0 (off) and 1440")
+	}
+	if c.ChannelRejectThreshold < 0 || c.ChannelRejectThreshold > 100000 {
+		return errors.New("channel_reject_threshold must be between 0 (off) and 100000")
 	}
 	if c.RechargeExpiredNotifyCNY < 0 {
 		return errors.New("recharge_expired_notify_cny must not be negative")
@@ -400,6 +415,10 @@ type SecurityAlertService struct {
 	channelSpendBaseline   map[int64]float64
 	usageBaselineAt        time.Time
 	balanceSweepInProgress atomic.Bool
+
+	// walletOf 账号 → 所属钱包的代表账号（余额刷新时识别），供「上游开始拒绝」合并同一钱包。
+	walletMu sync.Mutex
+	walletOf map[int64]int64
 
 	lastFidelitySweepCheck  time.Time
 	fidelitySweepInProgress atomic.Bool

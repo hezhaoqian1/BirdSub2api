@@ -21,24 +21,34 @@ import (
 
 // 渠道与用户余额告警（和安全告警共用企业微信机器人与 outbox，消息标题为「运营告警」）：
 //   - 渠道大额消费：渠道（上游账号）近 1 小时成本超过下限，且超过它过去 7 天单小时 P95 的若干倍；
-//   - 渠道余额：leader 定时刷新能识别余额的上游账号，余额按近 3 小时扣费速度预计很快用完、
-//     低于提醒线、或已经用完时推送。每个账号每个级别只推一次，检测到充值后重新开始监控；
-//   - 渠道额度报错：查不到余额的渠道只能靠上游报错发现，账号因额度不足被停用时推送；
+//   - 渠道余额：leader 定时刷新能识别余额的上游账号，按钱包（同一上游钱包下的多个账号，可能挂在
+//     不同域名下）判定：按最近扣费速度预计几小时内用完 → 低于提醒线 → 预计 1 小时内用完 → 已用完，
+//     每个钱包每个级别只推一次；检测到充值后推一条「渠道已充值」并重新开始监控。快用完的钱包
+//     每 2 分钟复查一次。近 24 小时没有流量的渠道只记状态、进日报，不单独推送；
+//   - 上游开始拒绝：上游 5 分钟内多次以「余额/额度不足」拒绝请求时立即推送（见
+//     security_alert_balance_reject.go），这是最早的信号，也覆盖查不到余额的渠道；
+//   - 渠道额度报错：账号因额度不足被停用时推送；
 //   - 关注用户余额：管理员指定的用户余额低于提醒线时推送，充值回到提醒线以上后重新开始监控。
 
 const (
-	securityAlertKindChannelSpend = "channel_spend"
-	securityAlertKindChannelBal   = "channel_balance"
-	securityAlertKindChannelQuota = "channel_quota_error"
-	securityAlertKindUserBalance  = "user_balance"
+	securityAlertKindChannelSpend    = "channel_spend"
+	securityAlertKindChannelBal      = "channel_balance"
+	securityAlertKindChannelRecharge = "channel_recharge"
+	securityAlertKindChannelQuota    = "channel_quota_error"
+	securityAlertKindUserBalance     = "user_balance"
 
-	securityAlertBalanceSweepSubject = "sweep:channel_balance"
-	securityAlertBalanceSweepTimeout = 4 * time.Minute
-	securityAlertBalanceSweepWorkers = 2
-	securityAlertBalanceSampleWindow = 3 * time.Hour
-	securityAlertBalanceSampleTTL    = 48 * time.Hour
-	securityAlertBalanceFailedRetry  = 6 * time.Hour
-	securityAlertQuotaErrorWindow    = 10 * time.Minute
+	securityAlertBalanceSweepSubject    = "sweep:channel_balance"
+	securityAlertBalanceHotSweepSubject = "sweep:channel_balance_hot"
+	securityAlertBalanceHotSweepEvery   = 2 * time.Minute
+	securityAlertBalanceHotWindow       = 6 * time.Hour
+	securityAlertBalanceHotMax          = 20
+	securityAlertBalanceSweepTimeout    = 4 * time.Minute
+	securityAlertBalanceSweepWorkers    = 2
+	securityAlertBalanceSampleWindow    = 3 * time.Hour
+	securityAlertBalanceSampleTTL       = 48 * time.Hour
+	securityAlertBalanceFailedRetry     = 6 * time.Hour
+	securityAlertBalanceIdleWindow      = 24 * time.Hour
+	securityAlertQuotaErrorWindow       = 10 * time.Minute
 )
 
 // channelQuotaErrorPattern 匹配上游「额度不足/欠费」类报错（PostgreSQL 正则，大小写不敏感）。
@@ -47,12 +57,14 @@ const channelQuotaErrorPattern = `额度不足|余额不足|欠费|insufficient|
 // securityAccountCostExpr 渠道成本口径，与利润统计、仪表盘 account_cost 一致。
 const securityAccountCostExpr = "COALESCE(u.account_stats_cost, u.total_cost) * COALESCE(u.account_rate_multiplier, 1)"
 
-// 渠道余额告警级别，数值越大越严重。
+// 渠道余额告警级别，数值越大越严重，存于 security_alert_state.level。
+// 加入「即将用完」之前「已用完」是 3；旧的 3 会被读成「即将用完」，余额仍 ≤ 0 时会再升级一次。
 const (
 	channelBalanceOK     = 0
-	channelBalanceRunway = 1 // 按扣费速度预计很快用完
-	channelBalanceLow    = 2 // 低于提醒线
-	channelBalanceEmpty  = 3 // 已用完
+	channelBalanceRunway = 1 // 按扣费速度预计 ChannelRunwayHours 内用完
+	channelBalanceLow    = 2 // 低于固定提醒线（多见于流量小的渠道）
+	channelBalanceUrgent = 3 // 按扣费速度预计 ChannelUrgentMinutes 内用完
+	channelBalanceEmpty  = 4 // 已用完
 )
 
 // isOpsAlertKind 渠道/用户余额类告警，投递时使用「运营告警」标题。
@@ -64,6 +76,8 @@ func isOpsAlertKind(kind string) bool {
 type channelBalanceReader interface {
 	State(ctx context.Context, id int64, refresh, force bool) (UpstreamBalanceState, error)
 }
+
+func accountAlertSubject(id int64) string { return "account:" + strconv.FormatInt(id, 10) }
 
 // ---- 纯函数：级别判定与状态迁移 ----
 
@@ -83,10 +97,17 @@ func evaluateChannelBalanceLevel(cfg SecurityAlertConfig, remaining float64, uni
 	if remaining <= 0 {
 		return channelBalanceEmpty
 	}
+	hours := math.Inf(1)
+	if burnPerHour > 0 {
+		hours = remaining / burnPerHour
+	}
+	if cfg.ChannelUrgentMinutes > 0 && hours*60 < float64(cfg.ChannelUrgentMinutes) {
+		return channelBalanceUrgent
+	}
 	if threshold := channelLowBalanceThreshold(cfg, unit); threshold > 0 && remaining < threshold {
 		return channelBalanceLow
 	}
-	if cfg.ChannelRunwayHours > 0 && burnPerHour > 0 && remaining/burnPerHour < cfg.ChannelRunwayHours {
+	if cfg.ChannelRunwayHours > 0 && hours < cfg.ChannelRunwayHours {
 		return channelBalanceRunway
 	}
 	return channelBalanceOK
@@ -116,42 +137,71 @@ type balanceSample struct {
 	Unit      string
 }
 
-// balanceBurnPerHour 由按时间排序的余额样本估算每小时扣费；充值造成的上涨不计入，
-// 跨度不足 30 分钟时返回 0（未知）。
-func balanceBurnPerHour(samples []balanceSample) float64 {
+// balanceBurnWindows 估算扣费速度的时间窗口，取其中最快的一个。只看 3 小时平均会把突发流量摊薄：
+// 2026-11-08 XApi 05:10 起每小时扣约 $330，3 小时平均只有 $46，推送说还能撑 4.2 小时，实际约 35 分钟。
+var balanceBurnWindows = []time.Duration{30 * time.Minute, time.Hour, 3 * time.Hour}
+
+// balanceBurnMinSpan 窗口内样本跨度不足该值时不估算，避免两三个点的抖动被当成速度。
+const balanceBurnMinSpan = 20 * time.Minute
+
+// balanceBurn 扣费速度：每小时扣多少，以及取自哪个时间窗口。
+type balanceBurn struct {
+	PerHour float64
+	Window  time.Duration
+}
+
+// estimateBalanceBurn 由按时间排序的余额样本估算扣费速度：各窗口内累计下降 / 时间跨度，取最大值。
+// 充值造成的上涨不计入；只看和最新样本同币种的样本。
+func estimateBalanceBurn(samples []balanceSample) balanceBurn {
 	if len(samples) < 2 {
-		return 0
+		return balanceBurn{}
 	}
-	unit := samples[len(samples)-1].Unit
-	var drained float64
-	var first, last *balanceSample
-	for i := range samples {
-		cur := &samples[i]
-		if cur.Unit != unit {
+	last := samples[len(samples)-1]
+	var best balanceBurn
+	for _, window := range balanceBurnWindows {
+		since := last.At.Add(-window - time.Minute) // 定时采样有几十秒抖动
+		var drained float64
+		var first, prev *balanceSample
+		for i := range samples {
+			cur := &samples[i]
+			if cur.Unit != last.Unit || cur.At.Before(since) {
+				continue
+			}
+			if prev != nil && prev.Remaining > cur.Remaining {
+				drained += prev.Remaining - cur.Remaining
+			}
+			if first == nil {
+				first = cur
+			}
+			prev = cur
+		}
+		if first == nil || drained <= 0 {
 			continue
 		}
-		if last != nil && last.Remaining > cur.Remaining {
-			drained += last.Remaining - cur.Remaining
+		span := last.At.Sub(first.At)
+		if span < balanceBurnMinSpan {
+			continue
 		}
-		if first == nil {
-			first = cur
+		// 相差不到 1% 时保留较短的窗口（显示「近 30 分钟」比「近 3 小时」更有参考价值）。
+		if rate := drained / span.Hours(); rate > best.PerHour*1.01 {
+			best = balanceBurn{PerHour: rate, Window: window}
 		}
-		last = cur
 	}
-	if first == nil || last == nil {
-		return 0
-	}
-	span := last.At.Sub(first.At)
-	if span < 30*time.Minute || drained <= 0 {
-		return 0
-	}
-	return drained / span.Hours()
+	return best
+}
+
+// balanceBurnPerHour 只取速度（每小时），0 表示未知。
+func balanceBurnPerHour(samples []balanceSample) float64 {
+	return estimateBalanceBurn(samples).PerHour
 }
 
 func formatBalanceAmount(v float64, unit string) string {
 	sign := ""
 	if v < 0 {
 		sign, v = "-", -v
+	}
+	if v < 0.005 {
+		sign = "" // 不显示「-$0.00」
 	}
 	switch strings.ToUpper(unit) {
 	case "USD":
@@ -164,10 +214,35 @@ func formatBalanceAmount(v float64, unit string) string {
 }
 
 func formatHours(h float64) string {
-	if h < 1 {
+	switch {
+	case h < 1:
 		return fmt.Sprintf("%.0f 分钟", math.Max(1, h*60))
+	case h < 48:
+		return fmt.Sprintf("%.1f 小时", h)
+	default:
+		return fmt.Sprintf("%.0f 天", h/24)
 	}
-	return fmt.Sprintf("%.1f 小时", h)
+}
+
+func formatBurnWindow(d time.Duration) string {
+	if d < time.Hour {
+		return fmt.Sprintf("%.0f 分钟", d.Minutes())
+	}
+	return fmt.Sprintf("%.0f 小时", d.Hours())
+}
+
+// balanceBurnLine 「按近 30 分钟扣费速度每小时约 $330.00，预计 15 分钟后用完」；速度未知时返回空。
+func balanceBurnLine(burn balanceBurn, remaining float64, unit string) string {
+	if burn.PerHour < 0.01 {
+		return ""
+	}
+	line := fmt.Sprintf("按近 %s扣费速度每小时约 %s", formatBurnWindow(burn.Window), formatBalanceAmount(burn.PerHour, unit))
+	if remaining > 0 {
+		if hours := remaining / burn.PerHour; hours < 30*24 {
+			line += "，预计 " + formatHours(hours) + "后用完"
+		}
+	}
+	return line
 }
 
 func joinLimited(items []string, limit int) string {
@@ -197,101 +272,201 @@ type channelBalanceReading struct {
 	Remaining float64
 	Unit      string
 	Scope     string
-	Burn      float64
-	Level     int
+	FetchedAt time.Time
+	Burn      balanceBurn
+	// Prev 上一次同币种采样的余额（用于「充值前 → 充值后」），没有时为 nil。
+	Prev *float64
+	// UnitChanged 和上一次采样的币种不同（如换算参数偶发读取失败），本轮不参与判定。
+	UnitChanged bool
+	// Active 近 24 小时有请求。
+	Active bool
 }
 
 func channelAccountLabel(id int64, name string) string {
 	return fmt.Sprintf("#%d %s", id, sanitizeSecurityText(name, 40))
 }
 
-// buildChannelBalanceDrafts 把同一上游、同一钱包（余额相近）的账号合并成一条告警。
-func buildChannelBalanceDrafts(cfg SecurityAlertConfig, alerts []channelBalanceReading, at time.Time) []securityAlertDraft {
-	sort.SliceStable(alerts, func(i, j int) bool {
-		a, b := alerts[i], alerts[j]
-		if a.Level != b.Level {
-			return a.Level > b.Level
+// channelBalanceWallet 同一个上游钱包：其下的账号（可能挂在不同域名下）合并成一条告警、共用一个级别。
+type channelBalanceWallet struct {
+	Members []channelBalanceReading
+	Sites   []string
+	Unit    string
+	Scope   string
+	Low     float64
+	High    float64
+	Burn    balanceBurn
+	Prev    *float64
+	Active  bool
+}
+
+// sameBalanceWallet 判断 r 是否和 head 属于同一个钱包：同币种、同额度类型、余额足够接近。
+// 同一轮里各账号的查询时间相差几十秒到几分钟，扣得快的钱包按扣费速度放宽容差；burnPerHour 取两边
+// 较慢的一个（同一钱包两边速度一样），不扣费的渠道不会因为别的钱包扣得快就被并进去。
+func sameBalanceWallet(head, r channelBalanceReading, burnPerHour float64) bool {
+	if head.Unit != r.Unit || head.Scope != r.Scope {
+		return false
+	}
+	gap := head.FetchedAt.Sub(r.FetchedAt)
+	if gap < 0 {
+		gap = -gap
+	}
+	drift := burnPerHour * (gap + 30*time.Second).Hours() * 1.5
+	tolerance := math.Max(drift, math.Max(0.5, math.Abs(head.Remaining)*0.01))
+	if head.Site != r.Site {
+		// 跨域名只合并账户钱包，且容差收紧：不同上游的余额碰巧接近（尤其都见底时）不能并成一个。
+		if head.Scope != "account" || math.Abs(head.Remaining) < 1 {
+			return false
 		}
-		if a.Site != b.Site {
-			return a.Site < b.Site
-		}
+		tolerance = math.Max(drift, 0.05)
+	}
+	return math.Abs(r.Remaining-head.Remaining) <= tolerance
+}
+
+// groupChannelWallets 把读数归并成钱包（按余额从低到高，与钱包里余额最低的账号比较）。
+func groupChannelWallets(readings []channelBalanceReading) []channelBalanceWallet {
+	sorted := append([]channelBalanceReading(nil), readings...)
+	sort.SliceStable(sorted, func(i, j int) bool {
+		a, b := sorted[i], sorted[j]
 		if a.Unit != b.Unit {
 			return a.Unit < b.Unit
 		}
 		if a.Scope != b.Scope {
 			return a.Scope < b.Scope
 		}
-		return a.Remaining < b.Remaining
+		if a.Remaining != b.Remaining {
+			return a.Remaining < b.Remaining
+		}
+		return a.AccountID < b.AccountID
 	})
-	var clusters [][]channelBalanceReading
-	for _, r := range alerts {
-		if n := len(clusters); n > 0 {
-			head := clusters[n-1][0]
-			if head.Level == r.Level && head.Site == r.Site && head.Unit == r.Unit && head.Scope == r.Scope &&
-				math.Abs(r.Remaining-head.Remaining) <= math.Max(0.5, math.Abs(head.Remaining)*0.01) {
-				clusters[n-1] = append(clusters[n-1], r)
-				continue
+	var wallets []channelBalanceWallet
+	for _, r := range sorted {
+		placed := false
+		for i := range wallets {
+			w := &wallets[i]
+			if sameBalanceWallet(w.Members[0], r, math.Min(w.Burn.PerHour, r.Burn.PerHour)) {
+				w.Members = append(w.Members, r)
+				if r.Burn.PerHour > w.Burn.PerHour {
+					w.Burn = r.Burn
+				}
+				placed = true
+				break
 			}
 		}
-		clusters = append(clusters, []channelBalanceReading{r})
+		if !placed {
+			wallets = append(wallets, channelBalanceWallet{Members: []channelBalanceReading{r}, Burn: r.Burn})
+		}
 	}
+	for i := range wallets {
+		w := &wallets[i]
+		head := w.Members[0]
+		w.Unit, w.Scope, w.Low, w.High, w.Prev = head.Unit, head.Scope, head.Remaining, head.Remaining, head.Prev
+		seen := map[string]bool{}
+		for _, m := range w.Members {
+			w.High = math.Max(w.High, m.Remaining)
+			w.Active = w.Active || m.Active
+			site := m.Site
+			if site == "" {
+				site = "-"
+			}
+			if !seen[site] {
+				seen[site] = true
+				w.Sites = append(w.Sites, site)
+			}
+		}
+		sort.Strings(w.Sites)
+		sort.SliceStable(w.Members, func(a, b int) bool { return w.Members[a].AccountID < w.Members[b].AccountID })
+	}
+	return wallets
+}
 
-	drafts := make([]securityAlertDraft, 0, len(clusters))
-	for _, cluster := range clusters {
-		head := cluster[0]
-		labels := make([]string, 0, len(cluster))
-		low, high, burn := head.Remaining, head.Remaining, 0.0
-		for _, r := range cluster {
-			labels = append(labels, channelAccountLabel(r.AccountID, r.Name))
-			low, high, burn = math.Min(low, r.Remaining), math.Max(high, r.Remaining), math.Max(burn, r.Burn)
-		}
-		amount := formatBalanceAmount(low, head.Unit)
-		if highText := formatBalanceAmount(high, head.Unit); highText != amount {
-			amount += " ~ " + highText
-		}
-		switch head.Scope {
-		case "token":
-			amount += "（令牌额度）"
-		case "subscription":
-			amount += "（订阅额度）"
-		}
-		site := head.Site
-		if site == "" {
-			site = "-"
-		}
-		lines := []string{
-			"上游：" + sanitizeSecurityText(site, 80),
-			"账号：" + joinLimited(labels, 4),
-			"余额：" + amount,
-		}
-		if burn > 0 {
-			line := fmt.Sprintf("近 3 小时平均每小时扣 %s", formatBalanceAmount(burn, head.Unit))
-			if low > 0 {
-				line += "，预计 " + formatHours(low/burn) + "后用完"
-			}
-			lines = append(lines, line)
-		}
-		d := securityAlertDraft{
-			DedupeKey: fmt.Sprintf("channel_balance:%d:%d:%s", head.Level, head.AccountID, securityBucket(at, time.Minute)),
-			Kind:      securityAlertKindChannelBal,
-			Severity:  SecurityAlertWarning,
-		}
-		switch head.Level {
-		case channelBalanceEmpty:
-			d.Severity = SecurityAlertCritical
-			d.Title = "渠道余额已用完"
-			lines = append(lines, "请求可能已经开始失败，请尽快充值。")
-		case channelBalanceLow:
-			d.Title = "渠道余额不足"
-			lines = append(lines, "提醒线："+formatBalanceAmount(channelLowBalanceThreshold(cfg, head.Unit), head.Unit), "请及时充值，充值后会自动恢复监控。")
-		default:
-			d.Title = "渠道余额预计很快用完"
-			lines = append(lines, fmt.Sprintf("提醒条件：预计 %s内用完。请及时充值，充值后会自动恢复监控。", formatHours(cfg.ChannelRunwayHours)))
-		}
-		d.Lines = lines
-		drafts = append(drafts, d)
+// walletHeadID 钱包的代表账号（ID 最小的成员），用于去重键。
+func (w channelBalanceWallet) walletHeadID() int64 { return w.Members[0].AccountID }
+
+func (w channelBalanceWallet) headerLines() []string {
+	labels := make([]string, 0, len(w.Members))
+	for _, m := range w.Members {
+		labels = append(labels, channelAccountLabel(m.AccountID, m.Name))
 	}
-	return drafts
+	sites := make([]string, 0, len(w.Sites))
+	for _, s := range w.Sites {
+		sites = append(sites, sanitizeSecurityText(s, 80))
+	}
+	return []string{"上游：" + strings.Join(sites, "、"), "账号：" + joinLimited(labels, 6)}
+}
+
+func (w channelBalanceWallet) amountText() string {
+	amount := formatBalanceAmount(w.Low, w.Unit)
+	if highText := formatBalanceAmount(w.High, w.Unit); highText != amount {
+		amount += " ~ " + highText
+	}
+	switch w.Scope {
+	case "token":
+		amount += "（令牌额度）"
+	case "subscription":
+		amount += "（订阅额度）"
+	}
+	return amount
+}
+
+// buildChannelBalanceDraft 一个钱包升到 level 时的告警。
+func buildChannelBalanceDraft(cfg SecurityAlertConfig, w channelBalanceWallet, level int, at time.Time) securityAlertDraft {
+	lines := append(w.headerLines(), "余额："+w.amountText())
+	if line := balanceBurnLine(w.Burn, w.Low, w.Unit); line != "" {
+		lines = append(lines, line)
+	}
+	d := securityAlertDraft{
+		DedupeKey: fmt.Sprintf("channel_balance:%d:%d:%s", level, w.walletHeadID(), securityBucket(at, time.Minute)),
+		Kind:      securityAlertKindChannelBal,
+		Severity:  SecurityAlertWarning,
+	}
+	switch level {
+	case channelBalanceEmpty:
+		d.Severity = SecurityAlertCritical
+		d.Title = "渠道余额已用完"
+		lines = append(lines, "请求可能已经开始失败，请尽快充值。")
+	case channelBalanceUrgent:
+		d.Severity = SecurityAlertCritical
+		d.Title = "渠道余额即将用完"
+		lines = append(lines, fmt.Sprintf("提醒条件：按最近扣费速度预计 %d 分钟内用完。请尽快充值，充值后会自动恢复监控。", cfg.ChannelUrgentMinutes))
+	case channelBalanceLow:
+		d.Title = "渠道余额不足"
+		lines = append(lines, "提醒线："+formatBalanceAmount(channelLowBalanceThreshold(cfg, w.Unit), w.Unit), "请及时充值，充值后会自动恢复监控。")
+	default:
+		d.Title = "渠道余额预计很快用完"
+		lines = append(lines, fmt.Sprintf("提醒条件：按最近扣费速度预计 %s内用完。请及时充值，充值后会自动恢复监控。", formatHours(cfg.ChannelRunwayHours)))
+	}
+	d.Lines = lines
+	return d
+}
+
+// buildChannelRechargeDraft 告警过的钱包检测到充值。
+func buildChannelRechargeDraft(cfg SecurityAlertConfig, w channelBalanceWallet, level int, at time.Time) securityAlertDraft {
+	lines := w.headerLines()
+	if w.Prev != nil {
+		lines = append(lines, fmt.Sprintf("余额：%s → %s", formatBalanceAmount(*w.Prev, w.Unit), w.amountText()))
+	} else {
+		lines = append(lines, "充值后余额："+w.amountText())
+	}
+	if line := balanceBurnLine(w.Burn, w.Low, w.Unit); line != "" {
+		lines = append(lines, line)
+	}
+	switch level {
+	case channelBalanceOK:
+		lines = append(lines, "已恢复监控。")
+	case channelBalanceRunway:
+		lines = append(lines, fmt.Sprintf("注意：按最近扣费速度仍预计 %s内用完。", formatHours(cfg.ChannelRunwayHours)))
+	case channelBalanceLow:
+		lines = append(lines, "注意：充值后仍低于提醒线 "+formatBalanceAmount(channelLowBalanceThreshold(cfg, w.Unit), w.Unit)+"。")
+	default:
+		lines = append(lines, fmt.Sprintf("注意：按最近扣费速度仍预计 %d 分钟内用完。", cfg.ChannelUrgentMinutes))
+	}
+	return securityAlertDraft{
+		DedupeKey: fmt.Sprintf("channel_recharge:%d:%s", w.walletHeadID(), securityBucket(at, time.Minute)),
+		Kind:      securityAlertKindChannelRecharge,
+		Severity:  SecurityAlertInfo,
+		Title:     "渠道已充值",
+		Lines:     lines,
+	}
 }
 
 // ---- 告警状态表 ----
@@ -345,7 +520,8 @@ func (s *SecurityAlertService) claimSweep(ctx context.Context, subject string, e
 
 // ---- 渠道余额定时刷新 ----
 
-// maybeStartBalanceSweep 到期时在后台刷新上游余额（不阻塞 tick；跨实例由 claimSweep 协调）。
+// maybeStartBalanceSweep 到期时在后台刷新上游余额（不阻塞 tick；跨实例由 claimSweep 协调）：
+// 全量每 ChannelBalanceCheckMinutes 一次；快用完、已用完或正被上游拒绝的钱包每 2 分钟复查一次。
 func (s *SecurityAlertService) maybeStartBalanceSweep(snap securityRuleSnapshot) {
 	minutes := snap.cfg.ChannelBalanceCheckMinutes
 	if s.balances == nil || minutes <= 0 {
@@ -357,8 +533,15 @@ func (s *SecurityAlertService) maybeStartBalanceSweep(snap securityRuleSnapshot)
 	}
 	s.lastBalanceSweepCheck = now
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	var only []int64
 	claimed, err := s.claimSweep(ctx, securityAlertBalanceSweepSubject, time.Duration(minutes)*time.Minute)
-	cancel()
+	if err == nil && !claimed {
+		only, err = s.loadHotBalanceAccounts(ctx, now)
+		if err == nil && len(only) > 0 {
+			claimed, err = s.claimSweep(ctx, securityAlertBalanceHotSweepSubject, securityAlertBalanceHotSweepEvery)
+		}
+	}
 	if err != nil {
 		slog.Warn("[SecurityAlert] failed to claim balance sweep", "error", err)
 		return
@@ -371,8 +554,28 @@ func (s *SecurityAlertService) maybeStartBalanceSweep(snap securityRuleSnapshot)
 	go func() {
 		defer s.wg.Done()
 		defer s.balanceSweepInProgress.Store(false)
-		s.runBalanceSweep(cfg)
+		s.runBalanceSweep(cfg, only)
 	}()
+}
+
+// loadHotBalanceAccounts 近 6 小时进入「即将用完 / 已用完」或正被上游以余额不足拒绝的账号。
+func (s *SecurityAlertService) loadHotBalanceAccounts(ctx context.Context, now time.Time) ([]int64, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT DISTINCT split_part(subject, ':', 2)::bigint FROM security_alert_state
+ WHERE updated_at > $1 AND ((subject LIKE 'account:%' AND level >= $2) OR (subject LIKE 'reject:%' AND level > 0))
+ LIMIT $3`, now.Add(-securityAlertBalanceHotWindow), channelBalanceUrgent, securityAlertBalanceHotMax)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	var ids []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
 }
 
 type channelBalanceTarget struct {
@@ -382,7 +585,8 @@ type channelBalanceTarget struct {
 	Site     string
 }
 
-func (s *SecurityAlertService) runBalanceSweep(cfg SecurityAlertConfig) {
+// runBalanceSweep 刷新余额并判定；only 非空时只复查这些账号（快用完的钱包），且绕过 5 分钟缓存。
+func (s *SecurityAlertService) runBalanceSweep(cfg SecurityAlertConfig, only []int64) {
 	ctx, cancel := context.WithTimeout(context.Background(), securityAlertBalanceSweepTimeout)
 	defer cancel()
 	go func() {
@@ -404,7 +608,20 @@ func (s *SecurityAlertService) runBalanceSweep(cfg SecurityAlertConfig) {
 		slog.Warn("[SecurityAlert] failed to load balance sweep targets", "error", err)
 		return
 	}
-	readings := s.refreshChannelBalances(ctx, targets, start)
+	if only != nil {
+		wanted := make(map[int64]bool, len(only))
+		for _, id := range only {
+			wanted[id] = true
+		}
+		kept := targets[:0]
+		for _, t := range targets {
+			if wanted[t.ID] {
+				kept = append(kept, t)
+			}
+		}
+		targets = kept
+	}
+	readings := s.refreshChannelBalances(ctx, targets, start, only != nil)
 	if len(readings) == 0 {
 		return
 	}
@@ -417,8 +634,9 @@ func (s *SecurityAlertService) runBalanceSweep(cfg SecurityAlertConfig) {
 	if err := s.fillBurnRates(ctx, readings); err != nil {
 		slog.Warn("[SecurityAlert] failed to load balance samples", "error", err)
 	}
-	s.evaluateChannelBalances(ctx, cfg, readings)
-	slog.Info("[SecurityAlert] balance sweep finished", "targets", len(targets), "readings", len(readings), "elapsed", s.now().Sub(start).Round(time.Second))
+	s.fillChannelActivity(ctx, readings)
+	s.evaluateChannelBalances(ctx, cfg, readings, only == nil)
+	slog.Info("[SecurityAlert] balance sweep finished", "hot", only != nil, "targets", len(targets), "readings", len(readings), "elapsed", s.now().Sub(start).Round(time.Second))
 }
 
 // loadBalanceSweepTargets 选出参与调度、配置了 Base URL 的 API Key 账号；关闭余额查询的跳过，
@@ -458,19 +676,23 @@ func (s *SecurityAlertService) loadBalanceSweepTargets(ctx context.Context, now 
 }
 
 // refreshChannelBalances 并发刷新余额（只占用余额查询 4 个名额中的 2 个，管理端仍可查询）。
-func (s *SecurityAlertService) refreshChannelBalances(ctx context.Context, targets []channelBalanceTarget, start time.Time) []channelBalanceReading {
+func (s *SecurityAlertService) refreshChannelBalances(ctx context.Context, targets []channelBalanceTarget, start time.Time, force bool) []channelBalanceReading {
 	var (
 		mu       sync.Mutex
 		readings []channelBalanceReading
 		wg       sync.WaitGroup
 	)
+	maxAge := 6 * time.Minute
+	if force {
+		maxAge = time.Minute
+	}
 	jobs := make(chan channelBalanceTarget)
 	for i := 0; i < securityAlertBalanceSweepWorkers; i++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
 			for t := range jobs {
-				state, err := s.balances.State(ctx, t.ID, true, false)
+				state, err := s.balances.State(ctx, t.ID, true, force)
 				if err != nil {
 					continue
 				}
@@ -479,13 +701,14 @@ func (s *SecurityAlertService) refreshChannelBalances(ctx context.Context, targe
 					continue
 				}
 				// 只用本轮（或 5 分钟缓存内）拿到的结果，不拿过期快照判定。
-				if start.Sub(time.Unix(state.Snapshot.FetchedAt, 0)) > 6*time.Minute {
+				fetched := time.Unix(state.Snapshot.FetchedAt, 0)
+				if start.Sub(fetched) > maxAge {
 					continue
 				}
 				mu.Lock()
 				readings = append(readings, channelBalanceReading{
 					AccountID: t.ID, Name: t.Name, Platform: t.Platform, Site: t.Site,
-					Remaining: *data.Remaining, Unit: data.Unit, Scope: data.Scope,
+					Remaining: *data.Remaining, Unit: data.Unit, Scope: data.Scope, FetchedAt: fetched,
 				})
 				mu.Unlock()
 			}
@@ -524,6 +747,7 @@ func (s *SecurityAlertService) recordBalanceSamples(ctx context.Context, reading
 	return err
 }
 
+// fillBurnRates 读取近 3 小时样本（含本轮刚写入的一条），估算扣费速度，并找出上一条样本。
 func (s *SecurityAlertService) fillBurnRates(ctx context.Context, readings []channelBalanceReading) error {
 	ids := make([]int64, 0, len(readings))
 	for _, r := range readings {
@@ -549,15 +773,67 @@ func (s *SecurityAlertService) fillBurnRates(ctx context.Context, readings []cha
 		return err
 	}
 	for i := range readings {
-		readings[i].Burn = balanceBurnPerHour(samples[readings[i].AccountID])
+		list := samples[readings[i].AccountID]
+		readings[i].Burn = estimateBalanceBurn(list)
+		// 最后一条是本轮刚写入的读数；再往前一条是上一次采样。
+		if n := len(list); n >= 2 {
+			prev := list[n-2]
+			if prev.Unit != readings[i].Unit {
+				readings[i].UnitChanged = true
+			} else {
+				v := prev.Remaining
+				readings[i].Prev = &v
+			}
+		}
 	}
 	return nil
 }
 
-func (s *SecurityAlertService) evaluateChannelBalances(ctx context.Context, cfg SecurityAlertConfig, readings []channelBalanceReading) {
-	subjects := make([]string, 0, len(readings))
+// fillChannelActivity 标记近 24 小时有请求的账号；查询失败时全部按有流量处理（宁可多推）。
+func (s *SecurityAlertService) fillChannelActivity(ctx context.Context, readings []channelBalanceReading) {
+	ids := make([]int64, 0, len(readings))
 	for _, r := range readings {
-		subjects = append(subjects, "account:"+strconv.FormatInt(r.AccountID, 10))
+		ids = append(ids, r.AccountID)
+	}
+	active := map[int64]bool{}
+	rows, err := s.db.QueryContext(ctx, `SELECT a FROM unnest($1::bigint[]) AS a
+ WHERE EXISTS (SELECT 1 FROM usage_logs u WHERE u.account_id = a AND u.created_at > $2)`,
+		pq.Array(ids), s.now().Add(-securityAlertBalanceIdleWindow))
+	if err == nil {
+		for rows.Next() {
+			var id int64
+			if rows.Scan(&id) == nil {
+				active[id] = true
+			}
+		}
+		err = rows.Err()
+		_ = rows.Close()
+	}
+	if err != nil {
+		slog.Warn("[SecurityAlert] channel activity query failed", "error", err)
+		for i := range readings {
+			readings[i].Active = true
+		}
+		return
+	}
+	for i := range readings {
+		readings[i].Active = active[readings[i].AccountID]
+	}
+}
+
+// evaluateChannelBalances 按钱包判定级别并推送。同一钱包的账号共用一个级别（取成员里最高的旧级别），
+// 推送后所有成员一起记状态，避免同一钱包隔一轮又推一次。
+func (s *SecurityAlertService) evaluateChannelBalances(ctx context.Context, cfg SecurityAlertConfig, readings []channelBalanceReading, full bool) {
+	usable := make([]channelBalanceReading, 0, len(readings))
+	for _, r := range readings {
+		if !r.UnitChanged {
+			usable = append(usable, r)
+		}
+	}
+	wallets := groupChannelWallets(usable)
+	subjects := make([]string, 0, 2*len(usable))
+	for _, r := range usable {
+		subjects = append(subjects, accountAlertSubject(r.AccountID), rejectAlertSubject(r.AccountID))
 	}
 	states, err := s.loadAlertStates(ctx, subjects)
 	if err != nil {
@@ -568,21 +844,40 @@ func (s *SecurityAlertService) evaluateChannelBalances(ctx context.Context, cfg 
 		subject string
 		state   balanceAlertState
 	}
-	var alerts []channelBalanceReading
+	now := s.now()
+	var drafts []securityAlertDraft
 	var changed []change
-	for i, r := range readings {
-		r.Level = evaluateChannelBalanceLevel(cfg, r.Remaining, r.Unit, r.Burn)
-		prev := states[subjects[i]]
-		level, value, alert := nextBalanceAlertState(prev.Level, prev.Value, r.Level, r.Remaining)
-		if alert {
-			alerts = append(alerts, r)
+	for _, w := range wallets {
+		var prev balanceAlertState
+		rejecting := false
+		for _, m := range w.Members {
+			if st := states[accountAlertSubject(m.AccountID)]; st.Level > prev.Level {
+				prev = st
+			}
+			rejecting = rejecting || states[rejectAlertSubject(m.AccountID)].Level > 0
 		}
-		if level != prev.Level || value != prev.Value {
-			changed = append(changed, change{subjects[i], balanceAlertState{Level: level, Value: value}})
+		raw := evaluateChannelBalanceLevel(cfg, w.Low, w.Unit, w.Burn.PerHour)
+		level, value, alert := nextBalanceAlertState(prev.Level, prev.Value, raw, w.Low)
+		switch {
+		case alert && !w.Active:
+			// 近 24 小时没有流量：只记状态，日报里列出，不单独推送。
+		case alert && rejecting && level < channelBalanceEmpty:
+			// 已推过「上游开始拒绝」，更低级别的余额提醒不再重复。
+		case alert:
+			drafts = append(drafts, buildChannelBalanceDraft(cfg, w, level, now))
+		case level < prev.Level && prev.Level >= channelBalanceLow && cfg.ChannelRechargeNotify && w.Active:
+			drafts = append(drafts, buildChannelRechargeDraft(cfg, w, level, now))
+		}
+		for _, m := range w.Members {
+			subject := accountAlertSubject(m.AccountID)
+			if st := states[subject]; st.Level != level || st.Value != value {
+				changed = append(changed, change{subject, balanceAlertState{Level: level, Value: value}})
+			}
 		}
 	}
+	s.rememberWallets(wallets, full)
 	// 先写 outbox 再记状态：记状态失败最多重复提醒一次，不会漏报。
-	for _, d := range buildChannelBalanceDrafts(cfg, alerts, s.now()) {
+	for _, d := range drafts {
 		s.emitLogged(ctx, d)
 	}
 	for _, c := range changed {
@@ -590,6 +885,28 @@ func (s *SecurityAlertService) evaluateChannelBalances(ctx context.Context, cfg 
 			slog.Warn("[SecurityAlert] failed to save channel alert state", "subject", c.subject, "error", err)
 		}
 	}
+}
+
+// rememberWallets 记下账号 → 钱包代表账号，供「上游开始拒绝」把同一钱包的账号合并成一条。
+// 全量刷新时整体替换；只复查部分账号时合并。
+func (s *SecurityAlertService) rememberWallets(wallets []channelBalanceWallet, full bool) {
+	s.walletMu.Lock()
+	defer s.walletMu.Unlock()
+	if full || s.walletOf == nil {
+		s.walletOf = map[int64]int64{}
+	}
+	for _, w := range wallets {
+		for _, m := range w.Members {
+			s.walletOf[m.AccountID] = w.walletHeadID()
+		}
+	}
+}
+
+func (s *SecurityAlertService) walletOfAccount(id int64) (int64, bool) {
+	s.walletMu.Lock()
+	defer s.walletMu.Unlock()
+	head, ok := s.walletOf[id]
+	return head, ok
 }
 
 // ---- 渠道大额消费 ----

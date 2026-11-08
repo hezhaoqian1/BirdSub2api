@@ -5,6 +5,7 @@ import (
 	"database/sql/driver"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"regexp"
 	"strings"
 	"testing"
@@ -46,6 +47,9 @@ func TestSecurityAlertConfigLegacyJSONKeepsNewDefaults(t *testing.T) {
 	require.Equal(t, 10, cfg.ChannelBalanceCheckMinutes)
 	require.True(t, cfg.ChannelQuotaErrorNotify)
 	require.True(t, cfg.ChannelMonitorNotify)
+	require.Equal(t, 60, cfg.ChannelUrgentMinutes)
+	require.Equal(t, 5, cfg.ChannelRejectThreshold)
+	require.True(t, cfg.ChannelRechargeNotify)
 	require.NotNil(t, cfg.UserBalanceWatches)
 	require.NoError(t, cfg.Validate())
 }
@@ -65,6 +69,8 @@ func TestSecurityAlertConfigValidateBalanceRules(t *testing.T) {
 		"interval too low": func(c *SecurityAlertConfig) { c.ChannelBalanceCheckMinutes = 2 },
 		"negative floor":   func(c *SecurityAlertConfig) { c.ChannelSpendFloor = -1 },
 		"runway too long":  func(c *SecurityAlertConfig) { c.ChannelRunwayHours = 200 },
+		"urgent too long":  func(c *SecurityAlertConfig) { c.ChannelUrgentMinutes = 1441 },
+		"negative reject":  func(c *SecurityAlertConfig) { c.ChannelRejectThreshold = -1 },
 	} {
 		c := cfg
 		c.UserBalanceWatches = append([]UserBalanceWatch{}, cfg.UserBalanceWatches...)
@@ -77,18 +83,23 @@ func TestSecurityAlertConfigValidateBalanceRules(t *testing.T) {
 }
 
 func TestEvaluateChannelBalanceLevel(t *testing.T) {
-	cfg := DefaultSecurityAlertConfig() // USD 20, CNY 100, runway 6h
+	cfg := DefaultSecurityAlertConfig() // USD 20, CNY 100, runway 6h, urgent 60 min
 	require.Equal(t, channelBalanceEmpty, evaluateChannelBalanceLevel(cfg, -4.6, "USD", 0))
 	require.Equal(t, channelBalanceEmpty, evaluateChannelBalanceLevel(cfg, 0, "CNY", 0))
 	require.Equal(t, channelBalanceLow, evaluateChannelBalanceLevel(cfg, 8.63, "USD", 0))
 	require.Equal(t, channelBalanceLow, evaluateChannelBalanceLevel(cfg, 42, "CNY", 0))
+	require.Equal(t, channelBalanceLow, evaluateChannelBalanceLevel(cfg, 19.77, "USD", 2), "slow channel below the line: 9.8h left")
 	require.Equal(t, channelBalanceOK, evaluateChannelBalanceLevel(cfg, 42, "USD", 0))
 	require.Equal(t, channelBalanceRunway, evaluateChannelBalanceLevel(cfg, 478, "USD", 300), "1.6h left at $300/h")
 	require.Equal(t, channelBalanceOK, evaluateChannelBalanceLevel(cfg, 478, "USD", 50), "9.6h left")
+	require.Equal(t, channelBalanceUrgent, evaluateChannelBalanceLevel(cfg, 140, "USD", 330), "25 min left")
+	require.Equal(t, channelBalanceUrgent, evaluateChannelBalanceLevel(cfg, 15, "USD", 166), "urgent outranks the fixed line")
 	require.Equal(t, channelBalanceOK, evaluateChannelBalanceLevel(cfg, 3, "QUOTA", 0), "raw quota has no threshold")
 	require.Equal(t, channelBalanceRunway, evaluateChannelBalanceLevel(cfg, 3, "QUOTA", 1))
 	cfg.ChannelRunwayHours = 0
 	require.Equal(t, channelBalanceOK, evaluateChannelBalanceLevel(cfg, 478, "USD", 300), "runway rule off")
+	cfg.ChannelUrgentMinutes = 0
+	require.Equal(t, channelBalanceOK, evaluateChannelBalanceLevel(cfg, 140, "USD", 330), "urgent rule off")
 }
 
 func TestNextBalanceAlertState(t *testing.T) {
@@ -103,7 +114,7 @@ func TestNextBalanceAlertState(t *testing.T) {
 	require.False(t, alert)
 	require.Equal(t, channelBalanceRunway, level, "traffic calming down without a recharge does not re-arm")
 
-	level, value, alert = nextBalanceAlertState(level, value, channelBalanceLow, 15)
+	level, value, alert = nextBalanceAlertState(level, value, channelBalanceUrgent, 120)
 	require.True(t, alert, "escalation is pushed")
 	level, value, alert = nextBalanceAlertState(level, value, channelBalanceEmpty, -0.5)
 	require.True(t, alert)
@@ -137,38 +148,106 @@ func TestBalanceBurnPerHour(t *testing.T) {
 
 	mixed := []balanceSample{{t0, 999, "QUOTA"}, {t0.Add(time.Hour), 100, "USD"}, {t0.Add(2 * time.Hour), 90, "USD"}}
 	require.InDelta(t, 10.0, balanceBurnPerHour(mixed), 0.001, "only samples in the latest unit count")
+
+	// 2026-11-08 XApi：闲了 2 小时，之后每 10 分钟扣 $55。3 小时平均被摊薄，近 30 分钟是 $330/h。
+	var burst []balanceSample
+	for i := 0; i <= 18; i++ {
+		v := 326.96
+		if i > 12 {
+			v = 326.96 - float64(i-12)*55
+		}
+		burst = append(burst, balanceSample{t0.Add(time.Duration(i) * 10 * time.Minute), v, "USD"})
+	}
+	b := estimateBalanceBurn(burst)
+	require.Equal(t, 30*time.Minute, b.Window)
+	require.InDelta(t, 330.0, b.PerHour, 0.001)
+	require.Equal(t, "按近 30 分钟扣费速度每小时约 $330.00，预计 1 分钟后用完", balanceBurnLine(b, 0.5, "USD"))
+	require.Equal(t, "", balanceBurnLine(balanceBurn{PerHour: 0.0028, Window: time.Hour}, 91.29, "CNY"), "no 32937-hour forecasts")
+	require.Equal(t, "$0.00", formatBalanceAmount(-0.004, "USD"), "no -$0.00")
 }
 
-func TestBuildChannelBalanceDraftsGroupsSharedWallets(t *testing.T) {
+func reading(id int64, site string, remaining float64, at time.Time, burn float64) channelBalanceReading {
+	return channelBalanceReading{AccountID: id, Name: fmt.Sprintf("acct%d", id), Site: site, Remaining: remaining,
+		Unit: "USD", Scope: "account", FetchedAt: at, Burn: balanceBurn{PerHour: burn, Window: time.Hour}, Active: true}
+}
+
+func TestGroupChannelWallets(t *testing.T) {
+	at := time.Date(2026, 11, 7, 17, 35, 0, 0, time.UTC)
+	wallets := groupChannelWallets([]channelBalanceReading{
+		// Kedaya：两个域名同一个钱包，扣得快，查询时间差 40 秒余额差 $0.77。
+		reading(85, "kedaya.ai", 4.66, at.Add(40*time.Second), 166),
+		reading(161, "51.222.42.218:17777", 3.99, at, 166),
+		reading(172, "51.222.42.218:17777", 3.89, at.Add(-10*time.Second), 166),
+		// 同一钱包的两个域名：余额完全一致。
+		reading(29, "duoduoai.co", 420.87, at, 0),
+		reading(70, "quiteai.autos", 420.87, at, 0),
+		// 不同上游碰巧余额接近、且都不怎么扣费：不能合并。
+		reading(53, "mfttai.cc", 420.50, at, 0),
+		// 同一域名下 1% 以内视为同一钱包，超出则是另一个钱包。
+		reading(101, "lcodex.example", 8.64, at, 0),
+		reading(98, "lcodex.example", 8.63, at, 0),
+		reading(120, "lcodex.example", 14.9, at, 0),
+		// 两个不同上游都见底：不跨域名合并。
+		reading(77, "yimo.example", -0.3, at, 0),
+		reading(99, "xapi.example", -0.3, at, 0),
+	})
+	byHead := map[int64]channelBalanceWallet{}
+	for _, w := range wallets {
+		byHead[w.walletHeadID()] = w
+	}
+	ids := func(w channelBalanceWallet) []int64 {
+		var out []int64
+		for _, m := range w.Members {
+			out = append(out, m.AccountID)
+		}
+		return out
+	}
+	require.Len(t, wallets, 7)
+	require.Equal(t, []int64{85, 161, 172}, ids(byHead[85]))
+	require.Equal(t, []string{"51.222.42.218:17777", "kedaya.ai"}, byHead[85].Sites)
+	require.InDelta(t, 3.89, byHead[85].Low, 1e-9)
+	require.Equal(t, []int64{29, 70}, ids(byHead[29]))
+	require.Equal(t, []int64{53}, ids(byHead[53]))
+	require.Equal(t, []int64{98, 101}, ids(byHead[98]))
+	require.Equal(t, []int64{120}, ids(byHead[120]))
+	require.Equal(t, []int64{77}, ids(byHead[77]))
+	require.Equal(t, []int64{99}, ids(byHead[99]))
+}
+
+func TestBuildChannelBalanceDrafts(t *testing.T) {
 	cfg := DefaultSecurityAlertConfig()
 	at := time.Date(2026, 10, 26, 3, 0, 0, 0, time.UTC)
-	drafts := buildChannelBalanceDrafts(cfg, []channelBalanceReading{
-		{AccountID: 101, Name: "lcodex GPT 官key", Site: "lcodex.example", Remaining: 8.64, Unit: "USD", Scope: "account", Level: channelBalanceLow},
-		{AccountID: 98, Name: "lcodex 不降智", Site: "lcodex.example", Remaining: 8.63, Unit: "USD", Scope: "account", Level: channelBalanceLow},
-		{AccountID: 120, Name: "lcodex Gemini", Site: "lcodex.example", Remaining: 14.9, Unit: "USD", Scope: "account", Level: channelBalanceLow},
-		{AccountID: 77, Name: "Yimo CCMAX", Site: "yimo.example", Remaining: -4.6, Unit: "USD", Scope: "account", Level: channelBalanceEmpty},
-		{AccountID: 150, Name: "Yimo 163", Site: "yimo.example", Remaining: 478, Unit: "USD", Scope: "account", Burn: 300, Level: channelBalanceRunway},
-	}, at)
-	require.Len(t, drafts, 4)
+	wallet := groupChannelWallets([]channelBalanceReading{
+		reading(101, "lcodex.example", 8.64, at, 0),
+		reading(98, "lcodex.example", 8.63, at, 0),
+	})[0]
+	low := buildChannelBalanceDraft(cfg, wallet, channelBalanceLow, at)
+	require.Equal(t, "渠道余额不足", low.Title)
+	require.Equal(t, SecurityAlertWarning, low.Severity)
+	body := low.body()
+	require.Contains(t, body, "上游：lcodex.example")
+	require.Contains(t, body, "#98 acct98、#101 acct101")
+	require.Contains(t, body, "余额：$8.63 ~ $8.64")
+	require.Contains(t, body, "提醒线：$20.00")
 
-	require.Equal(t, "渠道余额已用完", drafts[0].Title)
-	require.Equal(t, SecurityAlertCritical, drafts[0].Severity)
-	require.Contains(t, drafts[0].body(), "余额：-$4.60")
+	fast := groupChannelWallets([]channelBalanceReading{reading(99, "xapi.example", 140.52, at, 330)})[0]
+	fast.Burn.Window = 30 * time.Minute
+	urgent := buildChannelBalanceDraft(cfg, fast, channelBalanceUrgent, at)
+	require.Equal(t, "渠道余额即将用完", urgent.Title)
+	require.Equal(t, SecurityAlertCritical, urgent.Severity)
+	require.Contains(t, urgent.body(), "按近 30 分钟扣费速度每小时约 $330.00，预计 26 分钟后用完")
+	require.Contains(t, urgent.body(), "预计 60 分钟内用完")
 
-	shared := drafts[1].body()
-	require.Equal(t, "渠道余额不足", drafts[1].Title)
-	require.Contains(t, shared, "上游：lcodex.example")
-	require.Contains(t, shared, "#98 lcodex 不降智、#101 lcodex GPT 官key")
-	require.Contains(t, shared, "余额：$8.63 ~ $8.64")
-	require.Contains(t, shared, "提醒线：$20.00")
-	require.NotContains(t, shared, "#120", "a different wallet on the same site is reported separately")
-	require.Contains(t, drafts[2].body(), "#120 lcodex Gemini")
+	runway := buildChannelBalanceDraft(cfg, fast, channelBalanceRunway, at)
+	require.Equal(t, "渠道余额预计很快用完", runway.Title)
+	require.Contains(t, runway.body(), "预计 6.0 小时内用完")
 
-	runway := drafts[3].body()
-	require.Equal(t, "渠道余额预计很快用完", drafts[3].Title)
-	require.Contains(t, runway, "平均每小时扣 $300.00，预计 1.6 小时后用完")
+	empty := buildChannelBalanceDraft(cfg, groupChannelWallets([]channelBalanceReading{reading(77, "yimo.example", -4.6, at, 0)})[0], channelBalanceEmpty, at)
+	require.Equal(t, "渠道余额已用完", empty.Title)
+	require.Equal(t, SecurityAlertCritical, empty.Severity)
+	require.Contains(t, empty.body(), "余额：-$4.60")
 
-	for _, d := range drafts {
+	for _, d := range []securityAlertDraft{low, urgent, runway, empty} {
 		require.Equal(t, securityAlertKindChannelBal, d.Kind)
 		requirePlainText(t, d.body())
 	}
@@ -208,7 +287,7 @@ func balanceState(remaining float64, unit string, fetched time.Time) UpstreamBal
 	}}
 }
 
-func TestRunBalanceSweepAlertsOncePerLevel(t *testing.T) {
+func TestRunBalanceSweepAlertsOncePerWallet(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	require.NoError(t, err)
 	defer func() { _ = db.Close() }()
@@ -221,6 +300,8 @@ func TestRunBalanceSweepAlertsOncePerLevel(t *testing.T) {
 		101: balanceState(8.63, "USD", now),
 		50:  balanceState(714.9, "USD", now),
 		77:  balanceState(-4.6, "USD", now),
+		88:  balanceState(5, "USD", now),
+		149: balanceState(6252750, "QUOTA", now),             // 换算参数偶发读取失败时的原始额度
 		33:  balanceState(544, "USD", now.Add(-2*time.Hour)), // stale cached snapshot
 	}
 
@@ -234,37 +315,89 @@ func TestRunBalanceSweepAlertsOncePerLevel(t *testing.T) {
 			AddRow(int64(69), "BMCCA", "openai", "https://bmcca.example", "auto", string(failedRecently)).
 			AddRow(int64(70), "关掉余额", "openai", "https://off.example", "disabled", "{}").
 			AddRow(int64(77), "Yimo CCMAX", "anthropic", "https://yimo.example/", "auto", "{}").
+			AddRow(int64(88), "闲置渠道", "openai", "https://idle.example", "auto", "{}").
 			AddRow(int64(98), "lcodex 不降智", "openai", "https://lcodex.example/v1", "auto", "{}").
-			AddRow(int64(101), "lcodex GPT 官key", "openai", "https://lcodex.example/v1", "auto", "{}"))
+			AddRow(int64(101), "lcodex GPT 官key", "openai", "https://lcodex.example/v1", "auto", "{}").
+			AddRow(int64(149), "nat6 Kimi", "kimi", "https://pro.nat6.example", "new_api", "{}"))
 	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO security_alert_balance_samples")).
-		WillReturnResult(sqlmock.NewResult(0, 4))
+		WillReturnResult(sqlmock.NewResult(0, 6))
 	mock.ExpectQuery(regexp.QuoteMeta("FROM security_alert_balance_samples")).
 		WillReturnRows(sqlmock.NewRows([]string{"account_id", "observed_at", "remaining", "unit"}).
 			AddRow(int64(50), now.Add(-2*time.Hour), 1114.9, "USD").
 			AddRow(int64(50), now.Add(-time.Hour), 914.9, "USD").
-			AddRow(int64(50), now, 714.9, "USD"))
+			AddRow(int64(50), now, 714.9, "USD").
+			AddRow(int64(149), now.Add(-10*time.Minute), 91.29, "CNY").
+			AddRow(int64(149), now, 6252750.0, "QUOTA"))
+	mock.ExpectQuery(regexp.QuoteMeta("FROM unnest($1::bigint[]) AS a")).
+		WillReturnRows(sqlmock.NewRows([]string{"a"}).AddRow(int64(50)).AddRow(int64(77)).AddRow(int64(98)).AddRow(int64(101)).AddRow(int64(149)))
 	mock.ExpectQuery(regexp.QuoteMeta("FROM security_alert_state WHERE subject = ANY")).
 		WillReturnRows(sqlmock.NewRows([]string{"subject", "level", "value"}).
-			AddRow("account:101", channelBalanceLow, 8.70))
+			AddRow("account:101", channelBalanceLow, 8.70).
+			AddRow("account:149", channelBalanceLow, 91.29))
 	expectAlert := func(title, severity string, body ...string) {
 		mock.ExpectExec(regexp.QuoteMeta("INSERT INTO security_alert_events")).
 			WithArgs(sqlmock.AnyArg(), securityAlertKindChannelBal, severity, title, bodyContains(body)).
 			WillReturnResult(sqlmock.NewResult(1, 1))
 	}
+	// #98/#101 同一钱包，#101 已推过「余额不足」→ 不再推；#88 近 24 小时没有流量 → 只记状态；
+	// #149 本轮读到的是原始额度（币种变了）→ 不判定、不当作充值。
 	expectAlert("渠道余额已用完", "critical", "#77 Yimo CCMAX", "余额：-$4.60")
-	expectAlert("渠道余额不足", "warning", "上游：lcodex.example", "账号：#98 lcodex 不降智\n")
-	expectAlert("渠道余额预计很快用完", "warning", "#50 Sixoner GPT 企业", "平均每小时扣 $200.00，预计 3.6 小时后用完")
+	expectAlert("渠道余额预计很快用完", "warning", "#50 Sixoner GPT 企业", "按近 1 小时扣费速度每小时约 $200.00，预计 3.6 小时后用完")
 	for _, st := range []struct {
 		subject string
 		level   int
 		value   float64
-	}{{"account:50", channelBalanceRunway, 714.9}, {"account:77", channelBalanceEmpty, -4.6}, {"account:98", channelBalanceLow, 8.63}} {
+	}{{"account:77", channelBalanceEmpty, -4.6}, {"account:88", channelBalanceLow, 5}, {"account:98", channelBalanceLow, 8.70}, {"account:50", channelBalanceRunway, 714.9}} {
 		mock.ExpectExec(regexp.QuoteMeta("INSERT INTO security_alert_state")).
 			WithArgs(st.subject, st.level, st.value).
 			WillReturnResult(sqlmock.NewResult(0, 1))
 	}
 
-	svc.runBalanceSweep(DefaultSecurityAlertConfig())
+	svc.runBalanceSweep(DefaultSecurityAlertConfig(), nil)
+	require.NoError(t, mock.ExpectationsWereMet())
+	head, ok := svc.walletOfAccount(101)
+	require.True(t, ok)
+	require.Equal(t, int64(98), head)
+}
+
+func TestEvaluateChannelBalancesRechargeAndRejectSuppression(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	defer func() { _ = db.Close() }()
+	now := time.Date(2026, 11, 7, 17, 46, 0, 0, time.UTC)
+	svc := NewSecurityAlertService(db, nil, nil)
+	svc.now = func() time.Time { return now }
+	cfg := DefaultSecurityAlertConfig()
+
+	prev := 3.99
+	kedaya := []channelBalanceReading{
+		reading(85, "kedaya.ai", 3343.52, now.Add(20*time.Second), 160),
+		reading(161, "51.222.42.218:17777", 3343.11, now, 160),
+	}
+	kedaya[1].Prev = &prev
+	// XApi 正在被上游拒绝，余额掉到 1 小时内：不再推「即将用完」，但记状态。
+	xapi := reading(99, "xapi.example", 81.36, now, 330)
+	mock.ExpectQuery(regexp.QuoteMeta("FROM security_alert_state WHERE subject = ANY")).
+		WillReturnRows(sqlmock.NewRows([]string{"subject", "level", "value"}).
+			AddRow("account:85", channelBalanceUrgent, 4.66).
+			AddRow("account:161", channelBalanceUrgent, 3.99).
+			AddRow("account:99", channelBalanceRunway, 194.74).
+			AddRow("reject:99", 1, float64(now.Unix())))
+	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO security_alert_events")).
+		WithArgs(sqlmock.AnyArg(), securityAlertKindChannelRecharge, "info", "渠道已充值", bodyContains{
+			"上游：51.222.42.218:17777、kedaya.ai", "账号：#85 acct85、#161 acct161", "余额：$3.99 → $3343.11 ~ $3343.52", "已恢复监控。",
+		}).
+		WillReturnResult(sqlmock.NewResult(1, 1))
+	for _, st := range []struct {
+		subject string
+		level   int
+		value   float64
+	}{{"account:99", channelBalanceUrgent, 81.36}, {"account:85", channelBalanceOK, 3343.11}, {"account:161", channelBalanceOK, 3343.11}} {
+		mock.ExpectExec(regexp.QuoteMeta("INSERT INTO security_alert_state")).
+			WithArgs(st.subject, st.level, st.value).
+			WillReturnResult(sqlmock.NewResult(0, 1))
+	}
+	svc.evaluateChannelBalances(context.Background(), cfg, append(kedaya, xapi), false)
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 
