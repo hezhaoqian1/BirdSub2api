@@ -10,7 +10,7 @@ import (
 
 const (
 	channelMonitorAlertThreshold    = 3
-	channelMonitorAlertTimeout      = 8 * time.Second
+	channelMonitorAlertTimeout      = 12 * time.Second
 	channelMonitorAlertMessageRunes = 200
 )
 
@@ -22,6 +22,15 @@ type channelMonitorFailureAlert struct {
 	Message             string
 	CheckedAt           time.Time
 	ConsecutiveFailures int
+	// Failures 这轮连续失败里最近几次检测（按时间先后），推送时据此写原因、回查出错渠道。
+	Failures []channelMonitorFailureSample
+}
+
+// channelMonitorFailureSample 一次失败检测。CheckedAt 是检测发起的时间。
+type channelMonitorFailureSample struct {
+	Status    string
+	Message   string
+	CheckedAt time.Time
 }
 
 type channelMonitorRecoveryAlert struct {
