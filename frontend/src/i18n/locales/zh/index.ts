@@ -1,6 +1,7 @@
 import upstreamBalance from './upstreamBalance'
 import adminAccessKeys from './adminAccessKeys'
 import securityAlerts from './securityAlerts'
+import mcp from './mcp'
 import landing from './landing'
 import common from './common'
 import dashboard from './dashboard'
@@ -13,6 +14,7 @@ export default {
   upstreamBalance,
   adminAccessKeys,
   securityAlerts,
+  mcp,
   ...landing,
   ...common,
   ...dashboard,
