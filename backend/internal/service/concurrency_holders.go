@@ -196,6 +196,15 @@ func (s *ConcurrencyService) ListAccountSlotHolders(ctx context.Context, account
 	return hc.ListAccountSlots(ctx, accountID)
 }
 
+// ListAllAccountSlotHolders 通过账号活跃索引返回全部账号的在途槽位。
+func (s *ConcurrencyService) ListAllAccountSlotHolders(ctx context.Context) (*ActiveSlotSnapshot, error) {
+	hc, ok := s.slotHolderReader()
+	if !ok {
+		return &ActiveSlotSnapshot{}, nil
+	}
+	return hc.ListAllAccountSlots(ctx)
+}
+
 // ListUserSlotHolders 返回用户当前占用的槽位，所在账号来自账号占槽时回写的详情。
 // 用户并发不限（unlimited）时不占用户槽位，这类请求只出现在账号槽位里，
 // 只能扫一遍全部活跃账号按 UserID 找回来；有并发上限的用户不需要这次扫描。
