@@ -41,6 +41,11 @@ const (
 	monitorMessageMaxBytes = 500
 	// monitorResponseMaxBytes 单次模型响应最大读取字节，防止 OOM。
 	monitorResponseMaxBytes = 64 * 1024
+	// monitorStreamResponseMaxBytes 流式（SSE）探测响应最大读取字节。SSE 每个事件都带完整
+	// response 对象，体积比 JSON 大，所以单独放宽；仍有上限防止异常上游无限推流。
+	monitorStreamResponseMaxBytes = 2 << 20
+	// monitorStreamLineMaxBytes SSE 单行最大字节数。
+	monitorStreamLineMaxBytes = 1 << 20
 	// monitorErrorBodySnippetMaxBytes 非 2xx 响应时保留上游 body 片段的最大字节数。
 	// 留 300 字节足够覆盖典型结构化错误（如 `{"error":{"message":"..."}}`），
 	// 又给 "upstream HTTP <status>: " 前缀留出余量，避免最终被 monitorMessageMaxBytes (500) 截得太狠。

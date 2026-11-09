@@ -318,8 +318,11 @@ func TestRunCheckForModel_OpenAIResponses_DefaultRequest(t *testing.T) {
 	if _, ok := h.lastBody["messages"]; ok {
 		t.Error("responses body must not contain chat messages")
 	}
-	if h.lastBody["stream"] != false {
-		t.Errorf("responses body should set stream=false, got %v", h.lastBody["stream"])
+	if h.lastBody["stream"] != true {
+		t.Errorf("responses body should set stream=true, got %v", h.lastBody["stream"])
+	}
+	if got := h.lastHeaders.Get("Accept"); got != "text/event-stream" {
+		t.Errorf("streaming responses probe should send Accept: text/event-stream, got %q", got)
 	}
 	if h.lastHeaders.Get("Authorization") != "Bearer sk-openai" {
 		t.Errorf("expected bearer auth header, got %q", h.lastHeaders.Get("Authorization"))
