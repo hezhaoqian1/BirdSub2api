@@ -248,6 +248,11 @@ func newOpenAICompatibleChatAdapter(path string) providerAdapter {
 	}
 }
 
+// providerOpenAIResponsesAdapter 默认以流式（stream: true）探测，响应由
+// postOpenAIResponses 按 SSE 解析（同时兼容 JSON 回包）。
+// 原因：部分上游会把「小的非流式请求」当探活拦截，返回 HTTP 200 + 占位文本，
+// 导致检测误报失败；流式也更接近 Codex / SDK 客户的真实请求形态。
+//
 //nolint:gochecknoglobals // 适配器表是只读静态数据，初始化后不变更。
 var providerOpenAIResponsesAdapter = providerAdapter{
 	buildPath: func(string) string { return providerOpenAIResponsesPath },
@@ -257,7 +262,7 @@ var providerOpenAIResponsesAdapter = providerAdapter{
 			"instructions":      "You are a channel health-check endpoint. Answer the arithmetic challenge exactly and briefly.",
 			"input":             prompt,
 			"max_output_tokens": monitorChallengeMaxTokens,
-			"stream":            false,
+			"stream":            true,
 		})
 	},
 	buildHeaders: func(apiKey string) map[string]string {
@@ -298,12 +303,12 @@ func callProvider(ctx context.Context, provider, endpoint, apiKey, model, prompt
 	}
 	headers := mergeHeaders(adapter.buildHeaders(apiKey), opts)
 	full := joinURL(endpoint, monitorRequestPath(provider, endpoint, adapter, model))
+	if provider == MonitorProviderOpenAI && apiMode == MonitorAPIModeResponses {
+		return postOpenAIResponses(ctx, full, body, headers)
+	}
 	respBytes, status, err := postRawJSON(ctx, full, body, headers)
 	if err != nil {
 		return "", "", status, err
-	}
-	if provider == MonitorProviderOpenAI && apiMode == MonitorAPIModeResponses {
-		return extractOpenAIResponsesText(respBytes), string(respBytes), status, nil
 	}
 	return extractMonitorResponseText(adapter, respBytes), string(respBytes), status, nil
 }
@@ -533,19 +538,9 @@ func hasNonEmptyBodyValue(v any) bool {
 // postRawJSON 发送 POST + 已序列化好的 JSON 字节，限制响应体大小，返回响应字节、HTTP status、错误。
 // adapter 自行 marshal 是为了精确控制字段顺序与类型，所以这里直接收 []byte 而不是 any。
 func postRawJSON(ctx context.Context, fullURL string, payload []byte, headers map[string]string) ([]byte, int, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, fullURL, bytes.NewReader(payload))
+	resp, err := doMonitorPost(ctx, fullURL, payload, headers, "application/json")
 	if err != nil {
-		return nil, 0, fmt.Errorf("build request: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Accept", "application/json")
-	for k, v := range headers {
-		req.Header.Set(k, v)
-	}
-
-	resp, err := monitorHTTPClient.Do(req)
-	if err != nil {
-		return nil, 0, fmt.Errorf("do request: %w", err)
+		return nil, 0, err
 	}
 	defer func() { _ = resp.Body.Close() }()
 
@@ -554,6 +549,26 @@ func postRawJSON(ctx context.Context, fullURL string, payload []byte, headers ma
 		return nil, resp.StatusCode, fmt.Errorf("read body: %w", err)
 	}
 	return respBody, resp.StatusCode, nil
+}
+
+// doMonitorPost 发送探测 POST；调用方负责关闭 resp.Body。
+// 用户自定义 headers 最后写入，可覆盖默认的 Content-Type / Accept。
+func doMonitorPost(ctx context.Context, fullURL string, payload []byte, headers map[string]string, accept string) (*http.Response, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, fullURL, bytes.NewReader(payload))
+	if err != nil {
+		return nil, fmt.Errorf("build request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", accept)
+	for k, v := range headers {
+		req.Header.Set(k, v)
+	}
+
+	resp, err := monitorHTTPClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("do request: %w", err)
+	}
+	return resp, nil
 }
 
 // monitorRequestPath 返回探测请求路径。智谱按 endpoint 区分：
