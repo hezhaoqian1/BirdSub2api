@@ -91,12 +91,12 @@ type SecurityAlertConfig struct {
 	ChannelSpendMultiplier float64 `json:"channel_spend_multiplier"`
 	// ChannelBalanceCheckMinutes 后台刷新上游余额的间隔（分钟），0 关闭余额告警。
 	ChannelBalanceCheckMinutes int `json:"channel_balance_check_minutes"`
-	// ChannelLowBalanceUSD / ChannelLowBalanceCNY 上游余额低于该值时告警（按余额币种），0 关闭。
+	// ChannelLowBalanceUSD / ChannelLowBalanceCNY 上游余额低于该值算「见底」（按余额币种），推一次不重复，0 关闭。
 	ChannelLowBalanceUSD float64 `json:"channel_low_balance_usd"`
 	ChannelLowBalanceCNY float64 `json:"channel_low_balance_cny"`
 	// ChannelRunwayHours 按最近扣费速度（近 30 分钟 / 1 小时 / 3 小时里最快的）预计在该小时数内用完时告警，0 关闭。
 	ChannelRunwayHours float64 `json:"channel_runway_hours"`
-	// ChannelUrgentMinutes 按最近扣费速度预计在该分钟数内用完时再告警一次（即将用完），0 关闭。
+	// ChannelUrgentMinutes 按最近扣费速度预计在该分钟数内用完时告警（告急）；没充值时满足再提醒条件会再推，0 关闭。
 	ChannelUrgentMinutes int `json:"channel_urgent_minutes"`
 	// ChannelRejectThreshold 同一上游钱包 5 分钟内被上游以「余额/额度不足」拒绝达到该次数时立即告警，0 关闭。
 	ChannelRejectThreshold int `json:"channel_reject_threshold"`
