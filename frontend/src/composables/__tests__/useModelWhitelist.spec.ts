@@ -91,6 +91,8 @@ describe('useModelWhitelist', () => {
   })
 
   it('Claude 模型列表包含新发布的 Claude 模型', () => {
+    expect(getModelsByPlatform('claude')).toContain('claude-fable-5-2')
+    expect(getModelsByPlatform('antigravity')).toContain('claude-fable-5-2')
     expect(getModelsByPlatform('claude')).toContain('claude-fable-5-1')
     expect(getModelsByPlatform('antigravity')).toContain('claude-fable-5-1')
     expect(getModelsByPlatform('claude')).toContain('claude-fable-5')

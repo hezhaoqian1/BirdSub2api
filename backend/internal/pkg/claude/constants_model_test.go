@@ -6,6 +6,19 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestDefaultModelsContainsClaudeFable52(t *testing.T) {
+	t.Parallel()
+
+	for _, model := range DefaultModels {
+		if model.ID == "claude-fable-5-2" {
+			require.Equal(t, "Claude Fable 5.2", model.DisplayName)
+			require.Equal(t, "2026-11-09T00:00:00Z", model.CreatedAt)
+			return
+		}
+	}
+	t.Fatal("claude-fable-5-2 missing from DefaultModels")
+}
+
 func TestDefaultModelsContainsClaudeFable51(t *testing.T) {
 	t.Parallel()
 

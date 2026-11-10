@@ -167,6 +167,7 @@ type modelDef struct {
 
 // Antigravity 支持的 Claude 模型
 var claudeModels = []modelDef{
+	{ID: "claude-fable-5-2", DisplayName: "Claude Fable 5.2", CreatedAt: "2026-11-09T00:00:00Z"},
 	{ID: "claude-fable-5-1", DisplayName: "Claude Fable 5.1", CreatedAt: "2026-09-01T00:00:00Z"},
 	{ID: "claude-fable-5", DisplayName: "Claude Fable 5", CreatedAt: "2026-06-09T00:00:00Z"},
 	{ID: "claude-opus-5-5-high", DisplayName: "Claude Opus 5.5 (High)", CreatedAt: "2026-09-22T00:00:00Z"},

@@ -162,7 +162,7 @@ func TestIntervalPricePreservesDefaultFastRatio(t *testing.T) {
 func TestAnthropicSpeedServiceTier(t *testing.T) {
 	account := &Account{Platform: PlatformAnthropic}
 
-	for _, model := range []string{"claude-opus-5", "claude-opus-4-8", "claude-opus-4.8"} {
+	for _, model := range []string{"claude-fable-5-2", "claude-fable-5.2", "claude-opus-5-5", "claude-opus-5", "claude-opus-4-8", "claude-opus-4.8"} {
 		tier := anthropicSpeedServiceTier(account, "fast", model)
 		require.NotNil(t, tier, "model %s should bill as fast", model)
 		require.Equal(t, "fast", *tier)
@@ -177,6 +177,8 @@ func TestAnthropicSpeedServiceTierRejectsUnsupportedTargets(t *testing.T) {
 	account := &Account{Platform: PlatformAnthropic}
 
 	for _, model := range []string{
+		"claude-fable-5-1", // Fable 5 / 5.1 没有 fast mode
+		"claude-fable-5",   //
 		"claude-opus-4-7",  // fast mode 已被移除
 		"claude-opus-4-6",  //
 		"claude-opus-4-5",  // 不能被 "opus-5" 规则误判
