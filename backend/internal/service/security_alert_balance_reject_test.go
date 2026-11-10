@@ -57,6 +57,9 @@ func TestCheckChannelBalanceRejects(t *testing.T) {
 	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO security_alert_state")).WithArgs("reject:155", 0, 0.0).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	// #85 + #161 是同一个钱包（两个域名），合计 7 次 ≥ 5 → 推一条；#99 只有 2 次，不推。
+	mock.ExpectQuery(regexp.QuoteMeta("FROM security_alert_state WHERE subject LIKE 'account:%' AND level IN ($1, $2)")).
+		WithArgs(channelBalanceLow, channelBalanceEmpty).
+		WillReturnRows(sqlmock.NewRows([]string{"subject"}).AddRow("account:99"))
 	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO security_alert_events")).
 		WithArgs(sqlmock.AnyArg(), securityAlertKindChannelReject, "critical", "上游开始因余额不足拒绝请求", bodyContains{
 			"上游：51.222.42.218:17777、kedaya.ai",
@@ -88,6 +91,19 @@ func TestCheckChannelBalanceRejects(t *testing.T) {
 	mock.ExpectQuery(regexp.QuoteMeta("FROM security_alert_state WHERE subject LIKE 'reject:%'")).
 		WillReturnRows(sqlmock.NewRows([]string{"subject"}).AddRow("reject:85"))
 	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO security_alert_state")).WithArgs("reject:85", 0, 0.0).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	svc.checkChannelBalanceRejects(context.Background(), snap)
+	require.NoError(t, mock.ExpectationsWereMet())
+
+	// 钱包已经推过「见底 / 已用完」：再被拒是意料之中，只记状态不推送。
+	mock.ExpectQuery(regexp.QuoteMeta("FROM ops_error_logs e")).
+		WillReturnRows(sqlmock.NewRows(hitCols).
+			AddRow(int64(161), "可达鸭 DeepSeek", "http://51.222.42.218:17777", 8, 0, "insufficient balance", "deepseek-v4-pro", ""))
+	mock.ExpectQuery(regexp.QuoteMeta("FROM security_alert_state WHERE subject LIKE 'reject:%'")).
+		WillReturnRows(sqlmock.NewRows([]string{"subject"}))
+	mock.ExpectQuery(regexp.QuoteMeta("FROM security_alert_state WHERE subject LIKE 'account:%' AND level IN ($1, $2)")).
+		WillReturnRows(sqlmock.NewRows([]string{"subject"}).AddRow("account:85"))
+	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO security_alert_state")).WithArgs("reject:161", 1, float64(now.Unix())).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	svc.checkChannelBalanceRejects(context.Background(), snap)
 	require.NoError(t, mock.ExpectationsWereMet())

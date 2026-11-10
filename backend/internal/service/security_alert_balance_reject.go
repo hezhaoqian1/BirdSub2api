@@ -116,6 +116,7 @@ func (s *SecurityAlertService) checkChannelBalanceRejects(ctx context.Context, s
 		keys = append(keys, k)
 	}
 	sort.Strings(keys)
+	var empty map[int64]bool // 已推过「见底 / 已用完」的账号，用到时才查
 	for _, key := range keys {
 		group := groups[key]
 		recent, alreadyAlerted := 0, false
@@ -133,7 +134,16 @@ func (s *SecurityAlertService) checkChannelBalanceRejects(ctx context.Context, s
 				}
 			}
 		case recent >= threshold:
-			s.emitLogged(ctx, s.buildChannelRejectDraft(group, now))
+			if empty == nil {
+				if empty, err = s.loadEmptyBalanceAccounts(ctx); err != nil {
+					slog.Warn("[SecurityAlert] failed to load empty channel balances", "error", err)
+					empty = map[int64]bool{}
+				}
+			}
+			// 钱包已经推过「见底 / 已用完」：被拒是意料之中，只记状态不再推送。
+			if !s.rejectGroupAlreadyEmpty(group, empty) {
+				s.emitLogged(ctx, s.buildChannelRejectDraft(group, now))
+			}
 			for _, h := range group {
 				mark = append(mark, h.AccountID)
 			}
@@ -156,6 +166,40 @@ func (s *SecurityAlertService) rejectGroupKey(id int64, site string) string {
 		return "account:" + strconv.FormatInt(id, 10)
 	}
 	return "site:" + site
+}
+
+// loadEmptyBalanceAccounts 余额状态处于「见底 / 已用完」（含旧版「低于提醒线」）的账号。
+func (s *SecurityAlertService) loadEmptyBalanceAccounts(ctx context.Context) (map[int64]bool, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT subject FROM security_alert_state WHERE subject LIKE 'account:%' AND level IN ($1, $2)`,
+		channelBalanceLow, channelBalanceEmpty)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	empty := map[int64]bool{}
+	for rows.Next() {
+		var subject string
+		if err := rows.Scan(&subject); err != nil {
+			return nil, err
+		}
+		if id, err := strconv.ParseInt(strings.TrimPrefix(subject, "account:"), 10, 64); err == nil {
+			empty[id] = true
+		}
+	}
+	return empty, rows.Err()
+}
+
+// rejectGroupAlreadyEmpty 组里任一账号（或它所在钱包的代表账号）已推过「见底 / 已用完」。
+func (s *SecurityAlertService) rejectGroupAlreadyEmpty(group []channelRejectHit, empty map[int64]bool) bool {
+	for _, h := range group {
+		if empty[h.AccountID] {
+			return true
+		}
+		if head, ok := s.walletOfAccount(h.AccountID); ok && empty[head] {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *SecurityAlertService) loadActiveRejectStates(ctx context.Context) (map[int64]bool, error) {

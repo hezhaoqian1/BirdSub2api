@@ -22,9 +22,11 @@ import (
 // 渠道与用户余额告警（和安全告警共用企业微信机器人与 outbox，消息标题为「运营告警」）：
 //   - 渠道大额消费：渠道（上游账号）近 1 小时成本超过下限，且超过它过去 7 天单小时 P95 的若干倍；
 //   - 渠道余额：leader 定时刷新能识别余额的上游账号，按钱包（同一上游钱包下的多个账号，可能挂在
-//     不同域名下）判定：按最近扣费速度预计几小时内用完 → 低于提醒线 → 预计 1 小时内用完 → 已用完，
-//     每个钱包每个级别只推一次；检测到充值后推一条「渠道已充值」并重新开始监控。快用完的钱包
-//     每 2 分钟复查一次。近 24 小时没有流量的渠道只记状态、进日报，不单独推送；
+//     不同域名下）分三档：按当前扣费速度 6 小时内用完（偏低）→ 1 小时内用完（告急）→ 低于提醒线或
+//     已用完（见底）。进入更高一档时推送；告急后没充值，只有离上次提醒 30 分钟以上、又用掉两成以上、
+//     且按近 30 分钟速度仍会很快用完时再提醒（没人用不提醒）；偏低和见底不重复。检测到充值后推一条
+//     「渠道已充值」并重新开始监控。快用完的钱包每 2 分钟复查一次。近 24 小时没有流量的渠道只记状态、
+//     进日报，不单独推送；
 //   - 上游开始拒绝：上游 5 分钟内多次以「余额/额度不足」拒绝请求时立即推送（见
 //     security_alert_balance_reject.go），这是最早的信号，也覆盖查不到余额的渠道；
 //   - 渠道额度报错：账号因额度不足被停用时推送；
@@ -58,14 +60,31 @@ const channelQuotaErrorPattern = `额度不足|余额不足|欠费|insufficient|
 const securityAccountCostExpr = "COALESCE(u.account_stats_cost, u.total_cost) * COALESCE(u.account_rate_multiplier, 1)"
 
 // 渠道余额告警级别，数值越大越严重，存于 security_alert_state.level。
-// 加入「即将用完」之前「已用完」是 3；旧的 3 会被读成「即将用完」，余额仍 ≤ 0 时会再升级一次。
 const (
 	channelBalanceOK     = 0
-	channelBalanceRunway = 1 // 按扣费速度预计 ChannelRunwayHours 内用完
-	channelBalanceLow    = 2 // 低于固定提醒线（多见于流量小的渠道）
-	channelBalanceUrgent = 3 // 按扣费速度预计 ChannelUrgentMinutes 内用完
-	channelBalanceEmpty  = 4 // 已用完
+	channelBalanceRunway = 1 // 偏低：按当前扣费速度预计 ChannelRunwayHours 内用完
+	channelBalanceLow    = 2 // 旧版「低于提醒线」，现在并入「见底」；读到旧状态时按见底处理
+	channelBalanceUrgent = 3 // 告急：按当前扣费速度预计 ChannelUrgentMinutes 内用完
+	channelBalanceEmpty  = 4 // 见底：低于提醒线或已用完（上游多半已开始拒绝请求）
 )
+
+// 告急后的再提醒：离上次提醒至少 channelBalanceRemindGap，余额又少了 channelBalanceRemindSpent 以上，
+// 且按近 30 分钟的速度仍会在 ChannelRunwayHours 内用完。2026-11-08 回放：提醒后只要有扣费就每 30 分钟
+// 再推，一天 123 条（夜里零星扣费、见底后余额一分一分往下滴都会推）；按这三个条件是 32 条。
+const (
+	channelBalanceRemindGap     = 30 * time.Minute
+	channelBalanceRemindSpent   = 0.2
+	channelBalanceRemindPace    = 30 * time.Minute
+	channelBalanceRemindHorizon = 6.0 // ChannelRunwayHours 关闭时的默认值
+)
+
+// normalizeChannelBalanceLevel 旧版「低于提醒线」读成「见底」，避免升级后对同一个钱包再推一次。
+func normalizeChannelBalanceLevel(level int) int {
+	if level == channelBalanceLow {
+		return channelBalanceEmpty
+	}
+	return level
+}
 
 // isOpsAlertKind 渠道/用户余额类告警，投递时使用「运营告警」标题。
 func isOpsAlertKind(kind string) bool {
@@ -93,8 +112,12 @@ func channelLowBalanceThreshold(cfg SecurityAlertConfig, unit string) float64 {
 }
 
 // evaluateChannelBalanceLevel 根据余额与扣费速度（每小时，0 表示未知）判定级别。
+// 低于提醒线直接算见底：扣得快的钱包 $20 只够几分钟，扣得慢的上游这时也多半开始按在途请求预扣而拒绝。
 func evaluateChannelBalanceLevel(cfg SecurityAlertConfig, remaining float64, unit string, burnPerHour float64) int {
 	if remaining <= 0 {
+		return channelBalanceEmpty
+	}
+	if threshold := channelLowBalanceThreshold(cfg, unit); threshold > 0 && remaining < threshold {
 		return channelBalanceEmpty
 	}
 	hours := math.Inf(1)
@@ -103,9 +126,6 @@ func evaluateChannelBalanceLevel(cfg SecurityAlertConfig, remaining float64, uni
 	}
 	if cfg.ChannelUrgentMinutes > 0 && hours*60 < float64(cfg.ChannelUrgentMinutes) {
 		return channelBalanceUrgent
-	}
-	if threshold := channelLowBalanceThreshold(cfg, unit); threshold > 0 && remaining < threshold {
-		return channelBalanceLow
 	}
 	if cfg.ChannelRunwayHours > 0 && hours < cfg.ChannelRunwayHours {
 		return channelBalanceRunway
@@ -118,7 +138,83 @@ func balanceRecharged(prev, cur float64) bool {
 	return cur > prev+math.Max(0.01, math.Abs(prev)*0.01)
 }
 
-// nextBalanceAlertState 计算新的告警状态：级别升高时告警并记下当时的余额；级别降低只在
+// channelWalletRecharged 钱包是否充过值：和上一次采样比（不和推送时的余额比，否则充了一部分、仍低于
+// 推送时余额的充值认不出来，状态一直卡住）。同一账号相邻两次读数正常只降不升，留 2% / 1 个单位的余量。
+// 采样断了（重启超过 3 小时等）没有上一次采样时，退回和推送时的余额比。
+func channelWalletRecharged(prev balanceAlertState, w channelBalanceWallet) bool {
+	if w.Prev != nil {
+		return w.Low > *w.Prev+math.Max(math.Abs(*w.Prev)*0.02, 1)
+	}
+	return normalizeChannelBalanceLevel(prev.Level) > channelBalanceOK && w.Low > prev.Value+math.Max(math.Abs(prev.Value)*0.05, 1)
+}
+
+// channelBalanceAction 一个钱包本轮要推送的内容。
+type channelBalanceAction int
+
+const (
+	channelBalanceNoop     channelBalanceAction = iota
+	channelBalancePush                          // 进入更高一档
+	channelBalanceRemind                        // 告急后没充值、又用掉两成且仍在快速扣费
+	channelBalanceRecharge                      // 告警过的钱包充值了
+)
+
+// channelBalanceStep 钱包本轮的新状态和要推送的内容。
+type channelBalanceStep struct {
+	State  balanceAlertState
+	Action channelBalanceAction
+}
+
+// decideChannelBalance 由钱包的旧状态和本轮读数决定新状态与推送：
+//   - 充值：重新按当前读数定级；告警过的推「已充值」（仍然很低时在同一条里说明，不另推一条）；
+//   - 级别升高：推送并记下余额和时间（近 24 小时没流量、或已推过「上游开始拒绝」时只记状态）；
+//   - 告急且没充值：满足再提醒条件时再推一次；
+//   - 其他情况不变：流量降下来不会让级别回落，见底和偏低也不重复推。
+func decideChannelBalance(cfg SecurityAlertConfig, prev balanceAlertState, w channelBalanceWallet, rejecting bool, now time.Time) channelBalanceStep {
+	prevLevel := normalizeChannelBalanceLevel(prev.Level)
+	raw := evaluateChannelBalanceLevel(cfg, w.Low, w.Unit, w.Burn.PerHour)
+	quiet := !w.Active || (rejecting && raw < channelBalanceEmpty)
+	if channelWalletRecharged(prev, w) {
+		step := channelBalanceStep{State: balanceAlertState{Level: raw, Value: w.Low, At: now}}
+		switch {
+		case prevLevel > channelBalanceOK:
+			if cfg.ChannelRechargeNotify && w.Active {
+				step.Action = channelBalanceRecharge
+			}
+		case raw > channelBalanceOK && !quiet:
+			step.Action = channelBalancePush
+		}
+		return step
+	}
+	if raw > prevLevel {
+		step := channelBalanceStep{State: balanceAlertState{Level: raw, Value: w.Low, At: now}}
+		if !quiet {
+			step.Action = channelBalancePush
+		}
+		return step
+	}
+	if prevLevel == channelBalanceUrgent && w.Active && !rejecting && channelBalanceRemindDue(cfg, prev, w, now) {
+		return channelBalanceStep{State: balanceAlertState{Level: channelBalanceUrgent, Value: w.Low, At: now}, Action: channelBalanceRemind}
+	}
+	return channelBalanceStep{State: balanceAlertState{Level: prevLevel, Value: prev.Value, At: prev.At}}
+}
+
+// channelBalanceRemindDue 告急后的再提醒条件：离上次提醒够久、又用掉两成以上、按近 30 分钟速度仍会很快用完。
+// 夜里零星扣费不满足第三条；流量停了再起来时三条都满足，就会再提醒。
+func channelBalanceRemindDue(cfg SecurityAlertConfig, prev balanceAlertState, w channelBalanceWallet, now time.Time) bool {
+	if prev.At.IsZero() || now.Sub(prev.At) < channelBalanceRemindGap {
+		return false
+	}
+	if w.Low <= 0 || prev.Value <= 0 || w.Low > prev.Value*(1-channelBalanceRemindSpent) || w.Pace30 <= 0 {
+		return false
+	}
+	horizon := cfg.ChannelRunwayHours
+	if horizon <= 0 {
+		horizon = channelBalanceRemindHorizon
+	}
+	return w.Low/w.Pace30 < horizon
+}
+
+// nextBalanceAlertState 计算新的告警状态（关注用户余额用）：级别升高时告警并记下当时的余额；级别降低只在
 // 检测到充值时生效（避免流量忽高忽低时反复推送）。
 func nextBalanceAlertState(prevLevel int, prevValue float64, level int, value float64) (int, float64, bool) {
 	switch {
@@ -153,41 +249,47 @@ type balanceBurn struct {
 // estimateBalanceBurn 由按时间排序的余额样本估算扣费速度：各窗口内累计下降 / 时间跨度，取最大值。
 // 充值造成的上涨不计入；只看和最新样本同币种的样本。
 func estimateBalanceBurn(samples []balanceSample) balanceBurn {
-	if len(samples) < 2 {
-		return balanceBurn{}
-	}
-	last := samples[len(samples)-1]
 	var best balanceBurn
 	for _, window := range balanceBurnWindows {
-		since := last.At.Add(-window - time.Minute) // 定时采样有几十秒抖动
-		var drained float64
-		var first, prev *balanceSample
-		for i := range samples {
-			cur := &samples[i]
-			if cur.Unit != last.Unit || cur.At.Before(since) {
-				continue
-			}
-			if prev != nil && prev.Remaining > cur.Remaining {
-				drained += prev.Remaining - cur.Remaining
-			}
-			if first == nil {
-				first = cur
-			}
-			prev = cur
-		}
-		if first == nil || drained <= 0 {
-			continue
-		}
-		span := last.At.Sub(first.At)
-		if span < balanceBurnMinSpan {
-			continue
-		}
 		// 相差不到 1% 时保留较短的窗口（显示「近 30 分钟」比「近 3 小时」更有参考价值）。
-		if rate := drained / span.Hours(); rate > best.PerHour*1.01 {
+		if rate := balanceBurnWithin(samples, window); rate > best.PerHour*1.01 {
 			best = balanceBurn{PerHour: rate, Window: window}
 		}
 	}
 	return best
+}
+
+// balanceBurnWithin 最近 window 内的扣费速度（每小时）：累计下降 / 时间跨度，充值造成的上涨不计入，
+// 只看和最新样本同币种的样本；样本跨度不足 balanceBurnMinSpan 时返回 0（未知）。
+func balanceBurnWithin(samples []balanceSample, window time.Duration) float64 {
+	if len(samples) < 2 {
+		return 0
+	}
+	last := samples[len(samples)-1]
+	since := last.At.Add(-window - time.Minute) // 定时采样有几十秒抖动
+	var drained float64
+	var first, prev *balanceSample
+	for i := range samples {
+		cur := &samples[i]
+		if cur.Unit != last.Unit || cur.At.Before(since) {
+			continue
+		}
+		if prev != nil && prev.Remaining > cur.Remaining {
+			drained += prev.Remaining - cur.Remaining
+		}
+		if first == nil {
+			first = cur
+		}
+		prev = cur
+	}
+	if first == nil || drained <= 0 {
+		return 0
+	}
+	span := last.At.Sub(first.At)
+	if span < balanceBurnMinSpan {
+		return 0
+	}
+	return drained / span.Hours()
 }
 
 // balanceBurnPerHour 只取速度（每小时），0 表示未知。
@@ -229,6 +331,25 @@ func formatBurnWindow(d time.Duration) string {
 		return fmt.Sprintf("%.0f 分钟", d.Minutes())
 	}
 	return fmt.Sprintf("%.0f 小时", d.Hours())
+}
+
+// balanceDayLine 「近 24 小时共扣 $1049.12，按这个用量约够 13.4 小时」：只看最近半小时的速度，夜里会说
+// 「4 天后用完」，白天几小时就没了，所以每条余额消息都带上一整天的用量。样本不满一天时写实际时长。
+func balanceDayLine(drained float64, span time.Duration, remaining float64, unit string) string {
+	if drained < 0.01 || span < time.Hour {
+		return ""
+	}
+	label := "近 24 小时"
+	if span < 23*time.Hour {
+		label = fmt.Sprintf("近 %.0f 小时", math.Floor(span.Hours()))
+	}
+	line := label + "共扣 " + formatBalanceAmount(drained, unit)
+	if remaining > 0 {
+		if hours := remaining / (drained / span.Hours()); hours < 30*24 {
+			line += "，按这个用量约够 " + formatHours(hours)
+		}
+	}
+	return line
 }
 
 // balanceBurnLine 「按近 30 分钟扣费速度每小时约 $330.00，预计 15 分钟后用完」；速度未知时返回空。
@@ -274,6 +395,11 @@ type channelBalanceReading struct {
 	Scope     string
 	FetchedAt time.Time
 	Burn      balanceBurn
+	// Pace30 近 30 分钟的扣费速度（每小时，0 表示未知），用于判断告急后是否仍在快速扣费。
+	Pace30 float64
+	// Drained 近 24 小时累计扣掉的金额（不含充值），DrainedSpan 是样本覆盖的时长。
+	Drained     float64
+	DrainedSpan time.Duration
 	// Prev 上一次同币种采样的余额（用于「充值前 → 充值后」），没有时为 nil。
 	Prev *float64
 	// UnitChanged 和上一次采样的币种不同（如换算参数偶发读取失败），本轮不参与判定。
@@ -297,6 +423,10 @@ type channelBalanceWallet struct {
 	Burn    balanceBurn
 	Prev    *float64
 	Active  bool
+	// Pace30 / Drained 取成员里最大的（同一钱包各账号的采样本应一致，取大的防止个别账号漏采）。
+	Pace30      float64
+	Drained     float64
+	DrainedSpan time.Duration
 }
 
 // sameBalanceWallet 判断 r 是否和 head 属于同一个钱包：同币种、同额度类型、余额足够接近。
@@ -364,6 +494,10 @@ func groupChannelWallets(readings []channelBalanceReading) []channelBalanceWalle
 		for _, m := range w.Members {
 			w.High = math.Max(w.High, m.Remaining)
 			w.Active = w.Active || m.Active
+			w.Pace30 = math.Max(w.Pace30, m.Pace30)
+			if m.Drained > w.Drained {
+				w.Drained, w.DrainedSpan = m.Drained, m.DrainedSpan
+			}
 			site := m.Site
 			if site == "" {
 				site = "-"
@@ -408,10 +542,18 @@ func (w channelBalanceWallet) amountText() string {
 	return amount
 }
 
+// dayLine 「近 24 小时共扣 …，按这个用量约够 …」。
+func (w channelBalanceWallet) dayLine() string {
+	return balanceDayLine(w.Drained, w.DrainedSpan, w.Low, w.Unit)
+}
+
 // buildChannelBalanceDraft 一个钱包升到 level 时的告警。
 func buildChannelBalanceDraft(cfg SecurityAlertConfig, w channelBalanceWallet, level int, at time.Time) securityAlertDraft {
 	lines := append(w.headerLines(), "余额："+w.amountText())
-	if line := balanceBurnLine(w.Burn, w.Low, w.Unit); line != "" {
+	if line := balanceBurnLine(w.Burn, w.Low, w.Unit); line != "" && level != channelBalanceEmpty {
+		lines = append(lines, line)
+	}
+	if line := w.dayLine(); line != "" {
 		lines = append(lines, line)
 	}
 	d := securityAlertDraft{
@@ -422,24 +564,58 @@ func buildChannelBalanceDraft(cfg SecurityAlertConfig, w channelBalanceWallet, l
 	switch level {
 	case channelBalanceEmpty:
 		d.Severity = SecurityAlertCritical
-		d.Title = "渠道余额已用完"
-		lines = append(lines, "请求可能已经开始失败，请尽快充值。")
+		if w.Low <= 0 {
+			d.Title = "渠道余额已用完"
+			lines = append(lines, "请求可能已经开始失败，请尽快充值。")
+		} else {
+			d.Title = "渠道余额见底"
+			lines = append(lines, "余额低于提醒线 "+formatBalanceAmount(channelLowBalanceThreshold(cfg, w.Unit), w.Unit)+"，上游可能已开始拒绝请求，请尽快充值。")
+		}
+		lines = append(lines, "之后不再重复提醒，充值后会通知。")
 	case channelBalanceUrgent:
 		d.Severity = SecurityAlertCritical
 		d.Title = "渠道余额即将用完"
-		lines = append(lines, fmt.Sprintf("提醒条件：按最近扣费速度预计 %d 分钟内用完。请尽快充值，充值后会自动恢复监控。", cfg.ChannelUrgentMinutes))
-	case channelBalanceLow:
-		d.Title = "渠道余额不足"
-		lines = append(lines, "提醒线："+formatBalanceAmount(channelLowBalanceThreshold(cfg, w.Unit), w.Unit), "请及时充值，充值后会自动恢复监控。")
+		lines = append(lines,
+			fmt.Sprintf("提醒条件：按当前扣费速度预计 %d 分钟内用完。请尽快充值。", cfg.ChannelUrgentMinutes),
+			"没充值时，只有又用掉两成以上、并且仍在快速扣费才会再提醒，没人用时不提醒。")
 	default:
 		d.Title = "渠道余额预计很快用完"
-		lines = append(lines, fmt.Sprintf("提醒条件：按最近扣费速度预计 %s内用完。请及时充值，充值后会自动恢复监控。", formatHours(cfg.ChannelRunwayHours)))
+		lines = append(lines, fmt.Sprintf("提醒条件：按当前扣费速度预计 %s内用完。请及时充值，充值后会通知。", formatHours(cfg.ChannelRunwayHours)))
 	}
 	d.Lines = lines
 	return d
 }
 
-// buildChannelRechargeDraft 告警过的钱包检测到充值。
+// buildChannelBalanceRemindDraft 告急后没充值、又用掉两成以上且仍在快速扣费时的再提醒。
+func buildChannelBalanceRemindDraft(w channelBalanceWallet, prev balanceAlertState, at time.Time, loc *time.Location) securityAlertDraft {
+	since := prev.At
+	if loc != nil {
+		since = since.In(loc)
+	}
+	when := since.Format("15:04")
+	if at.In(since.Location()).Format("2006-01-02") != since.Format("2006-01-02") {
+		when = since.Format("01-02 15:04")
+	}
+	lines := append(w.headerLines(),
+		fmt.Sprintf("余额：%s（%s 提醒时 %s，还没充值）", w.amountText(), when, formatBalanceAmount(prev.Value, w.Unit)))
+	if line := balanceBurnLine(balanceBurn{PerHour: w.Pace30, Window: channelBalanceRemindPace}, w.Low, w.Unit); line != "" {
+		lines = append(lines, line)
+	}
+	if line := w.dayLine(); line != "" {
+		lines = append(lines, line)
+	}
+	lines = append(lines, "请尽快充值。又用掉两成以上、并且仍在快速扣费时才会再提醒，没人用时不提醒。")
+	return securityAlertDraft{
+		DedupeKey: fmt.Sprintf("channel_balance_remind:%d:%s", w.walletHeadID(), securityBucket(at, time.Minute)),
+		Kind:      securityAlertKindChannelBal,
+		Severity:  SecurityAlertCritical,
+		Title:     "渠道余额即将用完（再次提醒）",
+		Lines:     lines,
+	}
+}
+
+// buildChannelRechargeDraft 告警过的钱包检测到充值；level 是充值后按当前读数重新判定的级别。
+// 不写「按近 30 分钟速度预计几天后用完」：夜里充值时那个速度很低，会严重高估能撑多久。
 func buildChannelRechargeDraft(cfg SecurityAlertConfig, w channelBalanceWallet, level int, at time.Time) securityAlertDraft {
 	lines := w.headerLines()
 	if w.Prev != nil {
@@ -447,18 +623,18 @@ func buildChannelRechargeDraft(cfg SecurityAlertConfig, w channelBalanceWallet, 
 	} else {
 		lines = append(lines, "充值后余额："+w.amountText())
 	}
-	if line := balanceBurnLine(w.Burn, w.Low, w.Unit); line != "" {
+	if line := w.dayLine(); line != "" {
 		lines = append(lines, line)
 	}
 	switch level {
 	case channelBalanceOK:
 		lines = append(lines, "已恢复监控。")
 	case channelBalanceRunway:
-		lines = append(lines, fmt.Sprintf("注意：按最近扣费速度仍预计 %s内用完。", formatHours(cfg.ChannelRunwayHours)))
-	case channelBalanceLow:
-		lines = append(lines, "注意：充值后仍低于提醒线 "+formatBalanceAmount(channelLowBalanceThreshold(cfg, w.Unit), w.Unit)+"。")
+		lines = append(lines, fmt.Sprintf("注意：按当前扣费速度仍预计 %s内用完。", formatHours(cfg.ChannelRunwayHours)))
+	case channelBalanceUrgent:
+		lines = append(lines, fmt.Sprintf("注意：按当前扣费速度仍预计 %d 分钟内用完。", cfg.ChannelUrgentMinutes))
 	default:
-		lines = append(lines, fmt.Sprintf("注意：按最近扣费速度仍预计 %d 分钟内用完。", cfg.ChannelUrgentMinutes))
+		lines = append(lines, "注意：充值后仍低于提醒线 "+formatBalanceAmount(channelLowBalanceThreshold(cfg, w.Unit), w.Unit)+"。")
 	}
 	return securityAlertDraft{
 		DedupeKey: fmt.Sprintf("channel_recharge:%d:%s", w.walletHeadID(), securityBucket(at, time.Minute)),
@@ -474,6 +650,44 @@ func buildChannelRechargeDraft(cfg SecurityAlertConfig, w channelBalanceWallet, 
 type balanceAlertState struct {
 	Level int
 	Value float64
+	// At 最近一次推送（或充值）的时间，即 security_alert_state.updated_at；只有渠道余额判定会读。
+	At time.Time
+}
+
+// securityAlertQueryer *sql.DB 或 *sql.Tx。
+type securityAlertQueryer interface {
+	securityAlertExecer
+	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
+}
+
+// loadChannelBalanceStates 读取渠道余额状态（含更新时间，用于判断离上次提醒多久）。
+func loadChannelBalanceStates(ctx context.Context, q securityAlertQueryer, subjects []string) (map[string]balanceAlertState, error) {
+	states := make(map[string]balanceAlertState, len(subjects))
+	if len(subjects) == 0 {
+		return states, nil
+	}
+	rows, err := q.QueryContext(ctx, `SELECT subject, level, value, updated_at FROM security_alert_state WHERE subject = ANY($1)`, pq.Array(subjects))
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		var subject string
+		var st balanceAlertState
+		if err := rows.Scan(&subject, &st.Level, &st.Value, &st.At); err != nil {
+			return nil, err
+		}
+		states[subject] = st
+	}
+	return states, rows.Err()
+}
+
+func saveAlertStateWith(ctx context.Context, exec securityAlertExecer, subject string, st balanceAlertState) error {
+	_, err := exec.ExecContext(ctx, `INSERT INTO security_alert_state(subject, level, value, updated_at)
+ VALUES ($1, $2, $3, NOW())
+ ON CONFLICT (subject) DO UPDATE SET level = EXCLUDED.level, value = EXCLUDED.value, updated_at = NOW()`,
+		subject, st.Level, st.Value)
+	return err
 }
 
 func (s *SecurityAlertService) loadAlertStates(ctx context.Context, subjects []string) (map[string]balanceAlertState, error) {
@@ -498,11 +712,7 @@ func (s *SecurityAlertService) loadAlertStates(ctx context.Context, subjects []s
 }
 
 func (s *SecurityAlertService) saveAlertState(ctx context.Context, subject string, st balanceAlertState) error {
-	_, err := s.db.ExecContext(ctx, `INSERT INTO security_alert_state(subject, level, value, updated_at)
- VALUES ($1, $2, $3, NOW())
- ON CONFLICT (subject) DO UPDATE SET level = EXCLUDED.level, value = EXCLUDED.value, updated_at = NOW()`,
-		subject, st.Level, st.Value)
-	return err
+	return saveAlertStateWith(ctx, s.db, subject, st)
 }
 
 // claimSweep 在所有实例间按间隔领取一次周期任务。
@@ -609,17 +819,7 @@ func (s *SecurityAlertService) runBalanceSweep(cfg SecurityAlertConfig, only []i
 		return
 	}
 	if only != nil {
-		wanted := make(map[int64]bool, len(only))
-		for _, id := range only {
-			wanted[id] = true
-		}
-		kept := targets[:0]
-		for _, t := range targets {
-			if wanted[t.ID] {
-				kept = append(kept, t)
-			}
-		}
-		targets = kept
+		targets = s.expandHotBalanceTargets(targets, only)
 	}
 	readings := s.refreshChannelBalances(ctx, targets, start, only != nil)
 	if len(readings) == 0 {
@@ -634,9 +834,39 @@ func (s *SecurityAlertService) runBalanceSweep(cfg SecurityAlertConfig, only []i
 	if err := s.fillBurnRates(ctx, readings); err != nil {
 		slog.Warn("[SecurityAlert] failed to load balance samples", "error", err)
 	}
+	if err := s.fillDailyDrain(ctx, readings); err != nil {
+		slog.Warn("[SecurityAlert] failed to load daily balance drain", "error", err)
+	}
 	s.fillChannelActivity(ctx, readings)
 	s.evaluateChannelBalances(ctx, cfg, readings, only == nil)
 	slog.Info("[SecurityAlert] balance sweep finished", "hot", only != nil, "targets", len(targets), "readings", len(readings), "elapsed", s.now().Sub(start).Round(time.Second))
+}
+
+// expandHotBalanceTargets 复查快用完的账号时，把同一域名、同一钱包（上次全量刷新识别）的其他账号一起
+// 查：只查一部分成员会把钱包拆开，成员各自的旧状态对不上，同一个钱包会再推一条。
+func (s *SecurityAlertService) expandHotBalanceTargets(targets []channelBalanceTarget, only []int64) []channelBalanceTarget {
+	wanted := make(map[int64]bool, len(only))
+	heads := map[int64]bool{}
+	for _, id := range only {
+		wanted[id] = true
+		if head, ok := s.walletOfAccount(id); ok {
+			heads[head] = true
+		}
+	}
+	sites := map[string]bool{}
+	for _, t := range targets {
+		if wanted[t.ID] && t.Site != "" {
+			sites[t.Site] = true
+		}
+	}
+	kept := targets[:0]
+	for _, t := range targets {
+		head, known := s.walletOfAccount(t.ID)
+		if wanted[t.ID] || sites[t.Site] || (known && heads[head]) {
+			kept = append(kept, t)
+		}
+	}
+	return kept
 }
 
 // loadBalanceSweepTargets 选出参与调度、配置了 Base URL 的 API Key 账号；关闭余额查询的跳过，
@@ -775,6 +1005,7 @@ func (s *SecurityAlertService) fillBurnRates(ctx context.Context, readings []cha
 	for i := range readings {
 		list := samples[readings[i].AccountID]
 		readings[i].Burn = estimateBalanceBurn(list)
+		readings[i].Pace30 = balanceBurnWithin(list, channelBalanceRemindPace)
 		// 最后一条是本轮刚写入的读数；再往前一条是上一次采样。
 		if n := len(list); n >= 2 {
 			prev := list[n-2]
@@ -783,6 +1014,51 @@ func (s *SecurityAlertService) fillBurnRates(ctx context.Context, readings []cha
 			} else {
 				v := prev.Remaining
 				readings[i].Prev = &v
+			}
+		}
+	}
+	return nil
+}
+
+// fillDailyDrain 近 24 小时累计扣掉的金额（相邻两次同币种采样的下降之和，充值造成的上涨不计入）。
+func (s *SecurityAlertService) fillDailyDrain(ctx context.Context, readings []channelBalanceReading) error {
+	ids := make([]int64, 0, len(readings))
+	for _, r := range readings {
+		ids = append(ids, r.AccountID)
+	}
+	now := s.now()
+	rows, err := s.db.QueryContext(ctx, `SELECT account_id, unit, SUM(GREATEST(prev - remaining, 0)), MIN(prev_at)
+ FROM (SELECT account_id, unit, remaining,
+         LAG(remaining) OVER w AS prev, LAG(unit) OVER w AS prev_unit, LAG(observed_at) OVER w AS prev_at
+       FROM security_alert_balance_samples WHERE account_id = ANY($1) AND observed_at > $2
+       WINDOW w AS (PARTITION BY account_id ORDER BY observed_at)) x
+ WHERE prev IS NOT NULL AND prev_unit = unit
+ GROUP BY account_id, unit`, pq.Array(ids), now.Add(-24*time.Hour))
+	if err != nil {
+		return err
+	}
+	defer func() { _ = rows.Close() }()
+	type drain struct {
+		unit    string
+		drained float64
+		first   time.Time
+	}
+	drains := map[int64][]drain{}
+	for rows.Next() {
+		var id int64
+		var d drain
+		if err := rows.Scan(&id, &d.unit, &d.drained, &d.first); err != nil {
+			return err
+		}
+		drains[id] = append(drains[id], d)
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	for i := range readings {
+		for _, d := range drains[readings[i].AccountID] {
+			if d.unit == readings[i].Unit {
+				readings[i].Drained, readings[i].DrainedSpan = d.drained, now.Sub(d.first)
 			}
 		}
 	}
@@ -821,8 +1097,14 @@ func (s *SecurityAlertService) fillChannelActivity(ctx context.Context, readings
 	}
 }
 
+// channelBalanceEvalLock 全量刷新和快用完复查可能在两个实例上同时跑，判定必须串行：后到的那次要读到
+// 先到的那次刚写的状态，否则同一个钱包会各推一条（2026-11-08 Yimo 13:21 两条：一个实例复查 #150，
+// 另一个实例全量刷新 #54/#76）。
+const channelBalanceEvalLock int64 = 0x62616c616e6365 // "balance"
+
 // evaluateChannelBalances 按钱包判定级别并推送。同一钱包的账号共用一个级别（取成员里最高的旧级别），
-// 推送后所有成员一起记状态，避免同一钱包隔一轮又推一次。
+// 推送后所有成员一起记状态，避免同一钱包隔一轮又推一次。告警和状态在同一个事务里写入，并用
+// advisory lock 和其他实例的判定串行。
 func (s *SecurityAlertService) evaluateChannelBalances(ctx context.Context, cfg SecurityAlertConfig, readings []channelBalanceReading, full bool) {
 	usable := make([]channelBalanceReading, 0, len(readings))
 	for _, r := range readings {
@@ -831,11 +1113,27 @@ func (s *SecurityAlertService) evaluateChannelBalances(ctx context.Context, cfg 
 		}
 	}
 	wallets := groupChannelWallets(usable)
+	s.rememberWallets(wallets, full)
 	subjects := make([]string, 0, 2*len(usable))
 	for _, r := range usable {
 		subjects = append(subjects, accountAlertSubject(r.AccountID), rejectAlertSubject(r.AccountID))
 	}
-	states, err := s.loadAlertStates(ctx, subjects)
+
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		slog.Warn("[SecurityAlert] failed to begin channel balance evaluation", "error", err)
+		return
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := tx.ExecContext(ctx, `SET LOCAL lock_timeout = '20s'`); err != nil {
+		slog.Warn("[SecurityAlert] failed to set channel balance lock timeout", "error", err)
+		return
+	}
+	if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock($1)`, channelBalanceEvalLock); err != nil {
+		slog.Warn("[SecurityAlert] failed to lock channel balance evaluation", "error", err)
+		return
+	}
+	states, err := loadChannelBalanceStates(ctx, tx, subjects)
 	if err != nil {
 		slog.Warn("[SecurityAlert] failed to load channel alert states", "error", err)
 		return
@@ -848,42 +1146,47 @@ func (s *SecurityAlertService) evaluateChannelBalances(ctx context.Context, cfg 
 	var drafts []securityAlertDraft
 	var changed []change
 	for _, w := range wallets {
-		var prev balanceAlertState
+		prev := balanceAlertState{Level: -1}
 		rejecting := false
 		for _, m := range w.Members {
-			if st := states[accountAlertSubject(m.AccountID)]; st.Level > prev.Level {
+			st := states[accountAlertSubject(m.AccountID)]
+			level, prevLevel := normalizeChannelBalanceLevel(st.Level), normalizeChannelBalanceLevel(prev.Level)
+			if level > prevLevel || (level == prevLevel && st.At.After(prev.At)) {
 				prev = st
 			}
 			rejecting = rejecting || states[rejectAlertSubject(m.AccountID)].Level > 0
 		}
-		raw := evaluateChannelBalanceLevel(cfg, w.Low, w.Unit, w.Burn.PerHour)
-		level, value, alert := nextBalanceAlertState(prev.Level, prev.Value, raw, w.Low)
-		switch {
-		case alert && !w.Active:
-			// 近 24 小时没有流量：只记状态，日报里列出，不单独推送。
-		case alert && rejecting && level < channelBalanceEmpty:
-			// 已推过「上游开始拒绝」，更低级别的余额提醒不再重复。
-		case alert:
-			drafts = append(drafts, buildChannelBalanceDraft(cfg, w, level, now))
-		case level < prev.Level && prev.Level >= channelBalanceLow && cfg.ChannelRechargeNotify && w.Active:
-			drafts = append(drafts, buildChannelRechargeDraft(cfg, w, level, now))
+		step := decideChannelBalance(cfg, prev, w, rejecting, now)
+		switch step.Action {
+		case channelBalancePush:
+			drafts = append(drafts, buildChannelBalanceDraft(cfg, w, step.State.Level, now))
+		case channelBalanceRemind:
+			drafts = append(drafts, buildChannelBalanceRemindDraft(w, prev, now, s.loc))
+		case channelBalanceRecharge:
+			drafts = append(drafts, buildChannelRechargeDraft(cfg, w, step.State.Level, now))
 		}
 		for _, m := range w.Members {
 			subject := accountAlertSubject(m.AccountID)
-			if st := states[subject]; st.Level != level || st.Value != value {
-				changed = append(changed, change{subject, balanceAlertState{Level: level, Value: value}})
+			st := states[subject]
+			if step.Action != channelBalanceNoop || normalizeChannelBalanceLevel(st.Level) != step.State.Level || st.Value != step.State.Value {
+				changed = append(changed, change{subject, step.State})
 			}
 		}
 	}
-	s.rememberWallets(wallets, full)
-	// 先写 outbox 再记状态：记状态失败最多重复提醒一次，不会漏报。
 	for _, d := range drafts {
-		s.emitLogged(ctx, d)
+		if err := emitSecurityAlert(ctx, tx, d); err != nil {
+			slog.Warn("[SecurityAlert] failed to record channel balance alert", "kind", d.Kind, "error", err)
+			return
+		}
 	}
 	for _, c := range changed {
-		if err := s.saveAlertState(ctx, c.subject, c.state); err != nil {
+		if err := saveAlertStateWith(ctx, tx, c.subject, c.state); err != nil {
 			slog.Warn("[SecurityAlert] failed to save channel alert state", "subject", c.subject, "error", err)
+			return
 		}
+	}
+	if err := tx.Commit(); err != nil {
+		slog.Warn("[SecurityAlert] failed to commit channel balance evaluation", "error", err)
 	}
 }
 

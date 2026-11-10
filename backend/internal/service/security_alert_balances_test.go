@@ -86,14 +86,15 @@ func TestEvaluateChannelBalanceLevel(t *testing.T) {
 	cfg := DefaultSecurityAlertConfig() // USD 20, CNY 100, runway 6h, urgent 60 min
 	require.Equal(t, channelBalanceEmpty, evaluateChannelBalanceLevel(cfg, -4.6, "USD", 0))
 	require.Equal(t, channelBalanceEmpty, evaluateChannelBalanceLevel(cfg, 0, "CNY", 0))
-	require.Equal(t, channelBalanceLow, evaluateChannelBalanceLevel(cfg, 8.63, "USD", 0))
-	require.Equal(t, channelBalanceLow, evaluateChannelBalanceLevel(cfg, 42, "CNY", 0))
-	require.Equal(t, channelBalanceLow, evaluateChannelBalanceLevel(cfg, 19.77, "USD", 2), "slow channel below the line: 9.8h left")
+	require.Equal(t, channelBalanceEmpty, evaluateChannelBalanceLevel(cfg, 8.63, "USD", 0), "below the line counts as hitting bottom")
+	require.Equal(t, channelBalanceEmpty, evaluateChannelBalanceLevel(cfg, 42, "CNY", 0))
+	require.Equal(t, channelBalanceEmpty, evaluateChannelBalanceLevel(cfg, 19.77, "USD", 2), "slow channel below the line: 9.8h left")
 	require.Equal(t, channelBalanceOK, evaluateChannelBalanceLevel(cfg, 42, "USD", 0))
 	require.Equal(t, channelBalanceRunway, evaluateChannelBalanceLevel(cfg, 478, "USD", 300), "1.6h left at $300/h")
 	require.Equal(t, channelBalanceOK, evaluateChannelBalanceLevel(cfg, 478, "USD", 50), "9.6h left")
 	require.Equal(t, channelBalanceUrgent, evaluateChannelBalanceLevel(cfg, 140, "USD", 330), "25 min left")
-	require.Equal(t, channelBalanceUrgent, evaluateChannelBalanceLevel(cfg, 15, "USD", 166), "urgent outranks the fixed line")
+	require.Equal(t, channelBalanceEmpty, evaluateChannelBalanceLevel(cfg, 15, "USD", 166), "below the line outranks urgent")
+	require.Equal(t, channelBalanceEmpty, normalizeChannelBalanceLevel(channelBalanceLow), "old 低于提醒线 state reads as 见底")
 	require.Equal(t, channelBalanceOK, evaluateChannelBalanceLevel(cfg, 3, "QUOTA", 0), "raw quota has no threshold")
 	require.Equal(t, channelBalanceRunway, evaluateChannelBalanceLevel(cfg, 3, "QUOTA", 1))
 	cfg.ChannelRunwayHours = 0
@@ -221,22 +222,26 @@ func TestBuildChannelBalanceDrafts(t *testing.T) {
 		reading(101, "lcodex.example", 8.64, at, 0),
 		reading(98, "lcodex.example", 8.63, at, 0),
 	})[0]
-	low := buildChannelBalanceDraft(cfg, wallet, channelBalanceLow, at)
-	require.Equal(t, "渠道余额不足", low.Title)
-	require.Equal(t, SecurityAlertWarning, low.Severity)
+	low := buildChannelBalanceDraft(cfg, wallet, channelBalanceEmpty, at)
+	require.Equal(t, "渠道余额见底", low.Title)
+	require.Equal(t, SecurityAlertCritical, low.Severity)
 	body := low.body()
 	require.Contains(t, body, "上游：lcodex.example")
 	require.Contains(t, body, "#98 acct98、#101 acct101")
 	require.Contains(t, body, "余额：$8.63 ~ $8.64")
-	require.Contains(t, body, "提醒线：$20.00")
+	require.Contains(t, body, "余额低于提醒线 $20.00")
+	require.Contains(t, body, "之后不再重复提醒，充值后会通知。")
 
 	fast := groupChannelWallets([]channelBalanceReading{reading(99, "xapi.example", 140.52, at, 330)})[0]
 	fast.Burn.Window = 30 * time.Minute
+	fast.Drained, fast.DrainedSpan = 360, 24*time.Hour
 	urgent := buildChannelBalanceDraft(cfg, fast, channelBalanceUrgent, at)
 	require.Equal(t, "渠道余额即将用完", urgent.Title)
 	require.Equal(t, SecurityAlertCritical, urgent.Severity)
 	require.Contains(t, urgent.body(), "按近 30 分钟扣费速度每小时约 $330.00，预计 26 分钟后用完")
+	require.Contains(t, urgent.body(), "近 24 小时共扣 $360.00，按这个用量约够 9.4 小时")
 	require.Contains(t, urgent.body(), "预计 60 分钟内用完")
+	require.Contains(t, urgent.body(), "又用掉两成以上、并且仍在快速扣费才会再提醒")
 
 	runway := buildChannelBalanceDraft(cfg, fast, channelBalanceRunway, at)
 	require.Equal(t, "渠道余额预计很快用完", runway.Title)
@@ -247,10 +252,132 @@ func TestBuildChannelBalanceDrafts(t *testing.T) {
 	require.Equal(t, SecurityAlertCritical, empty.Severity)
 	require.Contains(t, empty.body(), "余额：-$4.60")
 
-	for _, d := range []securityAlertDraft{low, urgent, runway, empty} {
-		require.Equal(t, securityAlertKindChannelBal, d.Kind)
+	// 告急后的再提醒：带上次提醒的时间和余额、近 30 分钟速度和一天的用量。
+	loc := time.FixedZone("CST", 8*3600)
+	yimo := groupChannelWallets([]channelBalanceReading{reading(150, "api.ymocode.com", 127.89, at, 320)})[0]
+	yimo.Pace30, yimo.Drained, yimo.DrainedSpan = 160, 855, 24*time.Hour
+	remindAt := time.Date(2026, 11, 8, 13, 53, 0, 0, loc)
+	remind := buildChannelBalanceRemindDraft(yimo, balanceAlertState{Level: channelBalanceUrgent, Value: 213.33, At: time.Date(2026, 11, 8, 5, 21, 0, 0, time.UTC)}, remindAt, loc)
+	require.Equal(t, "渠道余额即将用完（再次提醒）", remind.Title)
+	require.Equal(t, SecurityAlertCritical, remind.Severity)
+	require.Contains(t, remind.body(), "余额：$127.89（13:21 提醒时 $213.33，还没充值）")
+	require.Contains(t, remind.body(), "按近 30 分钟扣费速度每小时约 $160.00，预计 48 分钟后用完")
+	require.Contains(t, remind.body(), "近 24 小时共扣 $855.00，按这个用量约够 3.6 小时")
+	nextDay := buildChannelBalanceRemindDraft(yimo, balanceAlertState{Value: 213.33, At: time.Date(2026, 11, 8, 5, 21, 0, 0, time.UTC)}, remindAt.Add(20*time.Hour), loc)
+	require.Contains(t, nextDay.body(), "（11-08 13:21 提醒时 $213.33，还没充值）")
+
+	// 充值通知不再写「按近 30 分钟速度预计几天后用完」，改写一天的用量。
+	prev := 87.65
+	recharged := groupChannelWallets([]channelBalanceReading{reading(150, "api.ymocode.com", 585.40, at, 5.52)})[0]
+	recharged.Prev, recharged.Drained, recharged.DrainedSpan = &prev, 1049.12, 24*time.Hour
+	recharge := buildChannelRechargeDraft(cfg, recharged, channelBalanceOK, at)
+	require.Contains(t, recharge.body(), "余额：$87.65 → $585.40")
+	require.Contains(t, recharge.body(), "近 24 小时共扣 $1049.12，按这个用量约够 13.4 小时")
+	require.NotContains(t, recharge.body(), "扣费速度")
+
+	for _, d := range []securityAlertDraft{low, urgent, runway, empty, remind, recharge} {
 		requirePlainText(t, d.body())
 	}
+	for _, d := range []securityAlertDraft{low, urgent, runway, empty, remind} {
+		require.Equal(t, securityAlertKindChannelBal, d.Kind)
+	}
+}
+
+func TestBalanceDayLine(t *testing.T) {
+	require.Equal(t, "近 24 小时共扣 $1049.12，按这个用量约够 13.4 小时", balanceDayLine(1049.12, 24*time.Hour, 585.40, "USD"))
+	require.Equal(t, "近 5 小时共扣 ¥50.00，按这个用量约够 9.7 小时", balanceDayLine(50, 5*time.Hour+20*time.Minute, 91.29, "CNY"))
+	require.Equal(t, "近 24 小时共扣 $10.00", balanceDayLine(10, 24*time.Hour, -1, "USD"), "no runway once empty")
+	require.Equal(t, "", balanceDayLine(0.001, 24*time.Hour, 50, "USD"))
+	require.Equal(t, "", balanceDayLine(10, 30*time.Minute, 50, "USD"), "too little history")
+}
+
+// yimoWallet 2026-11-08 Yimo（api.ymocode.com）钱包在某一时刻的读数。
+func yimoWallet(low, burn, pace30 float64, prev *float64) channelBalanceWallet {
+	w := groupChannelWallets([]channelBalanceReading{reading(150, "api.ymocode.com", low, time.Time{}, burn)})[0]
+	w.Pace30, w.Prev = pace30, prev
+	return w
+}
+
+func f64(v float64) *float64 { return &v }
+
+// TestDecideChannelBalanceYimoDay 按 2026-11-08 Yimo 的真实走势：告急后流量停了一夜不提醒，早上流量
+// 回来再提醒，见底推一次后不再重复，充值后通知。
+func TestDecideChannelBalanceYimoDay(t *testing.T) {
+	cfg := DefaultSecurityAlertConfig()
+	t0 := time.Date(2026, 11, 8, 5, 21, 0, 0, time.UTC)
+	var st balanceAlertState
+	step := func(at time.Time, w channelBalanceWallet) channelBalanceAction {
+		s := decideChannelBalance(cfg, st, w, false, at)
+		st = s.State
+		return s.Action
+	}
+
+	require.Equal(t, channelBalancePush, step(t0, yimoWallet(213.33, 320, 320, f64(297.51))), "40 min left → 告急")
+	require.Equal(t, balanceAlertState{Level: channelBalanceUrgent, Value: 213.33, At: t0}, st)
+	require.Equal(t, channelBalanceNoop, step(t0.Add(10*time.Minute), yimoWallet(160, 320, 320, f64(180))), "less than 30 min since the push")
+	require.Equal(t, channelBalanceRemind, step(t0.Add(32*time.Minute), yimoWallet(127.89, 320, 160, f64(140))), "40% spent, still draining fast")
+	require.Equal(t, 127.89, st.Value)
+	require.Equal(t, channelBalanceNoop, step(t0.Add(70*time.Minute), yimoWallet(109.74, 60, 30, f64(110))), "only 14% spent since the reminder")
+	require.Equal(t, channelBalanceNoop, step(t0.Add(15*time.Hour), yimoWallet(92.37, 3, 1, f64(92.47))), "night trickle: 28% spent but 92h at the current pace")
+	require.Equal(t, channelBalanceRemind, step(t0.Add(16*time.Hour), yimoWallet(70, 300, 300, f64(90))), "traffic is back in the morning")
+	require.Equal(t, channelBalancePush, step(t0.Add(16*time.Hour+10*time.Minute), yimoWallet(15, 300, 300, f64(40))), "below $20 → 见底")
+	require.Equal(t, channelBalanceEmpty, st.Level)
+	require.Equal(t, channelBalanceNoop, step(t0.Add(17*time.Hour), yimoWallet(0.5, 1, 1, f64(0.6))), "见底 is not repeated")
+	require.Equal(t, channelBalanceNoop, step(t0.Add(18*time.Hour), yimoWallet(-0.01, 1, 1, f64(0.5))), "nor is 已用完 after 见底")
+	require.Equal(t, channelBalanceRecharge, step(t0.Add(19*time.Hour), yimoWallet(585.40, 5.52, 5.52, f64(-0.01))))
+	require.Equal(t, balanceAlertState{Level: channelBalanceOK, Value: 585.40, At: t0.Add(19 * time.Hour)}, st)
+}
+
+func TestDecideChannelBalanceEdgeCases(t *testing.T) {
+	cfg := DefaultSecurityAlertConfig()
+	now := time.Date(2026, 11, 9, 4, 33, 0, 0, time.UTC)
+	urgent := balanceAlertState{Level: channelBalanceUrgent, Value: 213.33, At: now.Add(-15 * time.Hour)}
+
+	// 充了一部分、仍低于推送时的余额：也认作充值；仍然告急时写在充值通知里，不另推。
+	s := decideChannelBalance(cfg, urgent, yimoWallet(187.65, 300, 300, f64(87.65)), false, now)
+	require.Equal(t, channelBalanceRecharge, s.Action)
+	require.Equal(t, balanceAlertState{Level: channelBalanceUrgent, Value: 187.65, At: now}, s.State)
+
+	// 同一账号读数的小抖动不是充值。
+	s = decideChannelBalance(cfg, urgent, yimoWallet(187.0, 0, 0, f64(185.64)), false, now)
+	require.Equal(t, channelBalanceNoop, s.Action)
+	require.Equal(t, urgent, s.State)
+
+	// 采样断了没有上一次读数：和推送时的余额比。
+	s = decideChannelBalance(cfg, urgent, yimoWallet(500, 0, 0, nil), false, now)
+	require.Equal(t, channelBalanceRecharge, s.Action)
+
+	// 没告警过的钱包充值：不通知；充完仍很快会用完则按级别推送。
+	s = decideChannelBalance(cfg, balanceAlertState{}, yimoWallet(150, 300, 300, f64(10)), false, now)
+	require.Equal(t, channelBalancePush, s.Action)
+	require.Equal(t, channelBalanceUrgent, s.State.Level)
+
+	// 近 24 小时没流量：只记状态。
+	idle := yimoWallet(15, 0, 0, f64(15))
+	idle.Active = false
+	s = decideChannelBalance(cfg, balanceAlertState{}, idle, false, now)
+	require.Equal(t, channelBalanceNoop, s.Action)
+	require.Equal(t, channelBalanceEmpty, s.State.Level)
+
+	// 已推过「上游开始拒绝」：不再推更低级别，也不再提醒；见底照常推。
+	s = decideChannelBalance(cfg, balanceAlertState{Level: channelBalanceRunway, Value: 194.74}, yimoWallet(81.36, 330, 330, f64(90)), true, now)
+	require.Equal(t, channelBalanceNoop, s.Action)
+	require.Equal(t, channelBalanceUrgent, s.State.Level)
+	s = decideChannelBalance(cfg, urgent, yimoWallet(80, 300, 300, f64(90)), true, now)
+	require.Equal(t, channelBalanceNoop, s.Action, "no reminder while the upstream is rejecting")
+	s = decideChannelBalance(cfg, urgent, yimoWallet(12, 300, 300, f64(20)), true, now)
+	require.Equal(t, channelBalancePush, s.Action)
+
+	// 升级前的「低于提醒线」旧状态读成见底：nat6 ¥91 不会再推一次。
+	nat6 := groupChannelWallets([]channelBalanceReading{{AccountID: 149, Remaining: 91.29, Unit: "CNY", Scope: "account", Active: true, Prev: f64(91.29)}})[0]
+	s = decideChannelBalance(cfg, balanceAlertState{Level: channelBalanceLow, Value: 91.29}, nat6, false, now)
+	require.Equal(t, channelBalanceNoop, s.Action)
+	require.Equal(t, channelBalanceEmpty, s.State.Level)
+
+	// 偏低不重复提醒。
+	runway := balanceAlertState{Level: channelBalanceRunway, Value: 726, At: now.Add(-2 * time.Hour)}
+	s = decideChannelBalance(cfg, runway, yimoWallet(441.87, 110, 110, f64(460)), false, now)
+	require.Equal(t, channelBalanceNoop, s.Action)
 }
 
 func TestGroupSecurityAlertsSeparatesOpsAlerts(t *testing.T) {
@@ -328,30 +455,37 @@ func TestRunBalanceSweepAlertsOncePerWallet(t *testing.T) {
 			AddRow(int64(50), now, 714.9, "USD").
 			AddRow(int64(149), now.Add(-10*time.Minute), 91.29, "CNY").
 			AddRow(int64(149), now, 6252750.0, "QUOTA"))
+	mock.ExpectQuery(regexp.QuoteMeta("SUM(GREATEST(prev - remaining, 0))")).
+		WillReturnRows(sqlmock.NewRows([]string{"account_id", "unit", "drained", "first"}).
+			AddRow(int64(50), "USD", 400.0, now.Add(-2*time.Hour)).
+			AddRow(int64(149), "CNY", 0.0, now.Add(-10*time.Minute)))
 	mock.ExpectQuery(regexp.QuoteMeta("FROM unnest($1::bigint[]) AS a")).
 		WillReturnRows(sqlmock.NewRows([]string{"a"}).AddRow(int64(50)).AddRow(int64(77)).AddRow(int64(98)).AddRow(int64(101)).AddRow(int64(149)))
+	expectEvalLock(mock)
 	mock.ExpectQuery(regexp.QuoteMeta("FROM security_alert_state WHERE subject = ANY")).
-		WillReturnRows(sqlmock.NewRows([]string{"subject", "level", "value"}).
-			AddRow("account:101", channelBalanceLow, 8.70).
-			AddRow("account:149", channelBalanceLow, 91.29))
+		WillReturnRows(sqlmock.NewRows(channelStateCols).
+			AddRow("account:101", channelBalanceLow, 8.70, now.Add(-24*time.Hour)).
+			AddRow("account:149", channelBalanceLow, 91.29, now.Add(-48*time.Hour)))
 	expectAlert := func(title, severity string, body ...string) {
 		mock.ExpectExec(regexp.QuoteMeta("INSERT INTO security_alert_events")).
 			WithArgs(sqlmock.AnyArg(), securityAlertKindChannelBal, severity, title, bodyContains(body)).
 			WillReturnResult(sqlmock.NewResult(1, 1))
 	}
-	// #98/#101 同一钱包，#101 已推过「余额不足」→ 不再推；#88 近 24 小时没有流量 → 只记状态；
+	// #98/#101 同一钱包，#101 推过旧版「余额不足」（读成见底）→ 不再推；#88 近 24 小时没有流量 → 只记状态；
 	// #149 本轮读到的是原始额度（币种变了）→ 不判定、不当作充值。
-	expectAlert("渠道余额已用完", "critical", "#77 Yimo CCMAX", "余额：-$4.60")
-	expectAlert("渠道余额预计很快用完", "warning", "#50 Sixoner GPT 企业", "按近 1 小时扣费速度每小时约 $200.00，预计 3.6 小时后用完")
+	expectAlert("渠道余额已用完", "critical", "#77 Yimo CCMAX", "余额：-$4.60", "之后不再重复提醒")
+	expectAlert("渠道余额预计很快用完", "warning", "#50 Sixoner GPT 企业", "按近 1 小时扣费速度每小时约 $200.00，预计 3.6 小时后用完",
+		"近 2 小时共扣 $400.00，按这个用量约够 3.6 小时")
 	for _, st := range []struct {
 		subject string
 		level   int
 		value   float64
-	}{{"account:77", channelBalanceEmpty, -4.6}, {"account:88", channelBalanceLow, 5}, {"account:98", channelBalanceLow, 8.70}, {"account:50", channelBalanceRunway, 714.9}} {
+	}{{"account:77", channelBalanceEmpty, -4.6}, {"account:88", channelBalanceEmpty, 5}, {"account:98", channelBalanceEmpty, 8.70}, {"account:50", channelBalanceRunway, 714.9}} {
 		mock.ExpectExec(regexp.QuoteMeta("INSERT INTO security_alert_state")).
 			WithArgs(st.subject, st.level, st.value).
 			WillReturnResult(sqlmock.NewResult(0, 1))
 	}
+	mock.ExpectCommit()
 
 	svc.runBalanceSweep(DefaultSecurityAlertConfig(), nil)
 	require.NoError(t, mock.ExpectationsWereMet())
@@ -377,12 +511,13 @@ func TestEvaluateChannelBalancesRechargeAndRejectSuppression(t *testing.T) {
 	kedaya[1].Prev = &prev
 	// XApi 正在被上游拒绝，余额掉到 1 小时内：不再推「即将用完」，但记状态。
 	xapi := reading(99, "xapi.example", 81.36, now, 330)
+	expectEvalLock(mock)
 	mock.ExpectQuery(regexp.QuoteMeta("FROM security_alert_state WHERE subject = ANY")).
-		WillReturnRows(sqlmock.NewRows([]string{"subject", "level", "value"}).
-			AddRow("account:85", channelBalanceUrgent, 4.66).
-			AddRow("account:161", channelBalanceUrgent, 3.99).
-			AddRow("account:99", channelBalanceRunway, 194.74).
-			AddRow("reject:99", 1, float64(now.Unix())))
+		WillReturnRows(sqlmock.NewRows(channelStateCols).
+			AddRow("account:85", channelBalanceUrgent, 4.66, now.Add(-time.Hour)).
+			AddRow("account:161", channelBalanceUrgent, 3.99, now.Add(-time.Hour)).
+			AddRow("account:99", channelBalanceRunway, 194.74, now.Add(-time.Hour)).
+			AddRow("reject:99", 1, float64(now.Unix()), now.Add(-time.Minute)))
 	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO security_alert_events")).
 		WithArgs(sqlmock.AnyArg(), securityAlertKindChannelRecharge, "info", "渠道已充值", bodyContains{
 			"上游：51.222.42.218:17777、kedaya.ai", "账号：#85 acct85、#161 acct161", "余额：$3.99 → $3343.11 ~ $3343.52", "已恢复监控。",
@@ -397,8 +532,87 @@ func TestEvaluateChannelBalancesRechargeAndRejectSuppression(t *testing.T) {
 			WithArgs(st.subject, st.level, st.value).
 			WillReturnResult(sqlmock.NewResult(0, 1))
 	}
+	mock.ExpectCommit()
 	svc.evaluateChannelBalances(context.Background(), cfg, append(kedaya, xapi), false)
 	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+var channelStateCols = []string{"subject", "level", "value", "updated_at"}
+
+func expectEvalLock(mock sqlmock.Sqlmock) {
+	mock.ExpectBegin()
+	mock.ExpectExec(regexp.QuoteMeta("SET LOCAL lock_timeout")).WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectExec(regexp.QuoteMeta("SELECT pg_advisory_xact_lock($1)")).WithArgs(channelBalanceEvalLock).
+		WillReturnResult(sqlmock.NewResult(0, 0))
+}
+
+// TestEvaluateChannelBalancesRemindsUrgentWallet 告急后没充值、又用掉两成且仍在快速扣费：再提醒一次，
+// 消息带上次提醒的时间（北京时间）和余额。
+func TestEvaluateChannelBalancesRemindsUrgentWallet(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	defer func() { _ = db.Close() }()
+	pushedAt := time.Date(2026, 11, 8, 5, 21, 0, 0, time.UTC)
+	now := pushedAt.Add(32 * time.Minute)
+	svc := NewSecurityAlertService(db, nil, nil)
+	svc.now = func() time.Time { return now }
+
+	members := []channelBalanceReading{
+		reading(54, "api.ymocode.com", 127.89, now, 320),
+		reading(76, "api.ymocode.com", 127.89, now, 320),
+		reading(150, "api.ymocode.com", 127.89, now, 320),
+	}
+	for i := range members {
+		members[i].Pace30, members[i].Drained, members[i].DrainedSpan = 160, 855, 24*time.Hour
+		members[i].Prev = f64(140)
+	}
+	expectEvalLock(mock)
+	mock.ExpectQuery(regexp.QuoteMeta("FROM security_alert_state WHERE subject = ANY")).
+		WillReturnRows(sqlmock.NewRows(channelStateCols).
+			AddRow("account:54", channelBalanceUrgent, 213.33, pushedAt).
+			AddRow("account:76", channelBalanceUrgent, 213.33, pushedAt).
+			AddRow("account:150", channelBalanceUrgent, 213.33, pushedAt))
+	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO security_alert_events")).
+		WithArgs(sqlmock.AnyArg(), securityAlertKindChannelBal, "critical", "渠道余额即将用完（再次提醒）", bodyContains{
+			"账号：#54 acct54、#76 acct76、#150 acct150",
+			"余额：$127.89（13:21 提醒时 $213.33，还没充值）",
+			"按近 30 分钟扣费速度每小时约 $160.00",
+		}).
+		WillReturnResult(sqlmock.NewResult(1, 1))
+	for _, subject := range []string{"account:54", "account:76", "account:150"} {
+		mock.ExpectExec(regexp.QuoteMeta("INSERT INTO security_alert_state")).
+			WithArgs(subject, channelBalanceUrgent, 127.89).
+			WillReturnResult(sqlmock.NewResult(0, 1))
+	}
+	mock.ExpectCommit()
+	svc.evaluateChannelBalances(context.Background(), DefaultSecurityAlertConfig(), members, true)
+	require.NoError(t, mock.ExpectationsWereMet())
+
+	// 状态写不进去时整轮回滚（告警也不落库），下一轮重来，不会出现推了却没记状态。
+	expectEvalLock(mock)
+	mock.ExpectQuery(regexp.QuoteMeta("FROM security_alert_state WHERE subject = ANY")).
+		WillReturnRows(sqlmock.NewRows(channelStateCols).AddRow("account:54", channelBalanceUrgent, 213.33, pushedAt))
+	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO security_alert_events")).WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO security_alert_state")).WillReturnError(errors.New("connection reset"))
+	mock.ExpectRollback()
+	svc.evaluateChannelBalances(context.Background(), DefaultSecurityAlertConfig(), members[:1], true)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestExpandHotBalanceTargets(t *testing.T) {
+	svc := NewSecurityAlertService(nil, nil, nil)
+	// 上次全量刷新：Kedaya 两个域名是同一个钱包。
+	svc.rememberWallets([]channelBalanceWallet{{Members: []channelBalanceReading{{AccountID: 85}, {AccountID: 161}}}}, true)
+	targets := []channelBalanceTarget{
+		{ID: 54, Site: "api.ymocode.com"}, {ID: 76, Site: "api.ymocode.com"}, {ID: 150, Site: "api.ymocode.com"},
+		{ID: 85, Site: "kedaya.ai"}, {ID: 161, Site: "51.222.42.218:17777"},
+		{ID: 99, Site: "xapi-key.net"},
+	}
+	var ids []int64
+	for _, tg := range svc.expandHotBalanceTargets(targets, []int64{150, 161}) {
+		ids = append(ids, tg.ID)
+	}
+	require.Equal(t, []int64{54, 76, 150, 85, 161}, ids, "same site + same wallet, nothing else")
 }
 
 func TestCheckUserBalanceWatches(t *testing.T) {
