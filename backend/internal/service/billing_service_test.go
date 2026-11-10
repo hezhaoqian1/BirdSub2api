@@ -1919,6 +1919,60 @@ func TestGetModelPricing_Fable51FallbackPricing(t *testing.T) {
 	require.Empty(t, pricing.ReasoningEffortMultipliers)
 }
 
+func TestGetModelPricing_Fable52FallbackPricing(t *testing.T) {
+	svc := newTestBillingService()
+
+	for _, model := range []string{"claude-fable-5-2", "Claude-Fable-5.2", "anthropic.claude-fable-5-2", "openrouter/anthropic/claude-fable-5.2"} {
+		pricing, err := svc.GetModelPricing(model)
+		require.NoError(t, err, model)
+		require.InDelta(t, 8e-6, pricing.InputPricePerToken, 1e-12, model)
+		require.InDelta(t, 40e-6, pricing.OutputPricePerToken, 1e-12, model)
+		require.InDelta(t, 10e-6, pricing.CacheCreation5mPrice, 1e-12, model)
+		require.InDelta(t, 16e-6, pricing.CacheCreation1hPrice, 1e-12, model)
+		require.InDelta(t, 0.2e-6, pricing.CacheReadPricePerToken, 1e-12, model)
+		require.True(t, pricing.SupportsCacheBreakdown, model)
+		require.Empty(t, pricing.ReasoningEffortMultipliers, model)
+	}
+}
+
+// 带日期后缀的 Fable 5 ID 以 "fable-5-2" 开头，不能被当成 Fable 5.2 少收费。
+func TestGetModelPricing_DatedFable5IsNotFable52(t *testing.T) {
+	svc := newTestBillingService()
+
+	pricing, err := svc.GetModelPricing("claude-fable-5-20260601")
+	require.NoError(t, err)
+	require.InDelta(t, 10e-6, pricing.InputPricePerToken, 1e-12)
+	require.InDelta(t, 1e-6, pricing.CacheReadPricePerToken, 1e-12)
+}
+
+// Fable 5.2 fast mode 官方价 $16/$80，缓存写入/读取同样翻倍（$20/$32、$0.40）。
+func TestCalculateCostWithServiceTier_Fable52FastDoublesEveryCategory(t *testing.T) {
+	svc := newTestBillingService()
+	tokens := UsageTokens{
+		InputTokens:           1_000_000,
+		OutputTokens:          1_000_000,
+		CacheCreationTokens:   2_000_000,
+		CacheCreation5mTokens: 1_000_000,
+		CacheCreation1hTokens: 1_000_000,
+		CacheReadTokens:       1_000_000,
+	}
+
+	standard, err := svc.CalculateCostWithServiceTier("claude-fable-5-2", tokens, 1, "")
+	require.NoError(t, err)
+	require.InDelta(t, 8, standard.InputCost, 1e-9)
+	require.InDelta(t, 40, standard.OutputCost, 1e-9)
+	require.InDelta(t, 26, standard.CacheCreationCost, 1e-9)
+	require.InDelta(t, 0.2, standard.CacheReadCost, 1e-9)
+
+	fast, err := svc.CalculateCostWithServiceTier("claude-fable-5-2", tokens, 1, "fast")
+	require.NoError(t, err)
+	require.InDelta(t, 16, fast.InputCost, 1e-9)
+	require.InDelta(t, 80, fast.OutputCost, 1e-9)
+	require.InDelta(t, 52, fast.CacheCreationCost, 1e-9)
+	require.InDelta(t, 0.4, fast.CacheReadCost, 1e-9)
+	require.InDelta(t, 2*standard.TotalCost, fast.TotalCost, 1e-9)
+}
+
 func TestGetModelPricingWithChannel_CacheReadPriceAffectsPriority(t *testing.T) {
 	svc := newTestBillingService()
 

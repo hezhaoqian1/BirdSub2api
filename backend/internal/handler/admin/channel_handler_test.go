@@ -613,6 +613,33 @@ func TestGetModelDefaultPricing_ReturnsFable51CacheTTLs(t *testing.T) {
 	require.Empty(t, body.Data.ReasoningEffortMultipliers)
 }
 
+func TestGetModelDefaultPricing_ReturnsFable52Prices(t *testing.T) {
+	router := setupModelDefaultPricingRouter()
+	req := httptest.NewRequest(http.MethodGet, "/channels/model-pricing?model=claude-fable-5-2", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code)
+	var body struct {
+		Data struct {
+			Found             bool     `json:"found"`
+			InputPrice        float64  `json:"input_price"`
+			OutputPrice       float64  `json:"output_price"`
+			CacheWritePrice   float64  `json:"cache_write_price"`
+			CacheWrite1hPrice *float64 `json:"cache_write_1h_price"`
+			CacheReadPrice    float64  `json:"cache_read_price"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
+	require.True(t, body.Data.Found)
+	require.InDelta(t, 8e-6, body.Data.InputPrice, 1e-12)
+	require.InDelta(t, 40e-6, body.Data.OutputPrice, 1e-12)
+	require.InDelta(t, 10e-6, body.Data.CacheWritePrice, 1e-12)
+	require.NotNil(t, body.Data.CacheWrite1hPrice)
+	require.InDelta(t, 16e-6, *body.Data.CacheWrite1hPrice, 1e-12)
+	require.InDelta(t, 0.2e-6, body.Data.CacheReadPrice, 1e-12)
+}
+
 func TestGetModelDefaultPricing_OmitsUnsupportedCache1hPrice(t *testing.T) {
 	router := setupModelDefaultPricingRouter()
 	req := httptest.NewRequest(http.MethodGet, "/channels/model-pricing?model=claude-sonnet-4", nil)
