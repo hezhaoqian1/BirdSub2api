@@ -92,7 +92,7 @@ describe('useModelWhitelist', () => {
 
   it('Claude 模型列表包含新发布的 Claude 模型', () => {
     expect(getModelsByPlatform('claude')).toContain('claude-fable-5-2')
-    expect(getModelsByPlatform('antigravity')).toContain('claude-fable-5-2')
+    expect(getModelsByPlatform('antigravity')).not.toContain('claude-fable-5-2')
     expect(getModelsByPlatform('claude')).toContain('claude-fable-5-1')
     expect(getModelsByPlatform('antigravity')).toContain('claude-fable-5-1')
     expect(getModelsByPlatform('claude')).toContain('claude-fable-5')
@@ -103,6 +103,25 @@ describe('useModelWhitelist', () => {
     expect(getModelsByPlatform('antigravity')).not.toContain('claude-sonnet-5-5')
     expect(getModelsByPlatform('claude')).toContain('claude-opus-4-8')
     expect(getModelsByPlatform('antigravity')).toContain('claude-opus-4-8')
+  })
+
+  it.each([
+    ['claude-fable-5-2', 'Fable 5.2'],
+    ['claude-mythos-5-2', 'Mythos 5.2']
+  ])('preserves %s in Anthropic whitelists and presets without inventing provider mappings', (model, label) => {
+    for (const platform of ['claude', 'anthropic']) {
+      const models = getModelsByPlatform(platform)
+      expect(models).toContain(model)
+      expect(buildModelMappingObject('whitelist', models, [])?.[model]).toBe(model)
+      expect(getPresetMappingsByPlatform(platform)).toEqual(expect.arrayContaining([
+        expect.objectContaining({ label, from: model, to: model })
+      ]))
+    }
+    expect(getPresetMappingsByPlatform('bedrock')).toEqual(expect.arrayContaining([
+      expect.objectContaining({ label, from: model, to: `anthropic.${model}` })
+    ]))
+    expect(getModelsByPlatform('antigravity')).not.toContain(model)
+    expect(getPresetMappingsByPlatform('antigravity').some(mapping => mapping.from === model)).toBe(false)
   })
 
   it('Claude Sonnet 5.5 预设使用各平台的官方模型 ID', () => {
