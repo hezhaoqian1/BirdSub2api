@@ -14,7 +14,8 @@ func TestQwenMiMoHunyuanCreditPricingOverridesRemoteUSD(t *testing.T) {
 	ps := newStubPricingServiceFromJSON(t, `{
 		"qwen3.8-max":{"input_cost_per_token":0.00000165,"output_cost_per_token":0.00000495},
 		"xiaomi/mimo-v2.6-pro":{"input_cost_per_token":0.000000435,"output_cost_per_token":0.00000087},
-		"tencent/hy4-preview":{"input_cost_per_token":0.000000834,"output_cost_per_token":0.000002501,"cache_read_input_token_cost":0.000000042}
+		"tencent/hy4-preview":{"input_cost_per_token":0.000000834,"output_cost_per_token":0.000002501,"cache_read_input_token_cost":0.000000042},
+		"tencent/hy4":{"input_cost_per_token":0.000000834,"output_cost_per_token":0.000002501,"cache_read_input_token_cost":0.000000042}
 	}`)
 	for _, catalog := range []*PricingService{nil, ps} {
 		bs := NewBillingService(&config.Config{}, catalog)
@@ -37,6 +38,11 @@ func TestQwenMiMoHunyuanCreditPricingOverridesRemoteUSD(t *testing.T) {
 			{"hy4-preview", 6, 18, 0.3},
 			{"Hy4-preview", 6, 18, 0.3},
 			{"tencent/hy4-preview", 6, 18, 0.3},
+			{"hy4", 6, 18, 0.3},
+			{"HY4", 6, 18, 0.3},
+			{"tencent/hy4", 6, 18, 0.3},
+			{"hy4std", 6, 18, 0.3},
+			{" Hy4std ", 6, 18, 0.3},
 		} {
 			t.Run(tc.model, func(t *testing.T) {
 				cost, err := bs.CalculateCost(tc.model, UsageTokens{
@@ -61,7 +67,7 @@ func TestQwenMiMoHunyuanCreditPricingOverridesRemoteUSD(t *testing.T) {
 
 func TestQwenUncoveredFamiliesStayUnpriced(t *testing.T) {
 	bs := newTestBillingService()
-	for _, model := range []string{"qwen3.5-plus", "qwen-plus", "qwen-flash", "qwen3.8-omni-flash", "mimo-v2.5-pro", "hy3"} {
+	for _, model := range []string{"qwen3.5-plus", "qwen-plus", "qwen-flash", "qwen3.8-omni-flash", "mimo-v2.5-pro", "hy3", "hy4-flash", "tencent/hy4-flash", "hy4std-flash", "hy4-turbo", "why4"} {
 		require.Empty(t, qwenPricingModel(model)+mimoPricingModel(model)+hunyuanPricingModel(model), model)
 		_, err := bs.CalculateCost(model, UsageTokens{InputTokens: 1_000}, 1)
 		require.Error(t, err, model)
@@ -118,6 +124,8 @@ func TestDomesticModelsOnOpenAIGroupUseSiteCards(t *testing.T) {
 		{"glm-5.3", 8, 28},
 		{"glm-5.3-flash", 0.8, 2.8},
 		{"hy4-preview", 6, 18},
+		{"hy4std", 6, 18},
+		{"hy4", 6, 18},
 		{"mimo-v2.6-flash", 1, 2},
 		{"mimo-v2.6-pro", 3, 6},
 		{"minimax-m3", 2.1, 8.4},
