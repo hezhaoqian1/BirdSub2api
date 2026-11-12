@@ -825,6 +825,7 @@ func (s *BillingService) initFallbackPricing() {
 		s.fallbackPrices[model] = mimoDefaultPricing(model)
 	}
 	s.fallbackPrices["hy4-preview"] = hunyuanDefaultPricing("hy4-preview")
+	s.fallbackPrices["hy4"] = hunyuanDefaultPricing("hy4")
 
 	// ---- 火山方舟 豆包 Embedding（多模态向量化）----
 	// doubao-embedding-vision 图文向量化：上游 usage 回传 prompt_tokens_details.{text_tokens,image_tokens}，
