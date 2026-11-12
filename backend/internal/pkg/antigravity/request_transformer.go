@@ -220,7 +220,6 @@ type modelInfo struct {
 // 只有在此映射表中的模型才会注入身份提示词
 // 注意：模型映射逻辑在网关层完成；这里仅用于按模型前缀判断是否注入身份提示词。
 var modelInfoMap = map[string]modelInfo{
-	"claude-fable-5-2":  {DisplayName: "Claude Fable 5.2", CanonicalID: "claude-fable-5-2"},
 	"claude-fable-5-1":  {DisplayName: "Claude Fable 5.1", CanonicalID: "claude-fable-5-1"},
 	"claude-fable-5":    {DisplayName: "Claude Fable 5", CanonicalID: "claude-fable-5"},
 	"claude-opus-4-8":   {DisplayName: "Claude Opus 4.8", CanonicalID: "claude-opus-4-8"},
@@ -505,6 +504,7 @@ func buildParts(content json.RawMessage, toolIDToName map[string]string, allowDu
 		return nil, false, fmt.Errorf("parse content blocks: %w", err)
 	}
 
+	var toolMediaParts []GeminiPart
 	for _, block := range blocks {
 		switch block.Type {
 		case "text":
@@ -592,13 +592,14 @@ func buildParts(content json.RawMessage, toolIDToName map[string]string, allowDu
 				for _, part := range media {
 					response.Parts = append(response.Parts, GeminiFunctionResponsePart{InlineData: part.InlineData})
 				}
+			} else {
+				toolMediaParts = append(toolMediaParts, media...)
 			}
 			parts = append(parts, GeminiPart{FunctionResponse: response})
-			if !multimodalToolResults {
-				parts = append(parts, media...)
-			}
 		}
 	}
+
+	parts = append(parts, toolMediaParts...)
 
 	return parts, strippedThinking, nil
 }
