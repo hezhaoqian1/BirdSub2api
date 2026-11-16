@@ -331,6 +331,11 @@ func (s *RateLimitService) CheckErrorPolicy(ctx context.Context, account *Accoun
 // HandleUpstreamError 处理上游错误响应，标记账号状态
 // 返回是否应该停止该账号的调度
 func (s *RateLimitService) HandleUpstreamError(ctx context.Context, account *Account, statusCode int, headers http.Header, responseBody []byte, requestedModel ...string) (shouldDisable bool) {
+	// 客户端原因的终止性错误（如 Claude 拒答后会话被锁）与账号健康无关，不得暂停/限流/标记账号。
+	if account != nil && IsClientCausedTerminalUpstreamError(statusCode, responseBody) {
+		slog.Info("client_caused_upstream_error_skipped", "account_id", account.ID, "status_code", statusCode)
+		return false
+	}
 	ctx = withTempUnschedulableModel(ctx, requestedModel)
 	// Team 联动熔断必须先于池模式/自定义错误码/临时不可调度的各类早退；
 	// 同请求内与 fastpath 调用点的重复触发由方法内去重吸收。

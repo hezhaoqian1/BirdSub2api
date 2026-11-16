@@ -156,6 +156,14 @@ type FailoverState struct {
 	profitVetoedAccountIDs map[int64]struct{}
 	// profitVetoCount 本次请求累计的利润否决次数，用于 maxProfitVetoAttempts 上限。
 	profitVetoCount int
+
+	// clientCausedErr 本次请求中首个客户端原因的终止性错误（如 Claude 拒答后会话被锁）。
+	// 所有账号都失败时优先回报它：其他渠道随后的 502/429 只是临时故障，
+	// 客户端真正需要的处理方式是「新开对话」。
+	clientCausedErr *service.UpstreamFailoverError
+	// clientCausedAccountIDs 返回过客户端原因终止性错误的账号。与利润否决一样，
+	// 503 退避分支清空 FailedAccountIDs 后必须放回，否则会反复重选已锁定该会话的账号。
+	clientCausedAccountIDs map[int64]struct{}
 }
 
 // NewFailoverState 创建 failover 状态
@@ -166,7 +174,28 @@ func NewFailoverState(maxSwitches int, hasBoundSession bool) *FailoverState {
 		SameAccountRetryCount:  make(map[int64]int),
 		hasBoundSession:        hasBoundSession,
 		profitVetoedAccountIDs: make(map[int64]struct{}),
+		clientCausedAccountIDs: make(map[int64]struct{}),
 	}
+}
+
+// recordClientCaused 记录客户端原因的终止性错误及其账号。
+func (s *FailoverState) recordClientCaused(accountID int64, failoverErr *service.UpstreamFailoverError) {
+	if s.clientCausedErr == nil {
+		s.clientCausedErr = failoverErr
+	}
+	if s.clientCausedAccountIDs == nil {
+		s.clientCausedAccountIDs = make(map[int64]struct{})
+	}
+	s.clientCausedAccountIDs[accountID] = struct{}{}
+}
+
+// exhaustedResult 结束 failover：若本次请求出现过客户端原因的终止性错误，
+// 让 LastFailoverErr 指向它，使各 exhausted 处理器回中英双语的处理提示。
+func (s *FailoverState) exhaustedResult() FailoverAction {
+	if s.clientCausedErr != nil {
+		s.LastFailoverErr = s.clientCausedErr
+	}
+	return FailoverExhausted
 }
 
 // RecordProfitVeto 记录一次分组利润门终检否决：把账号加入排除列表（同时登记到
@@ -191,14 +220,16 @@ func (s *FailoverState) RecordProfitVeto(accountID int64) FailoverAction {
 // ProfitVetoCount 返回本次请求累计的利润否决次数（供日志使用）。
 func (s *FailoverState) ProfitVetoCount() int { return s.profitVetoCount }
 
-// allExclusionsAreProfitVetoed 判断排除列表是否已全部由利润门否决贡献。
-// 此时清空 FailedAccountIDs 会被原样恢复，退避重试不会带来任何新候选。
-func (s *FailoverState) allExclusionsAreProfitVetoed() bool {
-	if len(s.profitVetoedAccountIDs) == 0 || len(s.FailedAccountIDs) == 0 {
+// allExclusionsArePinned 判断排除列表是否全部是「清空后也会被放回」的账号
+// （利润否决或已锁定该会话）。此时 503 退避重试拿不到任何新候选。
+func (s *FailoverState) allExclusionsArePinned() bool {
+	if len(s.FailedAccountIDs) == 0 || (len(s.profitVetoedAccountIDs) == 0 && len(s.clientCausedAccountIDs) == 0) {
 		return false
 	}
 	for id := range s.FailedAccountIDs {
-		if _, ok := s.profitVetoedAccountIDs[id]; !ok {
+		_, vetoed := s.profitVetoedAccountIDs[id]
+		_, blocked := s.clientCausedAccountIDs[id]
+		if !vetoed && !blocked {
 			return false
 		}
 	}
@@ -222,7 +253,29 @@ func (s *FailoverState) HandleFailoverError(
 	}
 	s.LastFailoverErr = failoverErr
 	if failoverErr == nil || !failoverErr.ShouldRetryNextAccount() {
-		return FailoverExhausted
+		return s.exhaustedResult()
+	}
+	// 客户端原因的终止性错误（如 Claude 拒答后会话被锁）：该账号上重试必然失败，
+	// 不做同账号重试、不临时封禁；但仍尝试其他账号（其他渠道可能没有锁定该会话）。
+	// 全部失败时由 exhaustedResult 优先回报这个错误（中英双语「请新开对话」），
+	// 而不是最后一个渠道的 502/429 等临时错误。
+	if failoverErr.IsClientCausedTerminal() {
+		s.recordClientCaused(accountID, failoverErr)
+		s.FailedAccountIDs[accountID] = struct{}{}
+		if needForceCacheBilling(s.hasBoundSession, failoverErr, false) {
+			s.ForceCacheBilling = true
+		}
+		if s.SwitchCount >= s.MaxSwitches {
+			return s.exhaustedResult()
+		}
+		s.SwitchCount++
+		logger.FromContext(ctx).Warn("gateway.failover_switch_account_client_caused",
+			zap.Int64("account_id", accountID),
+			zap.Int("upstream_status", failoverErr.StatusCode),
+			zap.Int("switch_count", s.SwitchCount),
+			zap.Int("max_switches", s.MaxSwitches),
+		)
+		return FailoverContinue
 	}
 
 	// 同账号重试不算切换账号，粘性会话仅在实际切换时强制缓存计费。
@@ -260,7 +313,7 @@ func (s *FailoverState) HandleFailoverError(
 
 	// 检查是否耗尽
 	if s.SwitchCount >= s.MaxSwitches {
-		return FailoverExhausted
+		return s.exhaustedResult()
 	}
 
 	// 递增切换计数
@@ -304,12 +357,12 @@ func (s *FailoverState) HandleSelectionExhausted(ctx context.Context) FailoverAc
 		// 排除列表全由利润门否决贡献时，清空后会被原样恢复：退避重试拿不到
 		// 任何新候选，而利润否决不推进 SwitchCount，退避条件将永远成立。
 		// 这里直接判定耗尽，避免每 2s 空转一轮的活锁。
-		if s.allExclusionsAreProfitVetoed() {
+		if s.allExclusionsArePinned() {
 			logger.FromContext(ctx).Warn("gateway.failover_selection_exhausted_by_profit_veto",
 				zap.Int("profit_veto_count", s.profitVetoCount),
 				zap.Int("excluded_accounts", len(s.FailedAccountIDs)),
 			)
-			return FailoverExhausted
+			return s.exhaustedResult()
 		}
 
 		logger.FromContext(ctx).Warn("gateway.failover_single_account_backoff",
@@ -330,9 +383,13 @@ func (s *FailoverState) HandleSelectionExhausted(ctx context.Context) FailoverAc
 		for id := range s.profitVetoedAccountIDs {
 			s.FailedAccountIDs[id] = struct{}{}
 		}
+		// 已锁定该会话的账号同理：同一请求内重选只会再次被拒。
+		for id := range s.clientCausedAccountIDs {
+			s.FailedAccountIDs[id] = struct{}{}
+		}
 		return FailoverContinue
 	}
-	return FailoverExhausted
+	return s.exhaustedResult()
 }
 
 // needForceCacheBilling 判断 failover 时是否需要强制缓存计费。

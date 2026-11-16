@@ -213,6 +213,10 @@ func (s *GatewayService) executeBedrockUpstream(
 		}
 
 		if resp.StatusCode >= 400 && resp.StatusCode != 400 && s.shouldRetryUpstreamError(account, resp.StatusCode) {
+			// 客户端原因的终止性错误（如 Claude 拒答后会话被锁）：同账号重试必然失败，直接交给后续 failover 判定。
+			if s.peekClientCausedTerminal(resp) {
+				break
+			}
 			if attempt < maxRetryAttempts {
 				elapsed := time.Since(retryStart)
 				if elapsed >= maxRetryElapsed {

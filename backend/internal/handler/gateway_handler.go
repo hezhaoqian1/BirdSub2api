@@ -1958,6 +1958,12 @@ func (h *GatewayHandler) handleFailoverExhausted(c *gin.Context, failoverErr *se
 	upstreamMsg := service.ExtractUpstreamErrorMessage(responseBody)
 	service.SetOpsUpstreamError(c, statusCode, upstreamMsg, "")
 
+	// 客户端原因的上游拒绝：回中英双语、不含上游信息的提示（4xx，客户端不会自动重试）。
+	if cc, ok := service.ClassifyClientCausedUpstreamError(statusCode, responseBody); ok {
+		h.handleStreamingAwareError(c, cc.StatusCode, cc.ErrType, cc.Message, streamStarted)
+		return
+	}
+
 	// 使用默认的错误映射
 	status, errType, errMsg := h.mapUpstreamError(statusCode)
 	h.handleStreamingAwareError(c, status, errType, errMsg, streamStarted)
@@ -1976,6 +1982,8 @@ func (h *GatewayHandler) mapUpstreamError(statusCode int) (int, string, string) 
 		return http.StatusBadGateway, "upstream_error", "Upstream authentication failed, please contact administrator"
 	case 403:
 		return http.StatusBadGateway, "upstream_error", "Upstream access forbidden, please contact administrator"
+	case 413:
+		return http.StatusRequestEntityTooLarge, "request_too_large", service.RequestBodyTooLargeClientMessage
 	case 429:
 		return http.StatusTooManyRequests, "rate_limit_error", "Upstream rate limit exceeded, please retry later"
 	case 529:

@@ -471,6 +471,21 @@ func (s *GatewayService) handleErrorResponse(ctx context.Context, resp *http.Res
 		return nil, fmt.Errorf("upstream error: %d (passthrough rule matched) message=%s", resp.StatusCode, summary)
 	}
 
+	// 客户端原因的上游拒绝（会话被锁、请求体过大等）：中英双语、不含上游信息。
+	if cc, ok := ClassifyClientCausedUpstreamError(resp.StatusCode, body); ok {
+		c.JSON(cc.StatusCode, gin.H{
+			"type": "error",
+			"error": gin.H{
+				"type":    cc.ErrType,
+				"message": cc.Message,
+			},
+		})
+		if upstreamMsg == "" {
+			return nil, fmt.Errorf("upstream error: %d (client caused: %s)", resp.StatusCode, cc.Kind)
+		}
+		return nil, fmt.Errorf("upstream error: %d (client caused: %s) message=%s", resp.StatusCode, cc.Kind, upstreamMsg)
+	}
+
 	// 根据状态码返回适当的自定义错误响应（不透传上游详细信息）
 	var errType, errMsg string
 	var statusCode int
