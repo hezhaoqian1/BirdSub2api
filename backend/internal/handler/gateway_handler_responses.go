@@ -395,6 +395,14 @@ func (h *GatewayHandler) responsesErrorResponse(c *gin.Context, status int, code
 	})
 }
 
+// clientCausedFromFailover classifies a failover error caused by the client's own request.
+func clientCausedFromFailover(lastErr *service.UpstreamFailoverError) (service.ClientCausedUpstreamError, bool) {
+	if lastErr == nil {
+		return service.ClientCausedUpstreamError{}, false
+	}
+	return service.ClassifyClientCausedUpstreamError(lastErr.StatusCode, lastErr.ResponseBody)
+}
+
 // handleResponsesFailoverExhausted writes a failover-exhausted error in Responses format.
 func (h *GatewayHandler) handleResponsesFailoverExhausted(c *gin.Context, lastErr *service.UpstreamFailoverError, streamStarted bool) {
 	if lastErr != nil {
@@ -416,6 +424,9 @@ func (h *GatewayHandler) handleResponsesFailoverExhausted(c *gin.Context, lastEr
 	} else if lastErr != nil && service.IsOpenAISilentRefusalErrorBody(lastErr.ResponseBody) {
 		service.SetOpsUpstreamError(c, statusCode, service.OpenAISilentRefusalClientMessage(), "")
 		status, code, message = http.StatusBadGateway, "upstream_error", service.OpenAISilentRefusalClientMessage()
+	} else if cc, ok := clientCausedFromFailover(lastErr); ok {
+		service.SetOpsUpstreamError(c, statusCode, service.ExtractUpstreamErrorMessage(lastErr.ResponseBody), "")
+		status, code, message = cc.StatusCode, cc.ErrType, cc.Message
 	} else if lastErr != nil && statusCode == http.StatusTooManyRequests {
 		status, code, message = http.StatusTooManyRequests, "rate_limit_error", "All available accounts are currently rate-limited. Please retry later."
 	}

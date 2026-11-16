@@ -442,5 +442,10 @@ func (h *GatewayHandler) handleCCFailoverExhausted(c *gin.Context, lastErr *serv
 		h.chatCompletionsErrorResponse(c, http.StatusBadGateway, "upstream_error", service.OpenAISilentRefusalClientMessage())
 		return
 	}
+	if cc, ok := clientCausedFromFailover(lastErr); ok {
+		service.SetOpsUpstreamError(c, statusCode, service.ExtractUpstreamErrorMessage(lastErr.ResponseBody), "")
+		h.chatCompletionsErrorResponse(c, cc.StatusCode, cc.ErrType, cc.Message)
+		return
+	}
 	h.chatCompletionsErrorResponse(c, statusCode, "server_error", "All available accounts exhausted")
 }
