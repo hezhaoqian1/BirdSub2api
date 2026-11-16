@@ -23,7 +23,7 @@ func TestClassifyClientCausedUpstreamError_ClaudeSessionBlocked(t *testing.T) {
 		"official code 403":     {http.StatusForbidden, claudeSessionBlockedBody},
 		"top-level code":        {http.StatusForbidden, `{"code":"claude_safety_session_blocked","message":"blocked"}`},
 		"message only, 400":     {http.StatusBadRequest, `{"error":{"message":"This session is blocked after a Claude refusal or fallback."}}`},
-		"code nested in string": {http.StatusForbidden, `{"error":{"message":"{\"code\":\"claude_safety_session_blocked\"}"}}`},
+		"code nested in string": {http.StatusForbidden, `{"error":{"message":"{\"error\":{\"code\":\"claude_safety_session_blocked\",\"message\":\"blocked\"}}"}}`},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -52,6 +52,15 @@ func TestClassifyClientCausedUpstreamError_IgnoresAccountSideFailures(t *testing
 		require.False(t, ok, "status=%d body=%s", status, body)
 	}
 	_, ok := ClassifyClientCausedUpstreamError(http.StatusForbidden, nil)
+	require.False(t, ok)
+}
+
+// 上游 4xx 回显了客户对话内容（客户把这段报错贴进了对话）时不得误判。
+func TestClassifyClientCausedUpstreamError_IgnoresEchoedConversationText(t *testing.T) {
+	body := `{"type":"error","error":{"type":"invalid_request_error","message":"messages.3.content.0.text: field too long: \"我遇到报错 claude_safety_session_blocked: This session is blocked after a Claude refusal\""}}`
+	_, ok := ClassifyClientCausedUpstreamError(http.StatusBadRequest, []byte(body))
+	require.False(t, ok)
+	_, ok = ClassifyClientCausedUpstreamError(http.StatusForbidden, []byte(`{"error":{"message":"forbidden","detail":"claude_safety_session_blocked"}}`))
 	require.False(t, ok)
 }
 

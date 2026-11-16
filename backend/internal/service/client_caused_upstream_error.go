@@ -97,12 +97,16 @@ func isClaudeSessionBlockedError(statusCode int, body []byte) bool {
 	if statusCode < 400 || statusCode >= 500 || len(body) == 0 {
 		return false
 	}
-	for _, path := range []string{"error.code", "code", "error.type"} {
+	// 只看错误码 / 错误信息字段，不对整个响应体做子串匹配：部分上游的 4xx 会回显请求内容，
+	// 客户对话里如果恰好贴了这段报错，整体子串匹配会把无关错误误判为「会话被锁」。
+	if strings.EqualFold(extractUpstreamErrorCode(body), claudeSessionBlockedErrorCode) {
+		return true
+	}
+	for _, path := range []string{"code", "error.type"} {
 		if strings.EqualFold(strings.TrimSpace(gjson.GetBytes(body, path).String()), claudeSessionBlockedErrorCode) {
 			return true
 		}
 	}
-	lower := strings.ToLower(string(body))
-	return strings.Contains(lower, claudeSessionBlockedErrorCode) ||
-		strings.Contains(lower, "session is blocked after a claude refusal")
+	msg := strings.ToLower(strings.TrimSpace(extractUpstreamErrorMessage(body)))
+	return strings.HasPrefix(msg, "this session is blocked after a claude refusal")
 }
