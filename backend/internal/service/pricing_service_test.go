@@ -886,6 +886,101 @@ func TestDefaultPricingIncludesGemini4ArgonRates(t *testing.T) {
 	require.Contains(t, pricingSvc.ListModelNamesByProvider("gemini"), "gemini-4-argon")
 }
 
+func TestPricingService_Gemini4CarbonHydrogenThinkingTiersUseBasePricing(t *testing.T) {
+	carbonPricing := &LiteLLMModelPricing{InputCostPerToken: 2e-6, OutputCostPerToken: 10e-6, CacheReadInputTokenCost: 0.1e-6}
+	hydrogenPricing := &LiteLLMModelPricing{InputCostPerToken: 1.5e-6, OutputCostPerToken: 7.5e-6, CacheReadInputTokenCost: 0.075e-6}
+	svc := &PricingService{pricingData: map[string]*LiteLLMModelPricing{
+		"gemini-4-carbon":   carbonPricing,
+		"gemini-4-hydrogen": hydrogenPricing,
+	}}
+
+	for _, tc := range []struct {
+		model string
+		want  *LiteLLMModelPricing
+	}{
+		{"gemini-4-carbon", carbonPricing},
+		{"gemini-4-carbon-high", carbonPricing},
+		{"gemini-4-carbon-low", carbonPricing},
+		{"models/gemini-4-carbon-medium", carbonPricing},
+		{"projects/p/locations/global/publishers/google/models/gemini-4-carbon", carbonPricing},
+		{"gemini-4-hydrogen", hydrogenPricing},
+		{"gemini-4-hydrogen-high", hydrogenPricing},
+		{"gemini-4-hydrogen-low", hydrogenPricing},
+		{"models/gemini-4-hydrogen-medium", hydrogenPricing},
+	} {
+		t.Run(tc.model, func(t *testing.T) {
+			require.Same(t, tc.want, svc.GetModelPricing(tc.model))
+		})
+	}
+}
+
+// 回归：2026-11-15 起线上 gemini-4-hydrogen / gemini-4-carbon 无价卡，全部按 $0 计费。
+func TestBillingService_Gemini4CarbonHydrogenFallbacksAreBillable(t *testing.T) {
+	svc := NewBillingService(&config.Config{}, nil)
+	tokens := UsageTokens{InputTokens: 1_000_000, OutputTokens: 1_000_000, CacheReadTokens: 1_000_000}
+
+	for _, tc := range []struct {
+		model               string
+		input, output, read float64
+	}{
+		{"gemini-4-carbon", 2, 10, 0.1},
+		{"gemini-4-carbon-high", 2, 10, 0.1},
+		{"models/gemini-4-carbon", 2, 10, 0.1},
+		{"publishers/google/models/gemini-4-carbon", 2, 10, 0.1},
+		{"gemini-4-hydrogen", 1.5, 7.5, 0.075},
+		{"gemini-4-hydrogen-high", 1.5, 7.5, 0.075},
+		{"gemini-4-hydrogen-low", 1.5, 7.5, 0.075},
+		{"models/gemini-4-hydrogen", 1.5, 7.5, 0.075},
+	} {
+		t.Run(tc.model, func(t *testing.T) {
+			cost, err := svc.CalculateCost(tc.model, tokens, 1)
+			require.NoError(t, err)
+			require.InDelta(t, tc.input, cost.InputCost, 1e-12)
+			require.InDelta(t, tc.output, cost.OutputCost, 1e-12)
+			require.InDelta(t, tc.read, cost.CacheReadCost, 1e-12)
+			require.InDelta(t, tc.input+tc.output+tc.read, cost.TotalCost, 1e-12)
+		})
+	}
+}
+
+func TestDefaultPricingIncludesGemini4CarbonHydrogenRates(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("..", "..", "resources", "model-pricing", "model_prices_and_context_window.json"))
+	require.NoError(t, err)
+
+	pricingSvc := &PricingService{}
+	pricingData, err := pricingSvc.parsePricingData(data)
+	require.NoError(t, err)
+	pricingSvc.pricingData = pricingData
+
+	for _, tc := range []struct {
+		model               string
+		input, output, read float64
+	}{
+		{"gemini-4-carbon", 2e-6, 10e-6, 0.1e-6},
+		{"gemini-4-carbon-high", 2e-6, 10e-6, 0.1e-6},
+		{"gemini-4-hydrogen", 1.5e-6, 7.5e-6, 0.075e-6},
+		{"gemini-4-hydrogen-low", 1.5e-6, 7.5e-6, 0.075e-6},
+	} {
+		t.Run(tc.model, func(t *testing.T) {
+			pricing := pricingSvc.GetModelPricing(tc.model)
+			require.NotNil(t, pricing)
+			require.Equal(t, "gemini", pricing.LiteLLMProvider)
+			require.InDelta(t, tc.input, pricing.InputCostPerToken, 1e-15)
+			require.InDelta(t, tc.output, pricing.OutputCostPerToken, 1e-15)
+			require.InDelta(t, tc.read, pricing.CacheReadInputTokenCost, 1e-15)
+			// Priority 档为标准价的 1.8 倍；单一价档不分提示词长度，仅隐式缓存故无存储价。
+			require.InDelta(t, tc.input*1.8, pricing.InputCostPerTokenPriority, 1e-15)
+			require.InDelta(t, tc.output*1.8, pricing.OutputCostPerTokenPriority, 1e-15)
+			require.InDelta(t, tc.read*1.8, pricing.CacheReadInputTokenCostPriority, 1e-15)
+			require.Zero(t, pricing.LongContextInputTokenThreshold)
+			require.Zero(t, pricing.CacheStorageCostPerTokenPerHour)
+		})
+	}
+	names := pricingSvc.ListModelNamesByProvider("gemini")
+	require.Contains(t, names, "gemini-4-carbon")
+	require.Contains(t, names, "gemini-4-hydrogen")
+}
+
 func TestDefaultPricingIncludesGrok47FastRates(t *testing.T) {
 	data, err := os.ReadFile(filepath.Join("..", "..", "resources", "model-pricing", "model_prices_and_context_window.json"))
 	require.NoError(t, err)
