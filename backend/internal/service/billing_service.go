@@ -565,6 +565,27 @@ func (s *BillingService) initFallbackPricing() {
 		SupportsCacheBreakdown: false,
 	}
 
+	// Gemini 4 Carbon (Google AI pricing: $2 input / $10 output incl. thinking /
+	// $0.10 cached input per MTok, introductory through 2026-11-30; official
+	// rates double to $4/$20/$0.20 from 2026-12-01). Same card as Argon, one
+	// rate for every prompt length, implicit caching only (no storage price).
+	s.fallbackPrices["gemini-4-carbon"] = &ModelPricing{
+		InputPricePerToken:     2e-6,
+		OutputPricePerToken:    10e-6,
+		CacheReadPricePerToken: 0.1e-6,
+		SupportsCacheBreakdown: false,
+	}
+
+	// Gemini 4 Hydrogen (Google AI pricing: $1.50 input / $7.50 output incl.
+	// thinking / $0.075 cached input per MTok, flat across the 1M context, no
+	// scheduled change). Implicit caching only (no storage price).
+	s.fallbackPrices["gemini-4-hydrogen"] = &ModelPricing{
+		InputPricePerToken:     1.5e-6,
+		OutputPricePerToken:    7.5e-6,
+		CacheReadPricePerToken: 0.075e-6,
+		SupportsCacheBreakdown: false,
+	}
+
 	// OpenAI GPT-5.4（业务指定价格）
 	s.fallbackPrices["gpt-5.4"] = &ModelPricing{
 		InputPricePerToken:             2.5e-6,  // $2.5 per MTok
@@ -1044,6 +1065,12 @@ func (s *BillingService) getFallbackPricing(model string) *ModelPricing {
 	}
 	if strings.Contains(modelLower, "gemini-4-argon") {
 		return s.fallbackPrices["gemini-4-argon"]
+	}
+	if strings.Contains(modelLower, "gemini-4-carbon") {
+		return s.fallbackPrices["gemini-4-carbon"]
+	}
+	if strings.Contains(modelLower, "gemini-4-hydrogen") {
+		return s.fallbackPrices["gemini-4-hydrogen"]
 	}
 
 	// Resolve dated snapshots before broad Flash/Pro aliases.
