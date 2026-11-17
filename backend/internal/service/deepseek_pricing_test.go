@@ -606,8 +606,11 @@ func TestDeepseekSnapshotFallbackAndCustomPricing(t *testing.T) {
 // Fields absent from that patch still use the official default and peak policy.
 func TestDeepseekOverrideFileTokenPrices(t *testing.T) {
 	type prices struct{ input, output, cacheRead float64 }
-	official := prices{1.5e-7, 6e-7, 3e-9}
-	officialPeak := prices{3e-7, 1.2e-6, 6e-9}
+	// Fork: the site default card is the CNY-number flash card (see deepseek_pricing.go),
+	// doubled in the daily peak window.
+	in, out, read := deepseekFlashOffPeakInputPrice, deepseekFlashOffPeakOutputPrice, deepseekFlashOffPeakCacheRead
+	official := prices{in, out, read}
+	officialPeak := prices{2 * in, 2 * out, 2 * read}
 	custom := prices{2e-6, 3e-6, 4e-7}
 	fullPatch := `{"input_cost_per_token":0.000002,"output_cost_per_token":0.000003,"cache_read_input_token_cost":0.0000004}`
 	cases := []struct {
@@ -620,10 +623,10 @@ func TestDeepseekOverrideFileTokenPrices(t *testing.T) {
 		{"fallback full", "deepseek-flash", "fallback", fullPatch, custom, custom},
 		{"custom model override only", "deepseek-custom", "override", fullPatch, custom, custom},
 		{"override only", "deepseek-flash", "override", fullPatch, custom, custom},
-		{"input only", "deepseek-flash", "catalog", `{"input_cost_per_token":0.000002}`, prices{2e-6, 6e-7, 3e-9}, prices{2e-6, 1.2e-6, 6e-9}},
-		{"zero input", "deepseek-flash", "catalog", `{"input_cost_per_token":0}`, prices{0, 6e-7, 3e-9}, prices{0, 1.2e-6, 6e-9}},
-		{"zero output", "deepseek-flash", "catalog", `{"output_cost_per_token":0}`, prices{1.5e-7, 0, 3e-9}, prices{3e-7, 0, 6e-9}},
-		{"zero cache read", "deepseek-flash", "catalog", `{"cache_read_input_token_cost":0}`, prices{1.5e-7, 6e-7, 0}, prices{3e-7, 1.2e-6, 0}},
+		{"input only", "deepseek-flash", "catalog", `{"input_cost_per_token":0.000002}`, prices{2e-6, out, read}, prices{2e-6, 2 * out, 2 * read}},
+		{"zero input", "deepseek-flash", "catalog", `{"input_cost_per_token":0}`, prices{0, out, read}, prices{0, 2 * out, 2 * read}},
+		{"zero output", "deepseek-flash", "catalog", `{"output_cost_per_token":0}`, prices{in, 0, read}, prices{2 * in, 0, 2 * read}},
+		{"zero cache read", "deepseek-flash", "catalog", `{"cache_read_input_token_cost":0}`, prices{in, out, 0}, prices{2 * in, 2 * out, 0}},
 		{"metadata only", "deepseek-flash", "catalog", `{"supports_prompt_caching":true}`, official, officialPeak},
 		{"null input", "deepseek-flash", "catalog", `{"input_cost_per_token":null}`, official, officialPeak},
 		{"negative input", "deepseek-flash", "catalog", `{"input_cost_per_token":-0.000002}`, official, officialPeak},
@@ -708,8 +711,9 @@ func TestDeepseekOverrideFileReloadRestoresOfficialPolicy(t *testing.T) {
 	check(0.002, 0.0015, 0)
 	require.NoError(t, os.WriteFile(svc.cfg.Pricing.OverrideFile, []byte(`{"deepseek-flash":{"output_cost_per_token":0}}`), 0644))
 	svc.reloadIfCustomFilesChanged()
-	check(0.0003, 0, 0.000012)
+	// Fork: peak = 2x the CNY-number flash card (input 1000 x 2e-6, cache 2000 x 4e-8).
+	check(1000*2*deepseekFlashOffPeakInputPrice, 0, 2000*2*deepseekFlashOffPeakCacheRead)
 	require.NoError(t, os.Remove(svc.cfg.Pricing.OverrideFile))
 	svc.reloadIfCustomFilesChanged()
-	check(0.0003, 0.0006, 0.000012)
+	check(1000*2*deepseekFlashOffPeakInputPrice, 500*2*deepseekFlashOffPeakOutputPrice, 2000*2*deepseekFlashOffPeakCacheRead)
 }

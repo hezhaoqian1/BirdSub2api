@@ -1289,12 +1289,27 @@ func (s *PricingService) GetModelPricing(modelName string) *LiteLLMModelPricing 
 	// DeepSeek 展示与扣费共用人民币数值的低谷价；峰谷倍率仍由计费层应用。
 	// 远端 USD 目录不覆盖本站口径，分组/渠道自定义价格仍由上层处理。
 	if card := deepseekDefaultPricing(modelName); card != nil {
-		return &LiteLLMModelPricing{
+		pricing := &LiteLLMModelPricing{
 			InputCostPerToken:       card.InputPricePerToken,
 			OutputCostPerToken:      card.OutputPricePerToken,
 			CacheReadInputTokenCost: card.CacheReadPricePerToken,
 			LiteLLMProvider:         "deepseek", Mode: "chat", SupportsPromptCaching: true,
 		}
+		// pricing.override_file 显式写入的 token 单价优先于本站价卡（计费层据
+		// priceOverrides 跳过价卡覆盖与峰谷倍率）。
+		if entry := s.explicitTokenPriceOverrideEntry(modelName); entry != nil {
+			pricing.priceOverrides = entry.priceOverrides
+			if entry.priceOverrides.input {
+				pricing.InputCostPerToken = entry.InputCostPerToken
+			}
+			if entry.priceOverrides.output {
+				pricing.OutputCostPerToken = entry.OutputCostPerToken
+			}
+			if entry.priceOverrides.cacheRead {
+				pricing.CacheReadInputTokenCost = entry.CacheReadInputTokenCost
+			}
+		}
+		return pricing
 	}
 	// 与实际扣费共用本站 Kimi 人民币数值价卡，避免可用渠道等直接读取
 	// PricingService 的页面展示远端 USD 价。分组/渠道自定义价格仍在上层覆盖。
@@ -1350,6 +1365,30 @@ func (s *PricingService) GetModelPricing(modelName string) *LiteLLMModelPricing 
 		return s.matchOpenAIModel(lookupCandidates[0])
 	}
 
+	return nil
+}
+
+// explicitTokenPriceOverrideEntry 返回 override_file 对该模型（按精确候选名）显式
+// 写入过 token 单价的条目；没有显式单价时返回 nil。只查精确键，不做模糊遍历，
+// 适合放在 DeepSeek 等本站价卡的热路径上。
+func (s *PricingService) explicitTokenPriceOverrideEntry(modelName string) *LiteLLMModelPricing {
+	if s == nil {
+		return nil
+	}
+	modelLower := strings.ToLower(strings.TrimSpace(modelName))
+	if modelLower == "" {
+		return nil
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for _, candidate := range s.buildModelLookupCandidates(modelLower) {
+		if entry, ok := s.pricingData[candidate]; ok {
+			if entry == nil || entry.priceOverrides == (tokenPriceOverrides{}) {
+				return nil
+			}
+			return entry
+		}
+	}
 	return nil
 }
 
