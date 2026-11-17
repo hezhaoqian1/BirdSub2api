@@ -546,6 +546,7 @@ func (s *GatewayService) handleStreamingResponseAnthropicAPIKeyPassthrough(
 	// 半截事件（可能是未闭合的 JSON）直接丢弃，不能先写出去——否则 handler 随后补写的
 	// error 帧会与它拼成同一个事件，客户端把两段 data 拼接后解析 JSON 失败。
 	var pendingEvent []byte
+	clientModel := compositeClientModel(ctx, "")
 
 	for {
 		select {
@@ -629,8 +630,14 @@ func (s *GatewayService) handleStreamingResponseAnthropicAPIKeyPassthrough(
 				}
 			}
 
+			if data, ok := extractAnthropicSSEDataLine(line); ok && clientModel != "" && gjson.Get(data, "type").String() == "message_start" && gjson.Get(data, "message.model").Exists() {
+				if rewritten, err := sjson.Set(data, "message.model", clientModel); err == nil {
+					line = "data: " + rewritten
+				}
+			}
+
 			if !clientDisconnected {
-				pendingEvent = append(pendingEvent, reverseToolNamesIfPresent(c, []byte(line))...)
+				pendingEvent = append(pendingEvent, reverseToolNamesIfPresentString(c, line)...)
 				pendingEvent = append(pendingEvent, '\n')
 				if line == "" {
 					// 按 SSE 事件边界整块写出并刷新，减少每行 flush 带来的 syscall 开销。
@@ -965,6 +972,7 @@ func (s *GatewayService) handleNonStreamingResponseAnthropicAPIKeyPassthrough(
 	if contentType == "" {
 		contentType = "application/json"
 	}
+	body = restoreCompositeClientModel(ctx, body)
 	body = reverseToolNamesIfPresent(c, body)
 	c.Data(resp.StatusCode, contentType, body)
 	return usage, nil
