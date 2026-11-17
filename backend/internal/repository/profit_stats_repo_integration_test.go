@@ -36,6 +36,13 @@ func seedProfitStatsFixture(t *testing.T, label string) profitStatsFixture {
 	subscription := mustCreateAccount(t, client, &service.Account{Name: "profit-sub-" + label, Type: service.AccountTypeOAuth})
 	_, err := integrationDB.ExecContext(ctx, "UPDATE accounts SET rate_multiplier = 0.2 WHERE id = $1", metered.ID)
 	require.NoError(t, err)
+	// 这些账号建在共享库（非事务）里，默认是未分组、可调度的 anthropic 账号；
+	// 测试结束后软删除，避免泄漏进后续按平台/分组列可调度账号的集成测试。
+	t.Cleanup(func() {
+		_, _ = integrationDB.ExecContext(context.Background(),
+			"UPDATE accounts SET schedulable = FALSE, deleted_at = NOW() WHERE id IN ($1, $2)",
+			metered.ID, subscription.ID)
+	})
 
 	customerKey := mustCreateApiKey(t, client, &service.APIKey{UserID: customer.ID, Key: "sk-profit-customer-" + label})
 	adminKey := mustCreateApiKey(t, client, &service.APIKey{UserID: admin.ID, Key: "sk-profit-admin-" + label})
