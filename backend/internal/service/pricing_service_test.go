@@ -943,6 +943,28 @@ func TestBillingService_Gemini4CarbonHydrogenFallbacksAreBillable(t *testing.T) 
 	}
 }
 
+func TestBillingService_Gemini4CarbonHydrogenFallbackPriorityTier(t *testing.T) {
+	svc := NewBillingService(&config.Config{}, nil)
+	tokens := UsageTokens{InputTokens: 1_000_000, OutputTokens: 1_000_000, CacheReadTokens: 1_000_000}
+
+	for _, tc := range []struct {
+		model               string
+		input, output, read float64
+	}{
+		{"gemini-4-hydrogen", 2.7, 13.5, 0.135},
+		{"projects/p/locations/global/publishers/google/models/gemini-4-hydrogen", 2.7, 13.5, 0.135},
+		{"gemini-4-carbon", 3.6, 18, 0.18},
+	} {
+		t.Run(tc.model, func(t *testing.T) {
+			cost, err := svc.CalculateCostWithServiceTier(tc.model, tokens, 1, "priority")
+			require.NoError(t, err)
+			require.InDelta(t, tc.input, cost.InputCost, 1e-12)
+			require.InDelta(t, tc.output, cost.OutputCost, 1e-12)
+			require.InDelta(t, tc.read, cost.CacheReadCost, 1e-12)
+		})
+	}
+}
+
 func TestDefaultPricingIncludesGemini4CarbonHydrogenRates(t *testing.T) {
 	data, err := os.ReadFile(filepath.Join("..", "..", "resources", "model-pricing", "model_prices_and_context_window.json"))
 	require.NoError(t, err)
