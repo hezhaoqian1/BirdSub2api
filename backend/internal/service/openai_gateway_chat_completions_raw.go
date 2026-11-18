@@ -357,12 +357,19 @@ func (s *OpenAIGatewayService) streamRawChatCompletions(
 	}
 	requestID := resp.Header.Get("x-request-id")
 	writeStreamHeaders := s.newStreamHeaderWriter(c, resp.Header)
-	scanner := s.newUpstreamSSEScanner(resp.Body)
 
 	var usage OpenAIUsage
 	var firstTokenMs *int
 	clientDisconnected := false
 	clientOutputStarted := false
+	flushPending := false
+	flushToClient := func() {
+		if flushPending && !clientDisconnected && clientOutputStarted {
+			c.Writer.Flush()
+		}
+		flushPending = false
+	}
+	scanner := s.newUpstreamSSEScanner(&flushBeforeUpstreamRead{r: resp.Body, flush: flushToClient})
 	pendingLines := make([]string, 0, 8)
 	// openEventLines 暂存尚未到 SSE 事件边界（空行）的行，见扫描循环。
 	openEventLines := make([]string, 0, 4)
@@ -433,9 +440,7 @@ func (s *OpenAIGatewayService) streamRawChatCompletions(
 					writeLine(eventLine)
 				}
 				openEventLines = openEventLines[:0]
-				if !clientDisconnected && clientOutputStarted {
-					c.Writer.Flush()
-				}
+				flushPending = true
 			}
 			// 事件到边界前只暂存：上游在事件中途断开时，半截事件不能先写给客户端，
 			// 否则 handler 补发的 error 帧会与它拼成同一个 SSE 事件，客户端解析 JSON 失败。
@@ -447,9 +452,8 @@ func (s *OpenAIGatewayService) streamRawChatCompletions(
 		}
 		openEventLines = openEventLines[:0]
 		writeLine(line)
-		if !clientDisconnected && clientOutputStarted {
-			c.Writer.Flush()
-		}
+		// 不逐行 flush：scanner 下次向上游读取前统一 flush（见 flushBeforeUpstreamRead）。
+		flushPending = true
 	}
 	// 上游结束时仍未到事件边界：data 完整（只缺结尾空行）时补上边界送达，否则是被截断的
 	// 半截事件，丢弃。客户端取消时不会再追加任何帧，保持原样不补边界。
@@ -463,9 +467,7 @@ func (s *OpenAIGatewayService) streamRawChatCompletions(
 			if !canceled {
 				writeLine("")
 			}
-			if !clientDisconnected && clientOutputStarted {
-				c.Writer.Flush()
-			}
+			flushPending = true
 		} else {
 			logger.L().Warn("openai chat_completions raw: dropping incomplete SSE event at upstream end",
 				zap.String("request_id", requestID),
@@ -475,6 +477,7 @@ func (s *OpenAIGatewayService) streamRawChatCompletions(
 		}
 		openEventLines = nil
 	}
+	flushToClient()
 
 	resultWithUsage := func() *OpenAIForwardResult {
 		return &OpenAIForwardResult{
