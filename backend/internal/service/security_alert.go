@@ -655,8 +655,12 @@ func (s *SecurityAlertService) refreshBaseline(ctx context.Context) {
 	}
 	_ = rows.Close()
 
+	// 登录框也接受用户名（fork：用户名登录），审计里的 "email" 字段可能是用户名，
+	// 所以管理员的用户名也算管理员登录标识。
 	emails := map[string]struct{}{}
-	rows, err = s.db.QueryContext(ctx, `SELECT LOWER(email) FROM users WHERE role = 'admin' AND deleted_at IS NULL`)
+	rows, err = s.db.QueryContext(ctx, `SELECT LOWER(email) FROM users WHERE role = 'admin' AND deleted_at IS NULL
+ UNION
+ SELECT LOWER(TRIM(username)) FROM users WHERE role = 'admin' AND deleted_at IS NULL AND TRIM(username) <> ''`)
 	if err != nil {
 		slog.Warn("[SecurityAlert] failed to load admin emails", "error", err)
 		return

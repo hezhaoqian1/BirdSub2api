@@ -2,9 +2,10 @@ import { flushPromises, mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import LoginView from '@/views/auth/LoginView.vue'
 
-const { getPublicSettingsMock, pushMock } = vi.hoisted(() => ({
+const { getPublicSettingsMock, pushMock, loginMock } = vi.hoisted(() => ({
   getPublicSettingsMock: vi.fn(),
-  pushMock: vi.fn()
+  pushMock: vi.fn(),
+  loginMock: vi.fn()
 }))
 
 const publicSettings = {
@@ -50,7 +51,7 @@ vi.mock('vue-i18n', () => ({
 
 vi.mock('@/stores', () => ({
   useAuthStore: () => ({
-    login: vi.fn(),
+    login: loginMock,
     loginWithPasskey: vi.fn(),
     login2FA: vi.fn()
   }),
@@ -114,5 +115,45 @@ describe('LoginView registration entry', () => {
     await flushPromises()
 
     expect(wrapper.text()).not.toContain('auth.signUp')
+  })
+})
+
+describe('LoginView email or username', () => {
+  beforeEach(() => {
+    getPublicSettingsMock.mockReset()
+    pushMock.mockReset()
+    loginMock.mockReset()
+    getPublicSettingsMock.mockResolvedValue(publicSettings)
+    loginMock.mockResolvedValue({})
+  })
+
+  it('accepts a username in the account field', async () => {
+    const wrapper = mountLogin()
+    await flushPromises()
+
+    const input = wrapper.get('#email')
+    expect(input.attributes('type')).toBe('text')
+    expect(wrapper.text()).toContain('auth.loginIdentifierLabel')
+
+    await input.setValue('  alice  ')
+    await wrapper.get('#password').setValue('secret-1')
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+
+    expect(loginMock).toHaveBeenCalledTimes(1)
+    expect(loginMock).toHaveBeenCalledWith(
+      expect.objectContaining({ email: 'alice', password: 'secret-1' })
+    )
+  })
+
+  it('still requires the account field', async () => {
+    const wrapper = mountLogin()
+    await flushPromises()
+
+    await wrapper.get('#password').setValue('secret-1')
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+
+    expect(loginMock).not.toHaveBeenCalled()
   })
 })
