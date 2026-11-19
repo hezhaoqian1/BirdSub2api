@@ -543,19 +543,21 @@ func (s *AuthService) IsEmailVerifyEnabled(ctx context.Context) bool {
 
 // Login 用户登录，返回JWT token
 func (s *AuthService) Login(ctx context.Context, email, password string) (string, *User, error) {
-	// 查找用户
+	// 查找用户：先按邮箱，查无此人时再按用户名兜底（fork：用户名登录，见 auth_username_login.go）
 	user, err := s.userRepo.GetByEmail(ctx, email)
 	if err != nil {
-		if errors.Is(err, ErrUserNotFound) {
-			return "", nil, ErrInvalidCredentials
+		if !errors.Is(err, ErrUserNotFound) {
+			// 记录数据库错误但不暴露给用户
+			logger.LegacyPrintf("service.auth", "[Auth] Database error during login: %v", err)
+			return "", nil, ErrServiceUnavailable
 		}
-		// 记录数据库错误但不暴露给用户
-		logger.LegacyPrintf("service.auth", "[Auth] Database error during login: %v", err)
-		return "", nil, ErrServiceUnavailable
-	}
-
-	// 验证密码
-	if !s.CheckPassword(password, user.PasswordHash) {
+		// 用户名兜底内部已完成密码校验
+		user, err = s.findLoginUserByUsername(ctx, email, password)
+		if err != nil {
+			return "", nil, err
+		}
+	} else if !s.CheckPassword(password, user.PasswordHash) {
+		// 验证密码
 		return "", nil, ErrInvalidCredentials
 	}
 

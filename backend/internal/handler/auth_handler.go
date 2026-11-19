@@ -74,8 +74,9 @@ type SendVerifyCodeResponse struct {
 }
 
 // LoginRequest represents the login request payload
+// Email 字段可填邮箱或用户名（fork：用户名登录），字段名保持 email 以兼容现有客户端。
 type LoginRequest struct {
-	Email                 string `json:"email" binding:"required,email"`
+	Email                 string `json:"email" binding:"required,max=255"`
 	Password              string `json:"password" binding:"required"`
 	TurnstileToken        string `json:"turnstile_token"`
 	TencentCaptchaTicket  string `json:"tencent_captcha_ticket"`
