@@ -41,8 +41,13 @@ func ResponsesToAnthropicRequest(req *ResponsesRequest) (*AnthropicRequest, erro
 		out.MaxTokens = *req.MaxOutputTokens
 	}
 	if out.MaxTokens == 0 {
-		// Anthropic requires max_tokens; default to a sensible value.
-		out.MaxTokens = 8192
+		// Anthropic requires max_tokens. Claude families with a 128K output
+		// ceiling get that ceiling, because their thinking spends from the same
+		// budget and 8192 cut answers off. Every other model keeps 8192.
+		out.MaxTokens = claude.DefaultMaxTokens(req.Model)
+		if out.MaxTokens == 0 {
+			out.MaxTokens = 8192
+		}
 	}
 
 	// Convert tools
