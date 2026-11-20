@@ -172,6 +172,11 @@ func (s *GatewayService) ForwardAsChatCompletions(
 		upstreamMsg := strings.TrimSpace(extractUpstreamErrorMessage(respBody))
 		upstreamMsg = sanitizeUpstreamErrorMessage(upstreamMsg)
 
+		// 请求体超过该账号上游的大小上限：换上限更高的账号，且不触发账号策略（见 request_body_too_large_failover.go）。
+		if failoverErr := s.requestBodyTooLargeFailover(c, account, resp, respBody, false); failoverErr != nil {
+			return nil, failoverErr
+		}
+
 		// Apply account policies even for statuses outside the default failover list.
 		shouldDisable := false
 		if s.rateLimitService != nil {

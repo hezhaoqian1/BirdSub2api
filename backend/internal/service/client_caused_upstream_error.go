@@ -58,8 +58,9 @@ func ClassifyClientCausedUpstreamError(statusCode int, body []byte) (ClientCause
 		}, true
 	}
 	if statusCode == http.StatusRequestEntityTooLarge {
-		// 不同账号的大小上限可能不同（部分平台会据此切换账号），因此 413 只改写
-		// 客户端文案，不改变既有的 failover 行为。
+		// 不同渠道的请求体上限不同（官方 128MB、部分转发 32MiB），413 不终止换号：
+		// 各转发路径会换上限更高的账号（见 request_body_too_large_failover.go），
+		// 这里只负责全部失败时返回给客户的文案。
 		return ClientCausedUpstreamError{
 			Kind:       ClientCausedKindRequestBodyTooLarge,
 			StatusCode: http.StatusRequestEntityTooLarge,

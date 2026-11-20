@@ -34,6 +34,10 @@ const (
 )
 
 func (s *GatewayService) shouldRetryUpstreamError(account *Account, statusCode int) bool {
+	// 413 请求体过大：同一请求体发给同一账号必然再被拒，改由换号处理（见 request_body_too_large_failover.go）。
+	if statusCode == http.StatusRequestEntityTooLarge {
+		return false
+	}
 	// OAuth/Setup Token 账号：仅 403 重试
 	if account.IsOAuth() {
 		return statusCode == 403
@@ -723,6 +727,11 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 		return nil, errors.New("upstream request failed: empty response")
 	}
 	defer func() { _ = resp.Body.Close() }()
+
+	// 请求体超过该账号上游的大小上限：换上限更高的账号（见 request_body_too_large_failover.go）。
+	if failoverErr := s.peekRequestBodyTooLargeFailover(c, account, resp, false); failoverErr != nil {
+		return nil, failoverErr
+	}
 
 	// 处理重试耗尽的情况
 	if resp.StatusCode >= 400 && s.shouldRetryUpstreamError(account, resp.StatusCode) {

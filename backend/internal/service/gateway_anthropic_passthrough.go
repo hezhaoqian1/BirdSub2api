@@ -201,6 +201,11 @@ func (s *GatewayService) forwardAnthropicAPIKeyPassthroughWithInput(
 	}
 	defer func() { _ = resp.Body.Close() }()
 
+	// 请求体超过该账号上游的大小上限：换上限更高的账号（见 request_body_too_large_failover.go）。
+	if failoverErr := s.peekRequestBodyTooLargeFailover(c, account, resp, true); failoverErr != nil {
+		return nil, failoverErr
+	}
+
 	if resp.StatusCode >= 400 && s.shouldRetryUpstreamError(account, resp.StatusCode) {
 		if s.shouldFailoverUpstreamError(resp.StatusCode) {
 			respBody, _ := s.readUpstreamErrorBody(resp)

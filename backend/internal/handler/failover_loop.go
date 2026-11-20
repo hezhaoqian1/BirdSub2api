@@ -161,8 +161,9 @@ type FailoverState struct {
 	// 所有账号都失败时优先回报它：其他渠道随后的 502/429 只是临时故障，
 	// 客户端真正需要的处理方式是「新开对话」。
 	clientCausedErr *service.UpstreamFailoverError
-	// clientCausedAccountIDs 返回过客户端原因终止性错误的账号。与利润否决一样，
-	// 503 退避分支清空 FailedAccountIDs 后必须放回，否则会反复重选已锁定该会话的账号。
+	// clientCausedAccountIDs 返回过客户端原因错误的账号（会话被锁、请求体超过该账号上限）。
+	// 与利润否决一样，503 退避分支清空 FailedAccountIDs 后必须放回，否则会反复重选
+	// 必然再次拒绝本请求的账号。
 	clientCausedAccountIDs map[int64]struct{}
 }
 
@@ -310,6 +311,15 @@ func (s *FailoverState) HandleFailoverError(
 
 	// 加入失败列表
 	s.FailedAccountIDs[accountID] = struct{}{}
+
+	// 请求体超过该账号上游的大小上限：同一请求内再选回它只会再次被拒（并重复上传大请求体）。
+	// 与已锁定会话的账号一样，503 退避清空排除列表后也要放回。
+	if failoverErr.IsRequestBodyTooLarge() {
+		if s.clientCausedAccountIDs == nil {
+			s.clientCausedAccountIDs = make(map[int64]struct{})
+		}
+		s.clientCausedAccountIDs[accountID] = struct{}{}
+	}
 
 	// 检查是否耗尽
 	if s.SwitchCount >= s.MaxSwitches {

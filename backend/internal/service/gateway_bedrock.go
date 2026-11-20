@@ -280,6 +280,11 @@ func (s *GatewayService) handleBedrockUpstreamErrors(
 	account *Account,
 	modelKey string,
 ) (*ForwardResult, error) {
+	// 请求体超过该账号上游的大小上限（Bedrock 为 20MB）：换上限更高的账号（见 request_body_too_large_failover.go）。
+	if failoverErr := s.peekRequestBodyTooLargeFailover(c, account, resp, false); failoverErr != nil {
+		return nil, failoverErr
+	}
+
 	// 内容过滤由请求内容决定，换号结果相同：不换号，按普通错误返回客户端。
 	if resp.StatusCode >= http.StatusInternalServerError {
 		respBody, _ := s.readUpstreamErrorBody(resp)
