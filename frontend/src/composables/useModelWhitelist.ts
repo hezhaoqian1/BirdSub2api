@@ -75,7 +75,9 @@ const geminiModels = [
   'gemini-3.7-flash',
   'gemini-3.8-flash',
   'gemini-4-argon',
-  'gemini-4-carbon'
+  'gemini-4-carbon',
+  'gemini-4-neon',
+  'gemini-4-hydrogen'
 ]
 
 // Antigravity 官方支持的模型（精确匹配）

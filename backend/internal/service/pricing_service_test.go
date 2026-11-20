@@ -1003,6 +1003,73 @@ func TestDefaultPricingIncludesGemini4CarbonHydrogenRates(t *testing.T) {
 	require.Contains(t, names, "gemini-4-hydrogen")
 }
 
+// 回归：Gemini 4 Neon（2026-11-18 发布）在价卡上线前无价，会按 $0 计费。
+// 官方价 $3 / $15 / $0.15 cached per MTok，Priority 1.8x，仅隐式缓存。
+func TestBillingService_Gemini4NeonFallbackIsBillable(t *testing.T) {
+	svc := NewBillingService(&config.Config{}, nil)
+	tokens := UsageTokens{InputTokens: 1_000_000, OutputTokens: 1_000_000, CacheReadTokens: 1_000_000}
+
+	for _, tc := range []struct {
+		model, tier         string
+		input, output, read float64
+	}{
+		{"gemini-4-neon", "", 3, 15, 0.15},
+		{"gemini-4-neon-high", "", 3, 15, 0.15},
+		{"gemini-4-neon-xhigh", "", 3, 15, 0.15},
+		{"models/gemini-4-neon", "", 3, 15, 0.15},
+		{"projects/p/locations/global/publishers/google/models/gemini-4-neon", "", 3, 15, 0.15},
+		{"gemini-4-neon", "priority", 5.4, 27, 0.27},
+	} {
+		t.Run(tc.model+"/"+tc.tier, func(t *testing.T) {
+			cost, err := svc.CalculateCostWithServiceTier(tc.model, tokens, 1, tc.tier)
+			require.NoError(t, err)
+			require.InDelta(t, tc.input, cost.InputCost, 1e-12)
+			require.InDelta(t, tc.output, cost.OutputCost, 1e-12)
+			require.InDelta(t, tc.read, cost.CacheReadCost, 1e-12)
+			require.InDelta(t, tc.input+tc.output+tc.read, cost.TotalCost, 1e-12)
+		})
+	}
+}
+
+func TestPricingService_Gemini4NeonCatalogAndTierAliases(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("..", "..", "resources", "model-pricing", "model_prices_and_context_window.json"))
+	require.NoError(t, err)
+
+	pricingSvc := &PricingService{}
+	pricingData, err := pricingSvc.parsePricingData(data)
+	require.NoError(t, err)
+	pricingSvc.pricingData = pricingData
+
+	base := pricingSvc.GetModelPricing("gemini-4-neon")
+	require.NotNil(t, base)
+	require.Equal(t, "gemini", base.LiteLLMProvider)
+	require.InDelta(t, 3e-6, base.InputCostPerToken, 1e-15)
+	require.InDelta(t, 15e-6, base.OutputCostPerToken, 1e-15)
+	require.InDelta(t, 0.15e-6, base.CacheReadInputTokenCost, 1e-15)
+	require.InDelta(t, 5.4e-6, base.InputCostPerTokenPriority, 1e-15)
+	require.InDelta(t, 27e-6, base.OutputCostPerTokenPriority, 1e-15)
+	require.InDelta(t, 0.27e-6, base.CacheReadInputTokenCostPriority, 1e-15)
+	require.Zero(t, base.LongContextInputTokenThreshold)
+	require.Zero(t, base.CacheStorageCostPerTokenPerHour)
+	require.Contains(t, pricingSvc.ListModelNamesByProvider("gemini"), "gemini-4-neon")
+
+	// Antigravity 思考档位别名（含 Neon/Hydrogen 独有的 -xhigh）按基础模型计价。
+	for model, baseModel := range map[string]string{
+		"gemini-4-neon-low":         "gemini-4-neon",
+		"gemini-4-neon-medium":      "gemini-4-neon",
+		"gemini-4-neon-high":        "gemini-4-neon",
+		"gemini-4-neon-xhigh":       "gemini-4-neon",
+		"models/gemini-4-neon-high": "gemini-4-neon",
+		"gemini-4-hydrogen-xhigh":   "gemini-4-hydrogen",
+	} {
+		t.Run(model, func(t *testing.T) {
+			want := pricingSvc.GetModelPricing(baseModel)
+			require.NotNil(t, want)
+			require.Same(t, want, pricingSvc.GetModelPricing(model))
+		})
+	}
+}
+
 func TestDefaultPricingIncludesGrok47FastRates(t *testing.T) {
 	data, err := os.ReadFile(filepath.Join("..", "..", "resources", "model-pricing", "model_prices_and_context_window.json"))
 	require.NoError(t, err)
