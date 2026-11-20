@@ -1,0 +1,57 @@
+# 长任务入口（Railway 服务 caddy-long）
+#
+# 对外只走 Railway TCP Proxy（四层转发），不经过 Railway 的 HTTP 边缘，
+# 所以没有它的 15 分钟总时长 / 5 分钟无数据 / 5 分钟上传 限制。
+# 代价：TCP Proxy 不传客户端真实 IP，网关看到的都是 100.64.x.x，
+# 配了 IP 白名单的 API key 不能走这个入口。
+#
+# 环境变量：
+#   LONG_ENTRY_DOMAIN  证书域名，CNAME 到 TCP Proxy 的域名（Cloudflare 上必须是「仅 DNS」）
+#   CF_API_TOKEN       Cloudflare「Edit zone DNS」Token，用于 DNS-01 签发/续期证书
+#   UPSTREAM_HOST/PORT 网关内网地址
+{
+	# 只有一个随机分配的 TCP Proxy 端口，没有 80/443，用不上跳转和 HTTP/TLS-ALPN 验证
+	auto_https disable_redirects
+
+	servers {
+		# Caddy 2.11 起默认请求头上限从 1MB 降到 16KB；保持升级前的行为（实测请求头最大约 1.7KB）
+		max_header_size 1MB
+	}
+}
+
+{$LONG_ENTRY_DOMAIN:api.birdbirdapi.com}:{$LISTEN_PORT:8443} {
+	tls {
+		dns cloudflare {env.CF_API_TOKEN}
+		resolvers 1.1.1.1
+	}
+
+	# TCP Proxy 没有 Railway HTTP 日志，用访问日志查每个请求的时长/状态（默认会脱敏 Authorization）
+	log {
+		output stdout
+		format json
+	}
+
+	reverse_proxy {
+		# 网关有多个副本，按 DNS 动态发现并分摊
+		dynamic a {
+			name {$UPSTREAM_HOST:birdsub2api.railway.internal}
+			port {$UPSTREAM_PORT:8080}
+			refresh 10s
+		}
+		# 不开被动健康检查（不要写 fail_duration）：Caddy 会把「客户端中途取消/断开上传」
+		# 记成网关失败，一次就拉黑该地址；2026-11-19 14:08、23:48、11-20 01:20
+		# 三次因此把 4 个网关地址全部拉黑，整个入口 503 "no upstreams available"。
+		# 副本挂掉时靠「连不上就换下一个」兜底（POST 连接失败也一定重试），
+		# 所以必须用 round_robin：least_conn 会一直选中在途请求为 0 的坏副本。
+		# 需要 Caddy >= 2.11.2：更早的版本连接失败后重试会带着已关闭的请求体，必失败。
+		lb_policy round_robin
+		lb_try_duration 10s
+
+		# SSE 逐条转发，不做缓冲
+		flush_interval -1
+
+		transport http {
+			dial_timeout 2s
+		}
+	}
+}
