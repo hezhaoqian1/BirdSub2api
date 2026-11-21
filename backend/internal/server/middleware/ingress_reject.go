@@ -36,6 +36,8 @@ const (
 	// IngressRejectNoAvailableAccounts 分组里没有可调度账号、一次上游都没试就被拒（纯路由拒绝）。
 	// 客户在无容量时狂重试会每小时写 150 万行（2026-11-02），和排队满一样按分钟聚合计数。
 	IngressRejectNoAvailableAccounts IngressRejectReason = "no_available_accounts"
+	// IngressRejectConflictingRequestFields：请求体同名字段重复声明（GHSA-p3r4-jcm3-2hph）。
+	IngressRejectConflictingRequestFields IngressRejectReason = "conflicting_request_fields"
 )
 
 const ingressRejectReasonContextKey = "ingress_reject_reason"
